@@ -801,7 +801,8 @@ test("Windows: la shell de los comandos, rutas con / y ficheros con CRLF", async
     assert.equal(run.status, 4);
     // Un .cmd (como los que instala npm) se puede lanzar
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-cmd-"));
-    fs.writeFileSync(path.join(dir, "saluda.cmd"), "@echo hola %1\r\n");
+    // %~1 quita las comillas, como hacen los .cmd que crea npm al pasar los argumentos a node
+    fs.writeFileSync(path.join(dir, "saluda.cmd"), "@echo hola %~1\r\n");
     const child = shell.spawnProgram(path.join(dir, "saluda.cmd"), ["mundo"], { stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     child.stdout.on("data", (d) => (output += d));

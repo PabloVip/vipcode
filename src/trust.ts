@@ -109,7 +109,9 @@ export function projectTrust(root: string): ProjectTrust {
   const files: string[] = [];
   const changes: string[] = [];
   const parts: string[] = [];
-  const add = (relative: string, text: string, change: string[]) => {
+  const add = (file: string, text: string, change: string[]) => {
+    // Con / también en Windows: así se enseñan igual en todos los sistemas
+    const relative = file.split(path.sep).join("/");
     files.push(relative);
     parts.push(`${relative}\u0000${text}`);
     changes.push(...change.map((item) => `${relative}: ${item}`));

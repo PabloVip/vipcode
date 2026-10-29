@@ -497,7 +497,7 @@ test("skills: vipcode skills new y list, /skill tarea en vipcode run, y el agent
   const ws = tempWorkspace();
   ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false });
   let result = await runVip(["skills", "new", "informes", "--project"], { cwd: ws.proj, home: ws.home });
-  assert.match(result.output, /Creada .*\.vipcode\/skills\/informes\/SKILL\.md/, result.output);
+  assert.match(result.output, /Creada .*\.vipcode[\\/]skills[\\/]informes[\\/]SKILL\.md/, result.output);
   fs.writeFileSync(path.join(ws.proj, ".vipcode", "skills", "informes", "SKILL.md"), "---\nname: informes\ndescription: Úsala para informes semanales\n---\nPASOS-DE-LA-SKILL");
   result = await runVip(["skills"], { cwd: ws.proj, home: ws.home });
   assert.match(result.output, /informes\s+Úsala para informes semanales/);

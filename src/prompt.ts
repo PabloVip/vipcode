@@ -42,7 +42,7 @@ function projectInstructions(root: string, extra: string[]): string {
         continue;
       }
       seen.add(file);
-      parts.push(`# Instrucciones (${path.relative(root, file)})\n${readLimited(file, 8000)}`);
+      parts.push(`# Instrucciones (${path.relative(root, file).split(path.sep).join("/")})\n${readLimited(file, 8000)}`);
     }
   }
   if (parts.length === 0) {

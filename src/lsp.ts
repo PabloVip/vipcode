@@ -486,7 +486,8 @@ export class LspManager {
     if (relevant.length === 0) {
       return "";
     }
-    const name = path.relative(this.root, file);
+    // Con / también en Windows, como el resto de rutas que ve el modelo
+    const name = path.relative(this.root, file).split(path.sep).join("/");
     const lines = relevant.slice(0, 20).map((item) => {
       const code = item.code ? ` ${item.source || ""}${item.code}` : "";
       return `${name}:${item.line}:${item.column} ${SEVERITY[item.severity] || "error"}${code}: ${item.message}`;
