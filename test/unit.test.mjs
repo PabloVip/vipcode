@@ -8,8 +8,10 @@ import { test } from "node:test";
 // Antes de cargar nada, una carpeta de datos temporal para no tocar ~/.vipcode
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-unit-"));
 process.env.VIPCODE_HOME = HOME;
-// Tampoco se leen las skills de ~/.claude ni de ~/.config/opencode de quien pasa las pruebas
+// Tampoco se leen las skills de ~/.claude ni de ~/.config/opencode de quien pasa las pruebas (en Windows la carpeta
+// personal sale de USERPROFILE)
 process.env.HOME = HOME;
+process.env.USERPROFILE = HOME;
 
 const tools = await import("../dist/tools.js");
 const permissions = await import("../dist/permissions.js");
@@ -364,7 +366,10 @@ test("claves: entorno, auth.json, proveedores sin clave y variables en la URL", 
 
   auth.saveAuth("groq", { key: "gsk_123456789" });
   assert.equal(auth.readAuth().groq.key, "gsk_123456789");
-  assert.equal((fs.statSync(path.join(HOME, "auth.json")).mode & 0o777).toString(8), "600");
+  // Windows no tiene permisos de Unix
+  if (process.platform !== "win32") {
+    assert.equal((fs.statSync(path.join(HOME, "auth.json")).mode & 0o777).toString(8), "600");
+  }
   assert.equal(auth.maskKey("gsk_123456789"), "gsk_1…6789");
   assert.ok(auth.removeAuth("groq"));
 });
@@ -667,14 +672,23 @@ test("seguridad: la configuración de un proyecto solo se usa si confías en la 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test("seguridad: las herramientas no salen del proyecto por un enlace simbólico", async () => {
+test("seguridad: las herramientas no salen del proyecto por un enlace simbólico", async (t) => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-fuera-"));
   fs.writeFileSync(path.join(outside, "claves.json"), "SECRETO");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-enlaces-"));
   fs.writeFileSync(path.join(root, "normal.txt"), "hola");
-  fs.symlinkSync(path.join(outside, "claves.json"), path.join(root, "notas.txt"));
-  fs.symlinkSync(outside, path.join(root, "carpeta"));
-  fs.symlinkSync(path.join(outside, "todavia-no-existe.txt"), path.join(root, "roto.txt"));
+  try {
+    fs.symlinkSync(path.join(outside, "claves.json"), path.join(root, "notas.txt"));
+    fs.symlinkSync(outside, path.join(root, "carpeta"), "dir");
+    fs.symlinkSync(path.join(outside, "todavia-no-existe.txt"), path.join(root, "roto.txt"), "file");
+  } catch (err) {
+    // En Windows crear enlaces simbólicos necesita permisos de administrador o el modo de desarrollador
+    if (process.platform === "win32" && err.code === "EPERM") {
+      t.skip("Windows no deja crear enlaces simbólicos sin permisos");
+      return;
+    }
+    throw err;
+  }
   assert.equal(tools.resolvePath(root, "normal.txt"), path.join(root, "normal.txt"));
   for (const sneaky of ["notas.txt", "carpeta/claves.json", "roto.txt", "carpeta/nuevo.txt"]) {
     assert.throws(() => tools.resolvePath(root, sneaky), /enlace que lleva fuera del proyecto/, sneaky);
@@ -743,3 +757,73 @@ test("seguridad: vipcode no puede tocar sus datos ni modificar su propia instala
   fs.rmSync(path.join(HOME, "auth.json"), { force: true });
 });
 
+test("seguridad: las carpetas protegidas no se saltan cambiando mayúsculas ni barras", async () => {
+  fs.writeFileSync(path.join(HOME, "auth.json"), JSON.stringify({ groq: { key: "gsk_secreta" } }));
+  const parent = path.dirname(HOME);
+  // En macOS y Windows ~/.VIPCODE es la misma carpeta que ~/.vipcode (en Linux son dos distintas)
+  if (process.platform === "darwin" || process.platform === "win32") {
+    const shouted = path.join(path.basename(HOME).toUpperCase(), "AUTH.JSON");
+    assert.throws(() => tools.resolvePath(parent, shouted), /carpeta de datos de vipcode/);
+    assert.throws(() => tools.resolvePath(parent, path.join(path.basename(HOME).toUpperCase(), "nuevo.json"), { write: true }), /carpeta de datos de vipcode/);
+  }
+  for (const command of [`cat ${HOME.toUpperCase()}/auth.json`, `type ${HOME.replace(/\//g, "\\")}\\auth.json`, "Remove-Item -Recurse $env:APPDATA\\npm\\node_modules\\VIPCODE"]) {
+    assert.ok(permissions.touchesVipcode(command), command);
+  }
+  // En el bash de Git para Windows C:\Users\… se escribe /c/Users/…
+  if (/^[A-Za-z]:\\/.test(HOME)) {
+    assert.ok(permissions.touchesVipcode(`cat /${HOME[0].toLowerCase()}/${HOME.slice(3).replace(/\\/g, "/")}/auth.json`));
+  }
+  assert.ok(!permissions.touchesVipcode("ls -la"));
+  fs.rmSync(path.join(HOME, "auth.json"), { force: true });
+});
+
+test("Windows: la shell de los comandos, rutas con / y ficheros con CRLF", async () => {
+  const shell = await import("../dist/shell.js");
+  // Por defecto bash en macOS y Linux; en Windows el bash de Git si está (en GitHub Actions lo está)
+  if (process.platform === "win32") {
+    assert.equal(shell.commandShell().name, "Git Bash");
+  } else {
+    assert.deepEqual(shell.detectShell({ PATH: process.env.PATH }, "linux").args("ls"), ["-lc", "ls"]);
+  }
+  // Sin el bash de Git, PowerShell: el comando va codificado (las comillas llegan tal cual) y devuelve su código de salida
+  const ps = shell.detectShell({ PATH: "", VIPCODE_SHELL: "powershell.exe" }, "win32");
+  assert.equal(ps.name, "PowerShell");
+  const args = ps.args('Write-Output "hola ñ"');
+  const script = Buffer.from(args[args.indexOf("-EncodedCommand") + 1], "base64").toString("utf16le");
+  assert.match(script, /Write-Output "hola ñ"/);
+  assert.match(script, /exit \$LASTEXITCODE/);
+  assert.deepEqual(shell.detectShell({ VIPCODE_SHELL: "cmd.exe" }, "win32").args("dir"), ["/d", "/s", "/c", "dir"]);
+  assert.deepEqual(shell.splitArgs('"C:\\Program Files\\Firefox\\firefox.exe" --new-tab'), ["C:\\Program Files\\Firefox\\firefox.exe", "--new-tab"]);
+  if (process.platform === "win32") {
+    // PowerShell de verdad: tildes en UTF-8 y el código de salida
+    const run = spawnSync(ps.file, ps.args("Write-Output 'hola ñ'; exit 4"), { encoding: "utf8" });
+    assert.equal(run.stdout.trim(), "hola ñ");
+    assert.equal(run.status, 4);
+    // Un .cmd (como los que instala npm) se puede lanzar
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-cmd-"));
+    fs.writeFileSync(path.join(dir, "saluda.cmd"), "@echo hola %1\r\n");
+    const child = shell.spawnProgram(path.join(dir, "saluda.cmd"), ["mundo"], { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout.on("data", (d) => (output += d));
+    assert.equal(await new Promise((resolve) => child.on("close", resolve)), 0);
+    assert.equal(output.trim(), "hola mundo");
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-win-"));
+  fs.mkdirSync(path.join(root, "src", "sub"), { recursive: true });
+  fs.writeFileSync(path.join(root, "src", "sub", "a.ts"), "uno\r\ndos\r\n");
+  // Lo que ve el modelo va siempre con /
+  assert.equal(tools.rel(root, path.join(root, "src", "sub", "a.ts")), "src/sub/a.ts");
+  const ctx = { root, bashTimeoutMs: 5000, readTimes: new Map(), ask: async () => ({ allow: true }) };
+  const read = await tools.runTool(tools.CORE_TOOLS, "read_file", JSON.stringify({ path: "src/sub/a.ts" }), ctx, false);
+  assert.ok(!read.output.includes("\r"), JSON.stringify(read.output));
+  assert.match(read.output, /1\tuno\n2\tdos/);
+  const grep = await tools.runTool(tools.CORE_TOOLS, "grep", JSON.stringify({ pattern: "dos$" }), ctx, false);
+  assert.match(grep.output, /src\/sub\/a\.ts:2: dos/);
+  if (process.platform === "win32") {
+    const glob = await tools.runTool(tools.CORE_TOOLS, "glob", JSON.stringify({ pattern: "src\\**\\*.ts" }), ctx, false);
+    assert.equal(glob.output, "src/sub/a.ts");
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+});

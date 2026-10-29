@@ -47,6 +47,16 @@ export const INSTALL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.u
 // Lo que el agente no puede tocar: los datos de vipcode (claves, configuración, carpetas de confianza) ni leerlos,
 // y su propio código no modificarlo. Quien desarrolle vipcode con vipcode puede permitir lo segundo con
 // VIPCODE_ALLOW_SELF_EDIT=1.
+// macOS y Windows no distinguen mayúsculas en las rutas: ~/.VIPCODE es la misma carpeta que ~/.vipcode
+const FOLD_CASE = process.platform === "darwin" || process.platform === "win32";
+
+// true si file es dir o está dentro de dir
+export function isInside(file: string, dir: string): boolean {
+  const a = FOLD_CASE ? file.toLowerCase() : file;
+  const b = FOLD_CASE ? dir.toLowerCase() : dir;
+  return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep);
+}
+
 export function protectedDirs(): { dir: string; read: boolean }[] {
   const dirs = [{ dir: HOME_DIR, read: true }];
   if (process.env.VIPCODE_ALLOW_SELF_EDIT !== "1") {

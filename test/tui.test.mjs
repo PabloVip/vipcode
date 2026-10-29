@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { CLI, ROOT, contentText, lastMessage, provider, startMock, tempWorkspace } from "./helpers/mock-llm.mjs";
+import { CLI, ROOT, contentText, lastMessage, provider, startMock, systemEnv, tempWorkspace } from "./helpers/mock-llm.mjs";
 
 const hasExpect = spawnSync("expect", ["-v"], { stdio: "ignore" }).status === 0;
 
@@ -12,7 +12,7 @@ function runExpect(script, ws) {
   return new Promise((resolve) => {
     const child = spawn("expect", [path.join(ROOT, "test", "fixtures", script), CLI], {
       cwd: ws.proj,
-      env: { PATH: process.env.PATH, HOME: ws.home, VIPCODE_HOME: ws.home, TERM: "xterm-256color" },
+      env: { ...systemEnv(ws.home), VIPCODE_HOME: ws.home, TERM: "xterm-256color" },
     });
     let output = "";
     child.stdout.on("data", (d) => (output += d));

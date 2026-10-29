@@ -404,7 +404,7 @@ test("vipcode auth login openrouter: inicia sesión en el navegador (OAuth PKCE)
   });
   const ws = tempWorkspace();
   ws.writeConfig({ enabledProviders: ["openrouter"], providers: [{ name: "openrouter", baseURL: `${mock.url}/api/v1` }] });
-  const browser = `${process.execPath} ${path.join(ROOT, "test", "fixtures", "fake-browser.mjs")}`;
+  const browser = `"${process.execPath}" "${path.join(ROOT, "test", "fixtures", "fake-browser.mjs")}"`;
   const result = await runVip(["auth", "login", "openrouter"], { cwd: ws.proj, home: ws.home, env: { VIPCODE_BROWSER: browser }, input: "1\n" });
   assert.match(result.output, /1\. Iniciar sesión en el navegador/);
   assert.match(result.output, /conectado \(clave comprobada\)/, result.output);
@@ -458,7 +458,7 @@ test("vipcode auth login: con Enter vacío abre la página de la clave y luego l
   const ws = tempWorkspace();
   ws.writeConfig({ enabledProviders: ["groq"], providers: [{ name: "groq", baseURL: `${mock.url}/groq/v1` }] });
   const log = path.join(ws.home, "navegador.log");
-  const browser = `${process.execPath} ${path.join(ROOT, "test", "fixtures", "fake-browser.mjs")}`;
+  const browser = `"${process.execPath}" "${path.join(ROOT, "test", "fixtures", "fake-browser.mjs")}"`;
   const result = await runVip(["auth", "login", "groq"], {
     cwd: ws.proj,
     home: ws.home,
@@ -535,6 +535,14 @@ const QUIET_NPM = { npm_config_audit: "false", npm_config_fund: "false", npm_con
 // Sin las variables npm_* del «npm test» que lanza las pruebas: apuntan a la carpeta real del proyecto y al npm global
 const BASE_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toLowerCase().startsWith("npm_")));
 
+// npm en Windows es npm.cmd, que solo se puede lanzar con la shell (y entonces las rutas con espacios, entre comillas)
+function npm(args, options) {
+  if (process.platform === "win32") {
+    return spawnSync("npm", args.map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg)), { ...options, shell: true });
+  }
+  return spawnSync("npm", args, options);
+}
+
 test("vipcode update instalado con npm: instala el paquete de la última versión publicada", async () => {
   const ws = tempWorkspace();
   // Un paquete «vipcode 9.9.9» de mentira, como el que se sube a cada versión
@@ -542,7 +550,7 @@ test("vipcode update instalado con npm: instala el paquete de la última versió
   fs.mkdirSync(fake);
   fs.writeFileSync(path.join(fake, "package.json"), JSON.stringify({ name: "vipcode", version: "9.9.9", bin: { vipcode: "index.js" } }));
   fs.writeFileSync(path.join(fake, "index.js"), "#!/usr/bin/env node\nconsole.log('9.9.9');\n");
-  const pack = spawnSync("npm", ["pack", "--pack-destination", ws.dir], { cwd: fake, encoding: "utf8", env: { ...BASE_ENV, HOME: ws.home, ...QUIET_NPM } });
+  const pack = npm(["pack", "--pack-destination", ws.dir], { cwd: fake, encoding: "utf8", env: { ...BASE_ENV, HOME: ws.home, ...QUIET_NPM } });
   assert.equal(pack.status, 0, pack.stderr);
   const tarball = fs.readFileSync(path.join(ws.dir, "vipcode-9.9.9.tgz"));
   let latest = "v9.9.9";
@@ -557,7 +565,8 @@ test("vipcode update instalado con npm: instala el paquete de la última versió
   });
   // Un npm global de prueba con vipcode 0.2.0 «instalado» dentro
   const prefix = path.join(ws.dir, "npm-global");
-  const installed = path.join(prefix, "lib", "node_modules", "vipcode");
+  // En Windows npm no usa lib/ dentro del prefijo global
+  const installed = process.platform === "win32" ? path.join(prefix, "node_modules", "vipcode") : path.join(prefix, "lib", "node_modules", "vipcode");
   fs.mkdirSync(installed, { recursive: true });
   fs.writeFileSync(path.join(installed, "package.json"), JSON.stringify({ name: "vipcode", version: "0.2.0" }));
   const update = (root) =>
@@ -605,7 +614,7 @@ test("vipcode update instalado desde el código: trae lo último del repositorio
     JSON.stringify({ name: "vipcode", version: "0.2.0", scripts: { build: "node -e \"require('fs').writeFileSync('compilado.txt', 'si')\"" } }, null, 2),
   );
   fs.writeFileSync(path.join(work, ".gitignore"), "node_modules/\ncompilado.txt\n");
-  assert.equal(spawnSync("npm", ["install", "--package-lock-only"], { cwd: work, encoding: "utf8", env }).status, 0);
+  assert.equal(npm(["install", "--package-lock-only"], { cwd: work, encoding: "utf8", env }).status, 0);
   git(work, "add", ".");
   git(work, "commit", "-q", "-m", "uno");
   git(work, "push", "-q", "origin", "HEAD:main");

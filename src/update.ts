@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PACKAGE_NAME, REPO_URL, VERSION } from "./meta.js";
-import { INSTALL_DIR, UPDATE_PATH, ensureHomeDir } from "./paths.js";
+import { INSTALL_DIR, UPDATE_PATH, ensureHomeDir, isInside } from "./paths.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -171,11 +171,9 @@ function lastLines(text: string, count = 6): string {
   return text.trim().split("\n").slice(-count).join("\n");
 }
 
-function isInside(dir: string, parent: string): boolean {
+function isInstalledIn(dir: string, parent: string): boolean {
   try {
-    const real = fs.realpathSync(dir);
-    const base = fs.realpathSync(parent);
-    return real === base || real.startsWith(base + path.sep);
+    return isInside(fs.realpathSync.native(dir), fs.realpathSync.native(parent));
   } catch {
     return false;
   }
@@ -242,7 +240,7 @@ async function updateFromRelease(root: string, log: (text: string) => void): Pro
   }
   const prefix = (await run(NPM, ["prefix", "-g"], os.tmpdir())).output.trim();
   const globalDir = process.platform === "win32" ? path.join(prefix, "node_modules") : path.join(prefix, "lib", "node_modules");
-  if (!prefix || !isInside(root, globalDir)) {
+  if (!prefix || !isInstalledIn(root, globalDir)) {
     return {
       status: "manual",
       message: `Hay una versión nueva (${release.version}, tienes la ${VERSION}), pero este vipcode no está instalado con «npm install -g». Instálala con:\n  npm install -g ${release.spec}`,

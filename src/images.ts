@@ -43,10 +43,25 @@ function run(command: string, args: string[]): Promise<{ code: number; stdout: B
   });
 }
 
-// Lee una imagen del portapapeles (macOS con osascript, Linux con wl-paste o xclip)
+// La imagen que ha dejado el portapapeles en un fichero temporal (y lo borra)
+function takePng(tmp: string): string | null {
+  try {
+    const size = fs.statSync(tmp).size;
+    if (size === 0) {
+      return null;
+    }
+    return `data:image/png;base64,${fs.readFileSync(tmp).toString("base64")}`;
+  } catch {
+    return null;
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
+// Lee una imagen del portapapeles (macOS con osascript, Windows con PowerShell, Linux con wl-paste o xclip)
 export async function readClipboardImage(): Promise<string | null> {
+  const tmp = path.join(os.tmpdir(), `vipcode-clip-${process.pid}-${Date.now()}.png`);
   if (process.platform === "darwin") {
-    const tmp = path.join(os.tmpdir(), `vipcode-clip-${process.pid}-${Date.now()}.png`);
     const script = [
       `set f to open for access POSIX file "${tmp}" with write permission`,
       "try",
@@ -59,17 +74,18 @@ export async function readClipboardImage(): Promise<string | null> {
       args.push("-e", line);
     }
     await run("osascript", args);
-    try {
-      const size = fs.statSync(tmp).size;
-      if (size === 0) {
-        return null;
-      }
-      return `data:image/png;base64,${fs.readFileSync(tmp).toString("base64")}`;
-    } catch {
-      return null;
-    } finally {
-      fs.rmSync(tmp, { force: true });
-    }
+    return takePng(tmp);
+  }
+  if (process.platform === "win32") {
+    // El PowerShell que trae Windows, con el portapapeles de .NET (que necesita -STA)
+    const script = [
+      "Add-Type -AssemblyName System.Windows.Forms",
+      "Add-Type -AssemblyName System.Drawing",
+      "$image = [System.Windows.Forms.Clipboard]::GetImage()",
+      `if ($image) { $image.Save('${tmp.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png) }`,
+    ].join("\n");
+    await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")]);
+    return takePng(tmp);
   }
   if (process.platform === "linux") {
     for (const [command, args] of [

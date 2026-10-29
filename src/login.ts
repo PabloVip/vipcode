@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { debugLog } from "./debug.js";
+import { splitArgs } from "./shell.js";
 
 // Lo mínimo que necesita el inicio de sesión de la interfaz (terminal o TUI)
 export interface LoginUi {
@@ -10,11 +11,12 @@ export interface LoginUi {
   prompt?(title: string, options?: { mask?: boolean; placeholder?: string }): Promise<string | null>;
 }
 
-// Abre una dirección en el navegador. VIPCODE_BROWSER permite usar otro comando ("firefox", "echo"…)
+// Abre una dirección en el navegador. VIPCODE_BROWSER permite usar otro comando ("firefox", "echo"…);
+// con comillas si la ruta lleva espacios: "C:\Program Files\Mozilla Firefox\firefox.exe"
 export function openBrowser(url: string): void {
   let command: string;
   let args: string[];
-  const custom = (process.env.VIPCODE_BROWSER || "").split(/\s+/).filter(Boolean);
+  const custom = splitArgs(process.env.VIPCODE_BROWSER || "");
   if (custom.length > 0) {
     [command, ...args] = custom;
     args.push(url);

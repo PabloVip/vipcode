@@ -18,6 +18,7 @@ import { Router } from "./router.js";
 import { type SkillDefinition, loadSkills, skillContent } from "./skills.js";
 import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession, sessionMarkdownPath } from "./session.js";
 import { Snapshots } from "./snapshot.js";
+import { commandShell, killTree } from "./shell.js";
 import { updateVipcode } from "./update.js";
 import { formatTodos, truncate } from "./tools.js";
 import { type ProjectTrust, projectTrust } from "./trust.js";
@@ -1064,13 +1065,18 @@ export class App {
   // y guarda la salida para que el agente la vea con tu siguiente mensaje
   runShell(command: string, onOutput?: (text: string) => void, signal?: AbortSignal): Promise<{ output: string; code: number | null }> {
     return new Promise((resolve) => {
-      let shell = process.env.SHELL || "bash";
-      let args = ["-lc", command];
-      if (process.platform === "win32") {
-        shell = "cmd.exe";
-        args = ["/c", command];
+      // Tu shell de siempre; en Windows, la misma que usa el agente (el bash de Git o PowerShell)
+      let shell = { file: process.env.SHELL || "bash", args: ["-lc", command], env: {} as Record<string, string> };
+      if (process.platform === "win32" || process.env.VIPCODE_SHELL) {
+        const found = commandShell();
+        shell = { file: found.file, args: found.args(command), env: found.env };
       }
-      const child = spawn(shell, args, { cwd: this.root, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_PAGER: "cat", PAGER: "cat" } });
+      const child = spawn(shell.file, shell.args, {
+        cwd: this.root,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, ...shell.env, GIT_PAGER: "cat", PAGER: "cat" },
+        windowsHide: true,
+      });
       let output = "";
       const add = (data: Buffer) => {
         const text = data.toString();
@@ -1079,8 +1085,8 @@ export class App {
       };
       child.stdout.on("data", add);
       child.stderr.on("data", add);
-      const timer = setTimeout(() => child.kill("SIGTERM"), this.config.bashTimeoutMs);
-      const stop = () => child.kill("SIGTERM");
+      const stop = () => killTree(child);
+      const timer = setTimeout(stop, this.config.bashTimeoutMs);
       signal?.addEventListener("abort", stop, { once: true });
       let done = false;
       const finish = (code: number | null) => {

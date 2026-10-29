@@ -1,10 +1,11 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Config, LspServerConfig } from "./config.js";
 import { debugLog } from "./debug.js";
+import { spawnProgram } from "./shell.js";
 
 export interface Diagnostic {
   line: number;
@@ -134,10 +135,12 @@ class LspClient {
     command: string[],
     private root: string,
   ) {
-    this.child = spawn(command[0], command.slice(1), {
+    // En Windows muchos servidores son .cmd (instalados con npm)
+    this.child = spawnProgram(command[0], command.slice(1), {
       cwd: root,
       env: { ...process.env, ...(spec.env || {}) },
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
     this.child.on("error", (err) => {
       debugLog("lsp error", spec.id, err);

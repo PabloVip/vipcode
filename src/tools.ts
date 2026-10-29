@@ -6,7 +6,8 @@ import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { isImagePath, toDataUrl } from "./images.js";
 import type { Permission, PermissionReply, PermissionRequest } from "./permissions.js";
 import { stripControl } from "./sanitize.js";
-import { protectedDirs } from "./paths.js";
+import { isInside, protectedDirs } from "./paths.js";
+import { commandShell, killTree } from "./shell.js";
 
 export type { Permission } from "./permissions.js";
 
@@ -63,11 +64,11 @@ export function truncate(text: string, max = MAX_OUTPUT): string {
   return `${text.slice(0, half)}\n\n[… ${text.length - max} caracteres omitidos …]\n\n${text.slice(-half)}`;
 }
 
-// Convierte una ruta relativa en absoluta y comprueba que no sale del proyecto
-// Ruta real siguiendo los enlaces simbólicos, aunque el destino (o parte de él) todavía no exista
+// Ruta real siguiendo los enlaces simbólicos, aunque el destino (o parte de él) todavía no exista.
+// La versión nativa devuelve además las mayúsculas reales de cada carpeta
 function realPathOf(file: string, depth = 0): string {
   try {
-    return fs.realpathSync(file);
+    return fs.realpathSync.native(file);
   } catch {
     // no existe (todavía) o es un enlace roto
   }
@@ -87,25 +88,26 @@ function realPathOf(file: string, depth = 0): string {
   return path.join(realPathOf(parent, depth + 1), path.basename(file));
 }
 
+// Convierte una ruta relativa en absoluta y comprueba que no sale del proyecto
 export function resolvePath(root: string, p: string | undefined, options: { write?: boolean } = {}): string {
   let input = p;
   if (!input) {
     input = ".";
   }
   const abs = path.resolve(root, input);
-  if (abs !== root && !abs.startsWith(root + path.sep)) {
+  if (!isInside(abs, root)) {
     throw new Error(`La ruta ${p} está fuera del proyecto (${root})`);
   }
   // Un enlace simbólico dentro del proyecto tampoco puede llevar fuera (por ejemplo a ~/.ssh o a tus claves)
   const real = realPathOf(abs);
   const realRoot = realPathOf(root);
-  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+  if (!isInside(real, realRoot)) {
     throw new Error(`La ruta ${p} es un enlace que lleva fuera del proyecto (${real})`);
   }
   // vipcode no puede tocarse a sí mismo: ni sus datos (claves, configuración) ni, para escribir, su instalación
   for (const { dir, read } of protectedDirs()) {
     const realDir = realPathOf(dir);
-    if ((read || options.write) && (real === realDir || real.startsWith(realDir + path.sep))) {
+    if ((read || options.write) && isInside(real, realDir)) {
       if (read) {
         throw new Error(`La ruta ${p} está en la carpeta de datos de vipcode (${dir}), que guarda tus claves y tu configuración: no se puede leer ni cambiar desde aquí.`);
       }
@@ -128,12 +130,18 @@ function protectedIgnore(root: string): string[] {
   return patterns;
 }
 
+// Ruta relativa al proyecto, siempre con / (también en Windows): es lo que ve el modelo y lo que comparan los permisos
 export function rel(root: string, abs: string): string {
   const r = path.relative(root, abs);
   if (r === "") {
     return ".";
   }
-  return r;
+  return r.split(path.sep).join("/");
+}
+
+// Los patrones glob van siempre con /; en Windows el modelo a veces los escribe con \
+function globPattern(pattern: string): string {
+  return process.platform === "win32" ? pattern.replace(/\\/g, "/") : pattern;
 }
 
 function rejected(reply: PermissionReply, what: string): string {
@@ -318,7 +326,7 @@ function readNumbered(file: string, label: string, offset?: number, maxLines?: n
   if (buffer.includes(0)) {
     return `${label} parece un fichero binario; no se muestra.`;
   }
-  const lines = buffer.toString("utf8").split("\n");
+  const lines = buffer.toString("utf8").split(/\r?\n/);
   let start = 1;
   if (offset && offset > 0) {
     start = Math.floor(offset);
@@ -636,7 +644,7 @@ const globTool: Tool = {
   readOnly: true,
   async run(args, ctx) {
     const cwd = resolvePath(ctx.root, args.path);
-    const files = await fg(String(args.pattern), { cwd, ignore: [...IGNORE, ...protectedIgnore(cwd)], dot: true, onlyFiles: true, followSymbolicLinks: false });
+    const files = await fg(globPattern(String(args.pattern)), { cwd, ignore: [...IGNORE, ...protectedIgnore(cwd)], dot: true, onlyFiles: true, followSymbolicLinks: false });
     if (files.length === 0) {
       return "Sin resultados.";
     }
@@ -703,12 +711,16 @@ const grepTool: Tool = {
   async run(args, ctx) {
     const pattern = String(args.pattern);
     if (hasRipgrep()) {
-      const rgArgs = ["--line-number", "--no-heading", "--color", "never", "--with-filename", "--max-columns", "300", "--max-columns-preview", "-e", pattern];
+      // --crlf: en los ficheros con saltos de línea de Windows, $ también encaja antes del \r\n
+      const rgArgs = ["--line-number", "--no-heading", "--color", "never", "--with-filename", "--crlf", "--max-columns", "300", "--max-columns-preview", "-e", pattern];
+      if (process.platform === "win32") {
+        rgArgs.push("--path-separator", "/");
+      }
       if (args.ignore_case) {
         rgArgs.push("-i");
       }
       if (args.include) {
-        rgArgs.push("-g", String(args.include));
+        rgArgs.push("-g", globPattern(String(args.include)));
       }
       for (const pattern of protectedIgnore(ctx.root)) {
         rgArgs.push("-g", `!${pattern}`);
@@ -722,7 +734,7 @@ const grepTool: Tool = {
         const lines = found.stdout
           .split("\n")
           .filter((line) => line.length > 0)
-          .map((line) => line.replace(/^\.\//, "").replace(/^([^:]+):(\d+):/, "$1:$2: "));
+          .map((line) => line.replace(/\r$/, "").replace(/^\.\//, "").replace(/^([^:]+):(\d+):/, "$1:$2: "));
         if (lines.length > 200) {
           return `${lines.slice(0, 200).join("\n")}\n[… limitado a 200 resultados]`;
         }
@@ -742,7 +754,7 @@ const grepTool: Tool = {
     }
     let include = "**/*";
     if (args.include) {
-      include = String(args.include);
+      include = globPattern(String(args.include));
     }
     const files = await fg(include, { cwd: ctx.root, ignore: [...IGNORE, ...protectedIgnore(ctx.root)], dot: false, onlyFiles: true, followSymbolicLinks: false });
     const results: string[] = [];
@@ -761,7 +773,7 @@ const grepTool: Tool = {
       if (buffer.includes(0)) {
         continue;
       }
-      const lines = buffer.toString("utf8").split("\n");
+      const lines = buffer.toString("utf8").split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
         if (regex.test(lines[i])) {
           results.push(`${file}:${i + 1}: ${lines[i].slice(0, 300)}`);
@@ -815,25 +827,25 @@ const bashTool: Tool = {
     }
 
     return await new Promise<string>((resolve) => {
-      let shell = "bash";
-      let shellArgs = ["-lc", command];
-      if (process.platform === "win32") {
-        shell = "cmd.exe";
-        shellArgs = ["/c", command];
-      }
-      const child = spawn(shell, shellArgs, {
+      const shell = commandShell();
+      const child = spawn(shell.file, shell.args(command), {
         cwd: ctx.root,
-        env: { ...process.env, ...gitSafetyEnv(), VIPCODE: "1", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat" },
+        env: { ...process.env, ...shell.env, ...gitSafetyEnv(), VIPCODE: "1", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat" },
         stdio: ["ignore", "pipe", "pipe"],
         // Grupo de procesos propio para poder matar también a los hijos (npm test, servidores…)
         detached: process.platform !== "win32",
+        windowsHide: true,
       });
       let output = "";
       let timedOut = false;
 
       const kill = () => {
+        if (process.platform === "win32") {
+          killTree(child);
+          return;
+        }
         try {
-          if (process.platform !== "win32" && child.pid) {
+          if (child.pid) {
             process.kill(-child.pid, "SIGTERM");
           } else {
             child.kill("SIGTERM");
@@ -843,7 +855,7 @@ const bashTool: Tool = {
         }
         setTimeout(() => {
           try {
-            if (process.platform !== "win32" && child.pid) {
+            if (child.pid) {
               process.kill(-child.pid, "SIGKILL");
             }
           } catch {

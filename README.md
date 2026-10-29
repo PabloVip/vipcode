@@ -32,7 +32,9 @@ npm run build
 npm link        # deja el comando «vipcode» disponible en cualquier carpeta
 ```
 
-Probado sobre todo en macOS; las pruebas automáticas también pasan en Linux. Si algo falla, [abre un issue](https://github.com/PabloVip/vipcode/issues).
+Funciona en macOS, Linux y Windows: las pruebas automáticas pasan en los tres. Si algo falla, [abre un issue](https://github.com/PabloVip/vipcode/issues).
+
+**En Windows** conviene tener [Git para Windows](https://git-scm.com/download/win): vipcode ejecuta los comandos con su bash, porque los modelos escriben comandos de bash, y usa git para `/undo`. Sin él usa PowerShell y se lo dice al modelo. Para elegir otra shell, pon `VIPCODE_SHELL` (`pwsh`, `powershell`, `cmd` o la ruta de un bash).
 
 ## Primeros pasos
 

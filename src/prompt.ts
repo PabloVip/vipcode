@@ -3,6 +3,7 @@ import path from "node:path";
 import fg from "fast-glob";
 import type { AgentDefinition } from "./agents.js";
 import { GLOBAL_INSTRUCTIONS_PATH } from "./paths.js";
+import { commandShell } from "./shell.js";
 
 function readLimited(file: string, max = 15000): string {
   try {
@@ -51,6 +52,21 @@ function projectInstructions(root: string, extra: string[]): string {
 }
 
 // Lo que hay en la raíz del proyecto, para que el modelo se oriente sin gastar una llamada
+// Para que el modelo escriba los comandos en el idioma de la shell que hay de verdad
+function shellLine(): string {
+  const shell = commandShell();
+  if (shell.name === "PowerShell") {
+    return "PowerShell (write PowerShell commands, not bash)";
+  }
+  if (shell.name === "cmd") {
+    return "cmd.exe (write Windows cmd commands, not bash)";
+  }
+  if (shell.name === "Git Bash") {
+    return "Git Bash on Windows (bash syntax; Windows tools like npm, node and git work as usual)";
+  }
+  return shell.name;
+}
+
 function topLevel(root: string): string {
   try {
     const entries = fs
@@ -148,6 +164,7 @@ Environment:
 - Working directory: ${root}
 - Git repository: ${isGit}
 - Platform: ${process.platform}
+- Shell for the bash tool: ${shellLine()}
 - Date: ${new Date().toISOString().slice(0, 10)}
 - Top-level entries: ${topLevel(root)}${projectInstructions(root, options.instructions)}`;
 }

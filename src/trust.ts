@@ -98,7 +98,8 @@ function readStore(): Record<string, { fingerprint: string; date: string }> {
 
 function key(root: string): string {
   try {
-    return fs.realpathSync(root);
+    // La ruta real con sus mayúsculas: en macOS y Windows ~/Proyecto y ~/proyecto son la misma carpeta
+    return fs.realpathSync.native(root);
   } catch {
     return path.resolve(root);
   }

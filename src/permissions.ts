@@ -153,13 +153,23 @@ export class SessionGrants {
 // Un comando que nombra la carpeta de datos de vipcode o su instalación (para leer tus claves, cambiar la
 // configuración o tocar su propio código) se pregunta siempre: no vale ninguna regla allow ni «sí a todo»
 export function touchesVipcode(command: string): boolean {
+  // Sin distinguir mayúsculas (macOS y Windows no las distinguen) ni / de \ (en Windows valen las dos)
+  const normalize = (text: string) => text.replace(/\\/g, "/").toLowerCase();
   const home = os.homedir();
-  const names = [HOME_DIR, INSTALL_DIR, "lib/node_modules/vipcode"];
-  if (HOME_DIR.startsWith(home + path.sep)) {
+  const names = [HOME_DIR, INSTALL_DIR, "node_modules/vipcode"];
+  if (normalize(HOME_DIR).startsWith(normalize(home + path.sep))) {
     const inHome = HOME_DIR.slice(home.length + 1);
-    names.push(`~/${inHome}`, `$HOME/${inHome}`, `\${HOME}/${inHome}`);
+    for (const prefix of ["~", "$HOME", "${HOME}", "%USERPROFILE%", "$env:USERPROFILE", "${env:USERPROFILE}"]) {
+      names.push(`${prefix}/${inHome}`);
+    }
   }
-  return names.some((name) => command.includes(name));
+  const text = normalize(command);
+  return names.some((name) => {
+    const clean = normalize(name);
+    // C:\Users\… también se escribe /c/Users/… en el bash de Git para Windows
+    const msys = /^[a-z]:\//.test(clean) ? `/${clean[0]}${clean.slice(2)}` : null;
+    return text.includes(clean) || (msys !== null && text.includes(msys));
+  });
 }
 
 export function createAsker(

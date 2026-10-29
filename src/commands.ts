@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Config } from "./config.js";
 import { readMarkdownDir } from "./frontmatter.js";
 import { GLOBAL_COMMANDS_DIR } from "./paths.js";
+import { commandShell, killTree, splitArgs } from "./shell.js";
 import { truncate } from "./tools.js";
 import { isProjectFile, projectTrust } from "./trust.js";
 
@@ -88,28 +89,17 @@ export function loadCommands(root: string, config: Config, trusted = projectTrus
   return [...commands.values()];
 }
 
-// Separa los argumentos respetando las comillas: a "b c" d → [a, b c, d]
-export function splitArgs(text: string): string[] {
-  const result: string[] = [];
-  const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text)) !== null) {
-    result.push(match[1] ?? match[2] ?? match[3]);
-  }
-  return result;
-}
-
 function runShell(command: string, cwd: string): Promise<string> {
   return new Promise((resolve) => {
-    let shell = "bash";
-    let args = ["-lc", command];
-    if (process.platform === "win32") {
-      shell = "cmd.exe";
-      args = ["/c", command];
-    }
-    const child = spawn(shell, args, { cwd, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_PAGER: "cat", PAGER: "cat" } });
+    const shell = commandShell();
+    const child = spawn(shell.file, shell.args(command), {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...shell.env, GIT_PAGER: "cat", PAGER: "cat" },
+      windowsHide: true,
+    });
     let output = "";
-    const timer = setTimeout(() => child.kill("SIGTERM"), 30000);
+    const timer = setTimeout(() => killTree(child), 30000);
     child.stdout.on("data", (d) => (output += d.toString()));
     child.stderr.on("data", (d) => (output += d.toString()));
     child.on("error", (err) => {

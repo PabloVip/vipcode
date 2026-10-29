@@ -144,13 +144,30 @@ export function provider(name, url, models, extra = {}) {
   };
 }
 
+// Lo mínimo para lanzar programas sin las claves de tu entorno: PATH y una carpeta personal de prueba. En Windows hacen
+// falta además algunas variables del sistema (sin SystemRoot, por ejemplo, Node no puede ni abrir conexiones), y la
+// carpeta personal sale de USERPROFILE
+const WINDOWS_ENV = ["SystemRoot", "SystemDrive", "windir", "ComSpec", "PATHEXT", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS"];
+export function systemEnv(home) {
+  const env = { PATH: process.env.PATH, HOME: home };
+  if (process.platform === "win32") {
+    for (const name of WINDOWS_ENV) {
+      if (process.env[name] !== undefined) {
+        env[name] = process.env[name];
+      }
+    }
+    env.USERPROFILE = home;
+  }
+  return env;
+}
+
 // Ejecuta "vipcode ..." sin las claves de tu entorno (solo PATH y HOME), sin colores y sin abrir el navegador.
 // Con input como lista, escribe cada respuesta cuando vipcode ha enseñado su pregunta (readline pierde las líneas que llegan antes)
 export function runVip(args, { cwd, home, env = {}, timeout = 60000, input } = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd,
-      env: { PATH: process.env.PATH, HOME: home, VIPCODE_HOME: home, NO_COLOR: "1", VIPCODE_BROWSER: "true", ...env },
+      env: { ...systemEnv(home), VIPCODE_HOME: home, NO_COLOR: "1", VIPCODE_BROWSER: "true", ...env },
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";

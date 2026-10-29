@@ -19,6 +19,8 @@ Requires Node.js 22 or later.
 npm install -g vipcode
 ```
 
+Works on macOS, Linux and Windows. On Windows, install [Git for Windows](https://git-scm.com/download/win): vipcode runs commands with its bash (models write bash commands) and uses git for `/undo`; without it, it falls back to PowerShell and tells the model. `VIPCODE_SHELL` picks another shell (`pwsh`, `powershell`, `cmd` or a path to bash).
+
 To update, type `/update` inside vipcode or run `vipcode update` (it installs the latest published version, or pulls the repository if you installed from source). Without the npm registry you can also install the latest GitHub release (`npm install -g https://github.com/PabloVip/vipcode/releases/latest/download/vipcode.tgz`) or run it from source:
 
 ```bash
