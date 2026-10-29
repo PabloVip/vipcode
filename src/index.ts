@@ -10,7 +10,9 @@ import { isImagePath, toDataUrl } from "./images.js";
 import { REPO_URL, VERSION } from "./meta.js";
 import { NoSlotError } from "./router.js";
 import { appendHistory, exportMarkdown, listSessions, loadSession, saveExport } from "./session.js";
+import { stripControl } from "./sanitize.js";
 import { createSkill, installSkills, loadSkills, removeSkill } from "./skills.js";
+import { type ProjectTrust, projectTrust, trustProject, untrustProject } from "./trust.js";
 import { updateVipcode } from "./update.js";
 import { completeMention } from "./tools.js";
 import { plainAdapter, plainEvents, plainPermissionPrompt, ui } from "./ui.js";
@@ -30,6 +32,7 @@ Uso:
   vipcode skills new <nombre>      crea una skill vacía para rellenar
   vipcode skills remove <nombre>   borra una skill instalada con vipcode
   vipcode update                   actualiza vipcode (del repositorio o a la última versión publicada)
+  vipcode trust                    confiar en la configuración que trae esta carpeta (vipcode untrust lo deshace)
   vipcode sessions                 sesiones guardadas de esta carpeta
   vipcode export [id]              guarda una sesión en Markdown (por defecto la última)
 
@@ -95,7 +98,7 @@ function parseArgs(argv: string[]): Options {
     project: false,
     force: false,
   };
-  const commands = ["run", "auth", "models", "skills", "sessions", "export", "update", "help"];
+  const commands = ["run", "auth", "models", "skills", "sessions", "export", "update", "trust", "untrust", "help"];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "-c" || arg === "--continue") {
@@ -297,6 +300,28 @@ function runSkills(options: Options, root: string) {
   process.exitCode = 1;
 }
 
+function showTrust(trust: ProjectTrust) {
+  console.log(pc.yellow("⚠ Esta carpeta trae configuración propia de vipcode:"));
+  for (const change of trust.changes) {
+    console.log(`  · ${stripControl(change)}`);
+  }
+  console.log(pc.dim("  Puede hacer que vipcode arranque programas, mande tus claves a otro servidor o deje de pedirte permiso."));
+}
+
+// Antes de abrir la interfaz: ¿usamos la configuración del proyecto?
+async function askTrust(trust: ProjectTrust): Promise<boolean> {
+  showTrust(trust);
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question("¿Confías en esta carpeta y quieres usar esa configuración? (s/N) ")).trim().toLowerCase();
+    return ["s", "si", "sí", "y", "yes"].includes(answer);
+  } catch {
+    return false;
+  } finally {
+    rl.close();
+  }
+}
+
 function noModelsHelp() {
   ui.error('No hay ningún modelo disponible (los proveedores sin clave se desactivan con "keyless": false o al limitar enabledProviders).');
   console.log(`Añade una clave gratuita con:   vipcode auth login
@@ -460,6 +485,21 @@ async function main() {
     runSkills(options, root);
     return;
   }
+  if (options.command === "trust") {
+    const trust = projectTrust(root);
+    if (!trust.fingerprint) {
+      ui.info("Esta carpeta no trae configuración de vipcode: no hace falta confiar en ella.");
+      return;
+    }
+    showTrust(trust);
+    trustProject(root);
+    ui.info("Hecho: vipcode usará esa configuración en esta carpeta. Si cambia, te volverá a preguntar.");
+    return;
+  }
+  if (options.command === "untrust") {
+    ui.info(untrustProject(root) ? "Hecho: ya no uso la configuración de esta carpeta." : "No confiabas en esta carpeta.");
+    return;
+  }
   if (options.command === "update") {
     const result = await updateVipcode((text) => ui.info(text));
     if (result.status === "error") {
@@ -509,7 +549,16 @@ async function main() {
     session = listSessions(root)[0];
   }
 
-  const app = new App(root, { session, agentName: options.agent || undefined });
+  // En la interfaz se pregunta si usar la configuración del proyecto; con «run» se avisa y no se usa
+  let trusted: boolean | undefined;
+  const trust = projectTrust(root);
+  if (!trust.trusted && options.command === "" && process.stdin.isTTY) {
+    trusted = await askTrust(trust);
+    if (trusted) {
+      trustProject(root);
+    }
+  }
+  const app = new App(root, { session, agentName: options.agent || undefined, trusted });
   if (options.agent && !app.agents.some((agent) => agent.name === options.agent)) {
     ui.error(`No existe el agente «${options.agent}».`);
     process.exitCode = 1;

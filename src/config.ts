@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CONFIG_PATH, HOME_DIR } from "./paths.js";
+import { CONFIG_PATH, HOME_DIR, ensureHomeDir } from "./paths.js";
+import { projectTrust } from "./trust.js";
 
 export { CONFIG_PATH, HOME_DIR, SESSIONS_DIR, STATE_PATH } from "./paths.js";
 
@@ -387,8 +388,8 @@ export function setGlobalConfigValue(key: string, value: unknown) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2));
 }
 
-export function loadConfig(root: string = process.cwd()): Config {
-  fs.mkdirSync(HOME_DIR, { recursive: true });
+export function loadConfig(root: string = process.cwd(), options: { trusted?: boolean } = {}): Config {
+  ensureHomeDir();
 
   // La primera vez creamos el config con los valores por defecto para que puedas editarlo
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -404,8 +405,12 @@ export function loadConfig(root: string = process.cwd()): Config {
   }
 
   let config = mergeConfig(DEFAULT_CONFIG, raw);
-  for (const file of projectConfigFiles(root)) {
-    config = mergeConfig(config, readJson(file));
+  // La del proyecto puede arrancar programas o mandar tus claves a otro servidor: solo si confías en la carpeta
+  const trusted = options.trusted ?? projectTrust(root).trusted;
+  if (trusted) {
+    for (const file of projectConfigFiles(root)) {
+      config = mergeConfig(config, readJson(file));
+    }
   }
   if (!Array.isArray(config.providers)) {
     config.providers = [];

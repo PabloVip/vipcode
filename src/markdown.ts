@@ -1,6 +1,7 @@
 import hljs from "highlight.js/lib/common";
 import { type Token, type Tokens, marked } from "marked";
 import pc from "picocolors";
+import { stripControl } from "./sanitize.js";
 
 // Colores de resaltado de código por clase de highlight.js
 const CODE_COLORS: Record<string, (text: string) => string> = {
@@ -252,10 +253,12 @@ function blocks(tokens: Token[], width: number, depth = 0): string {
 
 // Markdown → texto con colores para la terminal
 export function renderMarkdown(text: string, width = 80): string {
+  // El texto del modelo no puede llevar secuencias de la terminal: los colores los ponemos nosotros
+  const clean = stripControl(text);
   try {
-    const tokens = marked.lexer(text, { gfm: true });
+    const tokens = marked.lexer(clean, { gfm: true });
     return blocks(tokens, width).replace(/\n{3,}/g, "\n\n");
   } catch {
-    return text;
+    return clean;
   }
 }

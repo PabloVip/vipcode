@@ -13,6 +13,7 @@ import { renderMarkdown } from "../markdown.js";
 import { VERSION } from "../meta.js";
 import type { PermissionReply, PermissionRequest } from "../permissions.js";
 import { NoSlotError } from "../router.js";
+import { showControl, stripControl, stripUnsafe } from "../sanitize.js";
 import { appendHistory, loadHistory } from "../session.js";
 import { type Todo, suggestFiles } from "../tools.js";
 import { colorPreview } from "../ui.js";
@@ -157,7 +158,8 @@ function diffStats(display: string | undefined): { added: number; removed: numbe
 
 // Debajo de cada herramienta, un resumen corto de lo que pasó
 function toolDetail(event: ToolEndEvent): string[] {
-  const output = event.output || "";
+  // La salida viene de ficheros y comandos: sin secuencias de la terminal
+  const output = stripControl(event.output || "");
   if (event.isError) {
     return [pc.red(firstLine(output))];
   }
@@ -213,11 +215,12 @@ function toolDetail(event: ToolEndEvent): string[] {
   }
 }
 
+// El resumen sale de lo que pidió el modelo (comandos, rutas): los caracteres de control se ven, no actúan
 function ToolHeader(props: { name: string; summary: string }) {
   return (
     <>
-      <Text bold>{TOOL_LABEL[props.name] || props.name}</Text>
-      {props.summary ? <Text> {props.summary}</Text> : null}
+      <Text bold>{TOOL_LABEL[props.name] || showControl(props.name)}</Text>
+      {props.summary ? <Text> {showControl(props.summary)}</Text> : null}
     </>
   );
 }
@@ -299,8 +302,8 @@ function ItemView(props: { item: Item; app: App; width: number }) {
     case "banner":
       return <Banner app={props.app} />;
     case "user": {
-      const lines = item.text.split("\n");
-      let text = item.text;
+      const lines = stripControl(item.text).split("\n");
+      let text = lines.join("\n");
       if (lines.length > 20) {
         text = `${lines.slice(0, 20).join("\n")}\n… (${lines.length - 20} líneas más)`;
       }
@@ -336,7 +339,7 @@ function ItemView(props: { item: Item; app: App; width: number }) {
         </Box>
       );
     case "shell": {
-      const lines = item.output ? item.output.split("\n") : [];
+      const lines = item.output ? stripControl(item.output).split("\n") : [];
       const shown = lines.slice(-30);
       return (
         <Box flexDirection="column" marginTop={1}>
@@ -344,7 +347,7 @@ function ItemView(props: { item: Item; app: App; width: number }) {
             <Text color="yellow" bold>
               ${" "}
             </Text>
-            <Text bold>{item.command}</Text>
+            <Text bold>{showControl(item.command)}</Text>
           </Text>
           {lines.length > shown.length ? <Text dimColor>  … {lines.length - shown.length} líneas antes</Text> : null}
           {shown.length > 0 ? <Text>{shown.map((line) => `  ${line}`).join("\n")}</Text> : null}
@@ -355,16 +358,17 @@ function ItemView(props: { item: Item; app: App; width: number }) {
         </Box>
       );
     }
+    // Avisos y bloques pueden llevar mensajes de los proveedores o datos de fuera: solo se dejan los colores
     case "info":
-      return <Text dimColor>{item.text}</Text>;
+      return <Text dimColor>{stripUnsafe(item.text)}</Text>;
     case "notice":
-      return <Text color="yellow">⚠ {item.text}</Text>;
+      return <Text color="yellow">⚠ {stripUnsafe(item.text)}</Text>;
     case "error":
-      return <Text color="red">✖ {item.text}</Text>;
+      return <Text color="red">✖ {stripUnsafe(item.text)}</Text>;
     case "block":
       return (
         <Box marginY={1}>
-          <Text>{item.text}</Text>
+          <Text>{stripUnsafe(item.text)}</Text>
         </Box>
       );
   }
@@ -385,25 +389,25 @@ function TodoPanel(props: { todos: Todo[] }) {
         if (todo.status === "completed") {
           return (
             <Text key={index} color="green" strikethrough>
-              ☑ {todo.content}
+              ☑ {stripControl(todo.content)}
             </Text>
           );
         }
         if (todo.status === "in_progress") {
           return (
             <Text key={index} color="yellow">
-              ◐ {todo.content}
+              ◐ {stripControl(todo.content)}
             </Text>
           );
         }
         if (todo.status === "cancelled") {
           return (
             <Text key={index} dimColor strikethrough>
-              ☒ {todo.content}
+              ☒ {stripControl(todo.content)}
             </Text>
           );
         }
-        return <Text key={index}>☐ {todo.content}</Text>;
+        return <Text key={index}>☐ {stripControl(todo.content)}</Text>;
       })}
       {props.todos.length > 10 ? <Text dimColor>… y {props.todos.length - 10} más</Text> : null}
     </Box>
@@ -1267,7 +1271,7 @@ function Main(props: { app: App; initial: string }) {
       <Box flexDirection="column">
         {live.current.reasoning ? (
           <Text dimColor italic wrap="truncate-end">
-            💭 {lastLines(live.current.reasoning.replace(/\s+/g, " "), 1).slice(-Math.max(20, columns - 6))}
+            💭 {lastLines(stripControl(live.current.reasoning).replace(/\s+/g, " "), 1).slice(-Math.max(20, columns - 6))}
           </Text>
         ) : null}
         {liveText ? (
@@ -1289,7 +1293,7 @@ function Main(props: { app: App; initial: string }) {
             {progress ? (
               <Text dimColor wrap="truncate-end">
                 {"    "}
-                {lastLines(progress, 1).slice(0, Math.max(20, columns - 8))}
+                {lastLines(stripControl(progress), 1).slice(0, Math.max(20, columns - 8))}
               </Text>
             ) : null}
           </Box>
@@ -1297,9 +1301,9 @@ function Main(props: { app: App; initial: string }) {
         {shell ? (
           <Box flexDirection="column" marginTop={1}>
             <Text>
-              <Spinner color="yellow" /> <Text bold>{shell.command}</Text> <Elapsed since={startedAt.current} hideUnderMs={1000} />
+              <Spinner color="yellow" /> <Text bold>{showControl(shell.command)}</Text> <Elapsed since={startedAt.current} hideUnderMs={1000} />
             </Text>
-            {shell.output ? <Text dimColor>{lastLines(shell.output, Math.min(8, liveRoom)).replace(/^/gm, "  ")}</Text> : null}
+            {shell.output ? <Text dimColor>{lastLines(stripControl(shell.output), Math.min(8, liveRoom)).replace(/^/gm, "  ")}</Text> : null}
           </Box>
         ) : null}
         <TodoPanel todos={todos} />

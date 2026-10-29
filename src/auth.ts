@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { ProviderConfig } from "./config.js";
-import { AUTH_PATH, HOME_DIR } from "./paths.js";
+import { AUTH_PATH, ensureHomeDir } from "./paths.js";
 
 // Lo que guarda "vipcode auth login" para cada proveedor
 export interface AuthEntry {
@@ -31,7 +31,7 @@ export function readAuth(): AuthFile {
 }
 
 function writeAuth(data: AuthFile) {
-  fs.mkdirSync(HOME_DIR, { recursive: true });
+  ensureHomeDir();
   // 0600: solo tu usuario puede leer las claves
   fs.writeFileSync(AUTH_PATH, JSON.stringify(data, null, 2), { mode: 0o600 });
   fs.chmodSync(AUTH_PATH, 0o600);

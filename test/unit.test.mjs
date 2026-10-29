@@ -26,6 +26,9 @@ const { CATALOG } = await import("../dist/catalog.js");
 const auth = await import("../dist/auth.js");
 const ranking = await import("../dist/ranking.js");
 const skills = await import("../dist/skills.js");
+const trust = await import("../dist/trust.js");
+const { evaluate } = await import("../dist/permissions.js");
+const { showControl, stripControl, stripUnsafe } = await import("../dist/sanitize.js");
 const { RANKING_FIXTURE } = await import("./fixtures/ranking-data.mjs");
 
 test("diff por líneas con contexto", () => {
@@ -117,7 +120,12 @@ test("comandos con plantilla: $ARGUMENTS, $1 y !`comando`", async () => {
   const list = commands.loadCommands(root, config.DEFAULT_CONFIG);
   const saluda = list.find((c) => c.name === "saluda");
   assert.equal(saluda.agent, "plan");
-  const text = await commands.expandCommand(saluda, '"Ana López" y $& más', root);
+  // En una carpeta en la que no confías, las !`órdenes` de sus comandos no se ejecutan
+  let text = await commands.expandCommand(saluda, '"Ana López" y $& más', root);
+  assert.equal(text, 'Saluda a Ana López ("Ana López" y $& más). Hoy: (no ejecutado: esta carpeta no es de confianza; usa «vipcode trust»)');
+  trust.trustProject(root);
+  const trusted = commands.loadCommands(root, config.DEFAULT_CONFIG).find((c) => c.name === "saluda");
+  text = await commands.expandCommand(trusted, '"Ana López" y $& más', root);
   assert.equal(text, 'Saluda a Ana López ("Ana López" y $& más). Hoy: martes');
   assert.ok(list.find((c) => c.name === "init"));
   fs.rmSync(root, { recursive: true, force: true });
@@ -372,9 +380,12 @@ test("config: migración del config antiguo y config del proyecto", () => {
   fs.writeFileSync(path.join(HOME, "config.json"), JSON.stringify(old));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-proj-"));
   fs.writeFileSync(path.join(root, "vipcode.json"), JSON.stringify({ maxSteps: 7, permission: { bash: { "npm test*": "allow" } } }));
-  const loaded = config.loadConfig(root);
+  // Sin confiar en la carpeta, su configuración no se usa
+  assert.equal(config.loadConfig(root).maxSteps, config.DEFAULT_CONFIG.maxSteps);
   assert.ok(fs.existsSync(path.join(HOME, "config.json.bak")));
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(HOME, "config.json"), "utf8")).providers, []);
+  trust.trustProject(root);
+  const loaded = config.loadConfig(root);
   assert.equal(loaded.maxSteps, 7);
   assert.equal(loaded.permission.bash["npm test*"], "allow");
   assert.equal(loaded.permission.bash["git status*"], "allow");
@@ -620,5 +631,115 @@ test("actualizaciones: comparar versiones y mirar en GitHub como mucho una vez a
     fs.rmSync(path.join(HOME, "update.json"), { force: true });
     await mock.close();
   }
+});
+
+test("seguridad: la configuración de un proyecto solo se usa si confías en la carpeta (y si cambia, vuelve a preguntar)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-confianza-"));
+  // Solo instrucciones: no hace falta confiar
+  writeFile(path.join(root, ".vipcode", "agents", "docs.md"), "---\ndescription: Docs\n---\nEscribe docs.");
+  writeFile(path.join(root, ".vipcode", "commands", "hola.md"), "Di hola");
+  assert.equal(trust.projectTrust(root).trusted, true);
+  // Un agente con permisos propios y un servidor MCP sí
+  writeFile(path.join(root, ".vipcode", "agents", "build.md"), "---\ndescription: Todo permitido\npermission:\n  bash: allow\n---\nHaz.");
+  writeFile(path.join(root, "vipcode.json"), JSON.stringify({ mcp: { malo: { type: "local", command: ["sh", "-c", "echo hola"] } }, providers: [{ name: "groq", baseURL: "https://otro.example/v1" }] }));
+  let info = trust.projectTrust(root);
+  assert.equal(info.trusted, false);
+  assert.deepEqual(info.files.sort(), [".vipcode/agents/build.md", "vipcode.json"].sort());
+  assert.ok(info.changes.some((change) => change.includes("servidores MCP que se arrancan solos: malo")));
+  assert.ok(info.changes.some((change) => change.includes("proveedores: groq")));
+  // Sin confianza: ni el MCP, ni el proveedor cambiado, ni los permisos del agente
+  let cfg = config.loadConfig(root);
+  assert.deepEqual(cfg.mcp, {});
+  assert.ok(!cfg.providers.some((p) => p.name === "groq"));
+  assert.equal(agents.loadAgents(root, cfg).find((a) => a.name === "build").permission, undefined);
+  // Confías: se usa todo
+  trust.trustProject(root);
+  cfg = config.loadConfig(root);
+  assert.ok(cfg.mcp.malo);
+  assert.deepEqual(agents.loadAgents(root, cfg).find((a) => a.name === "build").permission, { bash: "allow" });
+  // Si cambia (por ejemplo tras un git pull), se vuelve a preguntar
+  writeFile(path.join(root, "vipcode.json"), JSON.stringify({ mcp: { otro: { type: "local", command: ["sh"] } } }));
+  assert.equal(trust.projectTrust(root).trusted, false);
+  assert.deepEqual(config.loadConfig(root).mcp, {});
+  trust.trustProject(root);
+  assert.equal(trust.untrustProject(root), true);
+  assert.equal(trust.projectTrust(root).trusted, false);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("seguridad: las herramientas no salen del proyecto por un enlace simbólico", async () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-fuera-"));
+  fs.writeFileSync(path.join(outside, "claves.json"), "SECRETO");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-enlaces-"));
+  fs.writeFileSync(path.join(root, "normal.txt"), "hola");
+  fs.symlinkSync(path.join(outside, "claves.json"), path.join(root, "notas.txt"));
+  fs.symlinkSync(outside, path.join(root, "carpeta"));
+  fs.symlinkSync(path.join(outside, "todavia-no-existe.txt"), path.join(root, "roto.txt"));
+  assert.equal(tools.resolvePath(root, "normal.txt"), path.join(root, "normal.txt"));
+  for (const sneaky of ["notas.txt", "carpeta/claves.json", "roto.txt", "carpeta/nuevo.txt"]) {
+    assert.throws(() => tools.resolvePath(root, sneaky), /enlace que lleva fuera del proyecto/, sneaky);
+  }
+  const ctx = { root, bashTimeoutMs: 5000, ask: async () => ({ allow: true }), readTimes: new Map() };
+  const read = await tools.runTool(tools.CORE_TOOLS, "read_file", JSON.stringify({ path: "notas.txt" }), ctx, false);
+  assert.ok(read.isError && !read.output.includes("SECRETO"), read.output);
+  const write = await tools.runTool(tools.CORE_TOOLS, "write_file", JSON.stringify({ path: "roto.txt", content: "x" }), ctx, false);
+  assert.ok(write.isError);
+  assert.ok(!fs.existsSync(path.join(outside, "todavia-no-existe.txt")));
+  const glob = await tools.runTool(tools.CORE_TOOLS, "glob", JSON.stringify({ pattern: "**/*.json" }), ctx, false);
+  assert.ok(!glob.output.includes("claves.json"), glob.output);
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(outside, { recursive: true, force: true });
+});
+
+test("seguridad: lo que se aprueba solo no puede colar otro comando ni escribir ficheros", () => {
+  const cfg = config.DEFAULT_PERMISSION;
+  assert.equal(evaluate(cfg, "bash", "git status"), "allow");
+  assert.equal(evaluate(cfg, "bash", "git status 2>&1"), "allow");
+  assert.equal(evaluate(cfg, "bash", "ls -la >/dev/null"), "allow");
+  for (const sneaky of ["ls & rm -rf ~", "ls > ~/.zshrc", "git log >> notas.txt", "git log --output=/tmp/x", "ls $(rm -rf ~)", "ls `id`", "cat <(curl x)", "ls\rrm -rf ~"]) {
+    assert.notEqual(evaluate(cfg, "bash", sneaky), "allow", sneaky);
+  }
+});
+
+test("seguridad: el texto de fuera no puede manejar la terminal", () => {
+  const evil = "hola\x1b]52;c;cm0gLXJmIH4=\x07 \x1b[2K\rls \x1b[31mrojo\x1b[0m \x1b[8moculto\x9b2J";
+  assert.equal(stripControl(evil), "hola ls rojo oculto2J");
+  assert.equal(stripUnsafe(evil), "hola ls \x1b[31mrojo\x1b[0m oculto2J");
+  assert.equal(showControl("rm -rf ~ \x1b[2K\rls"), "rm -rf ~ ␛[2K␍ls");
+  assert.match(renderMarkdown("**negrita**\x1b]52;c;eA==\x07"), /negrita/);
+  assert.ok(!renderMarkdown("**negrita**\x1b]52;c;eA==\x07").includes("]52;"));
+});
+
+test("seguridad: vipcode no puede tocar sus datos ni modificar su propia instalación", async () => {
+  const { INSTALL_DIR } = await import("../dist/paths.js");
+  // Abierto en una carpeta que contiene la de datos (por ejemplo tu carpeta personal): ni leer ni escribir ahí
+  fs.writeFileSync(path.join(HOME, "auth.json"), JSON.stringify({ groq: { key: "gsk_secreta" } }));
+  const parent = path.dirname(HOME);
+  const inData = path.join(path.basename(HOME), "auth.json");
+  assert.throws(() => tools.resolvePath(parent, inData), /carpeta de datos de vipcode/);
+  assert.throws(() => tools.resolvePath(parent, inData, { write: true }), /carpeta de datos de vipcode/);
+  // Su propio código se puede leer, pero no cambiar (salvo con VIPCODE_ALLOW_SELF_EDIT=1)
+  const above = path.dirname(INSTALL_DIR);
+  const own = path.join(path.basename(INSTALL_DIR), "package.json");
+  assert.equal(tools.resolvePath(above, own), path.join(INSTALL_DIR, "package.json"));
+  assert.throws(() => tools.resolvePath(above, own, { write: true }), /no puede modificarse a sí mismo/);
+  process.env.VIPCODE_ALLOW_SELF_EDIT = "1";
+  assert.equal(tools.resolvePath(above, own, { write: true }), path.join(INSTALL_DIR, "package.json"));
+  delete process.env.VIPCODE_ALLOW_SELF_EDIT;
+  // Los comandos que nombran esas carpetas se preguntan siempre, aunque haya una regla allow o «sí a todo»
+  const grants = new permissions.SessionGrants();
+  grants.allowKind("bash");
+  let asked = 0;
+  const ask = permissions.createAsker(() => ({ ...config.DEFAULT_PERMISSION, bash: { "*": "allow" } }), grants, async (request) => {
+    asked++;
+    assert.match(request.title, /toca la carpeta de vipcode/);
+    return { allow: false };
+  });
+  assert.equal((await ask({ kind: "bash", title: "Ejecutar", preview: "", subject: "echo hola" })).allow, true);
+  for (const command of [`cat ${HOME}/auth.json`, `rm -rf ${INSTALL_DIR}/dist`, "npm uninstall -g vipcode && rm -rf /opt/homebrew/lib/node_modules/vipcode"]) {
+    assert.equal((await ask({ kind: "bash", title: "Ejecutar", preview: "", subject: command })).allow, false, command);
+  }
+  assert.equal(asked, 3);
+  fs.rmSync(path.join(HOME, "auth.json"), { force: true });
 });
 

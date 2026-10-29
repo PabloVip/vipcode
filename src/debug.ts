@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { DEBUG_LOG_PATH, HOME_DIR } from "./paths.js";
+import { DEBUG_LOG_PATH, ensureHomeDir } from "./paths.js";
 
 // Con VIPCODE_DEBUG=1 se apunta en ~/.vipcode/debug.log lo que pasa por dentro (peticiones, errores…)
 const enabled = process.env.VIPCODE_DEBUG === "1" || process.env.VIPCODE_DEBUG === "true";
@@ -24,7 +24,7 @@ export function debugLog(...parts: unknown[]) {
     })
     .join(" ");
   try {
-    fs.mkdirSync(HOME_DIR, { recursive: true });
+    ensureHomeDir();
     fs.appendFileSync(DEBUG_LOG_PATH, `[${new Date().toISOString()}] ${text}\n`);
   } catch {
     // no es grave si no se puede escribir el log

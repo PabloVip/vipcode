@@ -4,6 +4,7 @@ import type { Config } from "./config.js";
 import { readMarkdownDir } from "./frontmatter.js";
 import { GLOBAL_COMMANDS_DIR } from "./paths.js";
 import { truncate } from "./tools.js";
+import { isProjectFile, projectTrust } from "./trust.js";
 
 // Comando personalizado: un mensaje plantilla que se lanza con /nombre
 export interface CommandDefinition {
@@ -16,6 +17,8 @@ export interface CommandDefinition {
   subtask: boolean;
   builtIn: boolean;
   source?: string;
+  // false en los comandos de una carpeta en la que no confías: sus !`órdenes` no se ejecutan
+  allowShell?: boolean;
 }
 
 const INIT_TEMPLATE = `Analiza este proyecto y crea (o mejora, si ya existe) el fichero AGENTS.md en la raíz, con las instrucciones que necesitaría otro agente de programación para trabajar aquí sin perder tiempo.
@@ -43,7 +46,7 @@ const BUILTIN: CommandDefinition[] = [
 ];
 
 // Comandos integrados + ~/.vipcode/commands + .vipcode/commands y .opencode/command(s) del proyecto + "commands" del config
-export function loadCommands(root: string, config: Config): CommandDefinition[] {
+export function loadCommands(root: string, config: Config, trusted = projectTrust(root).trusted): CommandDefinition[] {
   const commands = new Map<string, CommandDefinition>();
   for (const command of BUILTIN) {
     commands.set(command.name, { ...command });
@@ -65,6 +68,7 @@ export function loadCommands(root: string, config: Config): CommandDefinition[] 
       subtask: Boolean(data.subtask),
       builtIn: false,
       source: entry.file,
+      allowShell: trusted || !isProjectFile(root, entry.file),
     });
   }
   for (const [name, input] of Object.entries(config.commands || {})) {
@@ -133,7 +137,7 @@ export async function expandCommand(command: CommandDefinition, args: string, ro
   const shellPattern = /!`([^`]+)`/g;
   const commands = [...text.matchAll(shellPattern)];
   for (const match of commands) {
-    const output = await runShell(match[1], root);
+    const output = command.allowShell === false ? "(no ejecutado: esta carpeta no es de confianza; usa «vipcode trust»)" : await runShell(match[1], root);
     text = text.replace(match[0], () => output);
   }
   return text.trim();

@@ -3,24 +3,26 @@ import pc from "picocolors";
 import type { AgentEvents } from "./agent.js";
 import type { UiAdapter } from "./app.js";
 import { type PermissionReply, type PermissionRequest, type SessionGrants, suggestPattern } from "./permissions.js";
+import { showControl, stripControl, stripUnsafe } from "./sanitize.js";
 import { formatTodos } from "./tools.js";
 
 export const ui = {
   text(chunk: string) {
     process.stdout.write(chunk);
   },
+  // Los mensajes pueden llevar texto de los proveedores o del modelo: sin secuencias de la terminal
   info(message: string) {
-    console.log(pc.dim(message));
+    console.log(pc.dim(stripUnsafe(message)));
   },
   notice(message: string) {
-    console.log(pc.yellow(`⚠ ${message}`));
+    console.log(pc.yellow(`⚠ ${stripUnsafe(message)}`));
   },
   error(message: string) {
-    console.log(pc.red(`✖ ${message}`));
+    console.log(pc.red(`✖ ${stripUnsafe(message)}`));
   },
   tool(name: string, summary: string, depth = 0) {
     const indent = depth > 0 ? "      " : "  ";
-    console.log(pc.cyan(`${indent}● ${name}`) + pc.dim(` ${summary}`));
+    console.log(pc.cyan(`${indent}● ${showControl(name)}`) + pc.dim(` ${showControl(summary)}`));
   },
   banner(agent: string, slots: number) {
     console.log(pc.bold(pc.magenta("vipcode")) + pc.dim(` · agente ${agent} · ${slots} modelos · /help para ayuda`));
@@ -36,9 +38,10 @@ export const ui = {
   },
 };
 
-// Líneas quitadas en rojo, añadidas en verde, cabeceras @@ en cian y el contexto atenuado
+// Líneas quitadas en rojo, añadidas en verde, cabeceras @@ en cian y el contexto atenuado.
+// Es lo que apruebas: los caracteres de control se ven (␛) en vez de actuar
 export function colorPreview(preview: string): string {
-  return preview
+  return showControl(preview)
     .split("\n")
     .map((line) => {
       if (line.startsWith("+ ")) {
@@ -82,7 +85,7 @@ export function plainEvents(options: { showReasoning: boolean }): AgentEvents {
         return;
       }
       flushReasoning();
-      process.stdout.write(chunk);
+      process.stdout.write(stripControl(chunk));
     },
     onTextEnd: (depth) => {
       if (depth === 0) {
@@ -99,7 +102,7 @@ export function plainEvents(options: { showReasoning: boolean }): AgentEvents {
           process.stdout.write(pc.dim("  💭 "));
           reasoningShown = true;
         }
-        const piece = chunk.replace(/\s+/g, " ").slice(0, 240 - reasoning.length);
+        const piece = stripControl(chunk).replace(/\s+/g, " ").slice(0, 240 - reasoning.length);
         reasoning += piece;
         process.stdout.write(pc.dim(piece));
         if (reasoning.length >= 240) {
@@ -114,7 +117,7 @@ export function plainEvents(options: { showReasoning: boolean }): AgentEvents {
     onToolEnd: (event) => {
       const pad = event.depth > 0 ? "        " : "    ";
       if (event.isError) {
-        console.log(pc.red(`${pad}${event.output.split("\n")[0].slice(0, 200)}`));
+        console.log(pc.red(`${pad}${stripControl(event.output.split("\n")[0]).slice(0, 200)}`));
       } else if (event.display && event.depth === 0) {
         console.log(indent(colorPreview(event.display), pad));
       }
@@ -136,7 +139,7 @@ export function plainPermissionPrompt(getReadline: () => Interface | null, grant
       return { allow: false, feedback: "no hay nadie para aprobarlo (usa --yolo o ajusta los permisos)" };
     }
     console.log("");
-    console.log(pc.bold(pc.yellow(`? ${request.title}`)));
+    console.log(pc.bold(pc.yellow(`? ${showControl(request.title)}`)));
     console.log(colorPreview(request.preview));
     let options = "[s]í / [n]o / [t]odo en esta sesión / [e] no y explicar";
     let pattern = "";
@@ -183,5 +186,5 @@ export const plainAdapter: UiAdapter = {
   info: (text) => ui.info(text),
   notice: (text) => ui.notice(text),
   error: (text) => ui.error(text),
-  block: (text) => console.log(text),
+  block: (text) => console.log(stripUnsafe(text)),
 };

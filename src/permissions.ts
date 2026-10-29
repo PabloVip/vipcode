@@ -1,5 +1,8 @@
+import os from "node:os";
+import path from "node:path";
 import { type PermissionAction, type PermissionConfig, deepMerge } from "./config.js";
 import { wildcardMatch } from "./match.js";
+import { HOME_DIR, INSTALL_DIR } from "./paths.js";
 
 // Tipo de acción con riesgo; "web" y "none" no modifican nada, así que valen en modo plan
 export type Permission = "none" | "write" | "bash" | "web" | "mcp";
@@ -52,9 +55,14 @@ export function matchRules(
 }
 
 // Parte "a && b | c; d" en comandos sueltos para que "git status && rm -rf x" no pase como "git status"
+// Redirecciones que no escriben ficheros (2>&1, >/dev/null): no cuentan como separadores ni como escritura
+const HARMLESS_REDIRECTS = /\d*>&\d+|&>\s*\/dev\/null|\d*>>?\s*\/dev\/null/g;
+
 export function splitCommand(command: string): string[] {
+  // Un & suelto (segundo plano) también separa: «ls & rm -rf ~» son dos comandos
   return command
-    .split(/&&|\|\||;|\||\n/)
+    .replace(HARMLESS_REDIRECTS, " ")
+    .split(/&&|\|\||;|\||\n|&/)
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
 }
@@ -81,7 +89,10 @@ export function evaluate(config: PermissionConfig, kind: Permission, subject: st
     result = strictest(result, matchRules(config.bash, part, "ask"));
   }
   // Una sustitución $(...) o `...` puede esconder cualquier cosa
-  if (/\$\(|`/.test(subject)) {
+  // Sustituciones, escribir en ficheros (> o --output) y saltos de línea raros siempre se preguntan,
+  // aunque el comando esté permitido (si no, «ls > ~/.zshrc» pasaría por «ls*»)
+  const writes = /[<>]\(|>/.test(subject.replace(HARMLESS_REDIRECTS, " ")) || /--output\b|\r/.test(subject);
+  if (/\$\(|`/.test(subject) || writes) {
     result = strictest(result, "ask");
   }
   return result;
@@ -139,6 +150,18 @@ export class SessionGrants {
 }
 
 // Decide si una acción se permite sola, se bloquea o hay que preguntar
+// Un comando que nombra la carpeta de datos de vipcode o su instalación (para leer tus claves, cambiar la
+// configuración o tocar su propio código) se pregunta siempre: no vale ninguna regla allow ni «sí a todo»
+export function touchesVipcode(command: string): boolean {
+  const home = os.homedir();
+  const names = [HOME_DIR, INSTALL_DIR, "lib/node_modules/vipcode"];
+  if (HOME_DIR.startsWith(home + path.sep)) {
+    const inHome = HOME_DIR.slice(home.length + 1);
+    names.push(`~/${inHome}`, `$HOME/${inHome}`, `\${HOME}/${inHome}`);
+  }
+  return names.some((name) => command.includes(name));
+}
+
 export function createAsker(
   getConfig: () => PermissionConfig,
   grants: SessionGrants,
@@ -148,6 +171,9 @@ export function createAsker(
     const action = evaluate(getConfig(), request.kind, request.subject);
     if (action === "deny") {
       return { allow: false, feedback: "bloqueado por la configuración de permisos (deny)" };
+    }
+    if (request.kind === "bash" && touchesVipcode(request.subject)) {
+      return prompt({ ...request, title: `${request.title} (toca la carpeta de vipcode)` });
     }
     if (action === "allow" || grants.allows(request.kind, request.subject)) {
       return { allow: true };

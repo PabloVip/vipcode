@@ -3,7 +3,7 @@ import { type Credentials, readAuth, resolveCredentials } from "./auth.js";
 import { CATALOG, RETIRED_PROVIDERS } from "./catalog.js";
 import { type Config, type ModelConfig, type ProviderConfig, configNotices, isAnonymous, mergeProvider } from "./config.js";
 import { debugLog } from "./debug.js";
-import { HOME_DIR, MODELS_CACHE_PATH } from "./paths.js";
+import { MODELS_CACHE_PATH, ensureHomeDir } from "./paths.js";
 
 // Modelos descubiertos en cada proveedor, guardados en ~/.vipcode/models.json
 export interface DiscoveryCache {
@@ -34,7 +34,7 @@ export function readDiscovery(): DiscoveryCache {
 
 function writeDiscovery(cache: DiscoveryCache) {
   try {
-    fs.mkdirSync(HOME_DIR, { recursive: true });
+    ensureHomeDir();
     fs.writeFileSync(MODELS_CACHE_PATH, JSON.stringify(cache, null, 2));
   } catch {
     // no es grave si no se puede guardar

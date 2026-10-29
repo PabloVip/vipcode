@@ -6,12 +6,12 @@ import { type AgentDefinition, loadAgents, primaryAgents, subagents } from "./ag
 import { envNames, maskKey, readAuth, removeAuth, resolveCredentials, saveAuth, urlVars } from "./auth.js";
 import { CATALOG } from "./catalog.js";
 import { type CommandDefinition, expandCommand, loadCommands } from "./commands.js";
-import { CONFIG_PATH, type Config, type ModelConfig, type ProviderConfig, isAnonymous, loadConfig, setGlobalConfigValue } from "./config.js";
+import { CONFIG_PATH, type Config, type ModelConfig, type ProviderConfig, configNotices, isAnonymous, loadConfig, setGlobalConfigValue } from "./config.js";
 import { type RefreshSummary, buildProviders, detectLocal, refreshModels } from "./discovery.js";
 import { isRemoteSession, loginOpenRouter, openBrowser } from "./login.js";
 import { LspManager } from "./lsp.js";
 import { McpManager } from "./mcp.js";
-import { AUTH_PATH, HOME_DIR, NOTICES_PATH, STATE_PATH } from "./paths.js";
+import { AUTH_PATH, HOME_DIR, NOTICES_PATH, STATE_PATH, ensureHomeDir } from "./paths.js";
 import { type PermissionReply, type PermissionRequest, SessionGrants, createAsker, permissionsFor } from "./permissions.js";
 import { Ranking, loadRankingData, rankingKey, refreshRanking } from "./ranking.js";
 import { Router } from "./router.js";
@@ -20,6 +20,7 @@ import { type Session, deleteSession, listSessions, newSession, saveExport, save
 import { Snapshots } from "./snapshot.js";
 import { updateVipcode } from "./update.js";
 import { formatTodos, truncate } from "./tools.js";
+import { type ProjectTrust, projectTrust } from "./trust.js";
 
 export interface SelectItem<T> {
   label: string;
@@ -148,6 +149,9 @@ export class App {
   agents: AgentDefinition[];
   commands: CommandDefinition[];
   skills: SkillDefinition[];
+  // Configuración que trae el proyecto y si la estamos usando (solo si confías en la carpeta)
+  trust: ProjectTrust;
+  trusted: boolean;
   lsp: LspManager | null;
   mcp: McpManager | null;
   snapshots: Snapshots;
@@ -164,17 +168,25 @@ export class App {
 
   constructor(
     readonly root: string,
-    options: { session?: Session; agentName?: string } = {},
+    options: { session?: Session; agentName?: string; trusted?: boolean } = {},
   ) {
-    this.config = loadConfig(root);
+    this.trust = projectTrust(root);
+    this.trusted = options.trusted ?? this.trust.trusted;
+    if (!this.trusted) {
+      const notice = `Esta carpeta trae configuración de vipcode que no estoy usando (${this.trust.files.join(", ")}): puede arrancar programas o cambiar a dónde van tus claves. Si confías en ella, ejecuta «vipcode trust».`;
+      if (!configNotices.includes(notice)) {
+        configNotices.push(notice);
+      }
+    }
+    this.config = loadConfig(root, { trusted: this.trusted });
     this.providers = buildProviders(this.config);
     this.ranking = this.buildRanking();
     this.router = new Router(this.config, this.providers, this.ranking);
     if (this.config.model) {
       this.router.pinned = this.config.model;
     }
-    this.agents = loadAgents(root, this.config);
-    this.commands = loadCommands(root, this.config);
+    this.agents = loadAgents(root, this.config, this.trusted);
+    this.commands = loadCommands(root, this.config, this.trusted);
     this.skills = loadSkills(root, this.config);
     this.lsp = new LspManager(root, this.config);
     if (!this.lsp.enabled()) {
@@ -252,7 +264,7 @@ export class App {
       // primera vez
     }
     data.privacy = new Date().toISOString();
-    fs.mkdirSync(HOME_DIR, { recursive: true });
+    ensureHomeDir();
     fs.writeFileSync(NOTICES_PATH, JSON.stringify(data, null, 2));
   }
 

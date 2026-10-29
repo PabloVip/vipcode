@@ -23,7 +23,7 @@
     "url": "git+https://github.com/PabloVip/vipcode.git"
   },
   "license": "MIT",
-  "author": "Pablo Vicente (https://github.com/PabloVip)",
+  "author": "Pablo Vicente Juan (https://github.com/PabloVip)",
   "type": "module",
   "bin": {
     "vipcode": "dist/index.js"

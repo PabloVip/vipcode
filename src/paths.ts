@@ -1,5 +1,7 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Carpeta de datos de vipcode (VIPCODE_HOME permite usar otra, por ejemplo en pruebas)
 export const HOME_DIR = process.env.VIPCODE_HOME || path.join(os.homedir(), ".vipcode");
@@ -16,6 +18,8 @@ export const HISTORY_PATH = path.join(HOME_DIR, "history.jsonl");
 export const NOTICES_PATH = path.join(HOME_DIR, "notices.json");
 // Última comprobación de versiones nuevas en GitHub
 export const UPDATE_PATH = path.join(HOME_DIR, "update.json");
+// Carpetas en las que confías para usar la configuración que traen
+export const TRUST_PATH = path.join(HOME_DIR, "trusted.json");
 export const SESSIONS_DIR = path.join(HOME_DIR, "sessions");
 export const SNAPSHOTS_DIR = path.join(HOME_DIR, "snapshots");
 export const EXPORTS_DIR = path.join(HOME_DIR, "exports");
@@ -26,3 +30,28 @@ export const GLOBAL_SKILLS_DIR = path.join(HOME_DIR, "skills");
 // Instrucciones que se aplican a todos tus proyectos
 export const GLOBAL_INSTRUCTIONS_PATH = path.join(HOME_DIR, "AGENTS.md");
 export const DEBUG_LOG_PATH = path.join(HOME_DIR, "debug.log");
+
+// La carpeta de datos guarda claves y conversaciones: solo la puede abrir tu usuario
+export function ensureHomeDir() {
+  fs.mkdirSync(HOME_DIR, { recursive: true, mode: 0o700 });
+  try {
+    fs.chmodSync(HOME_DIR, 0o700);
+  } catch {
+    // en Windows o en carpetas que no son tuyas no se puede: no pasa nada
+  }
+}
+
+// Carpeta donde está instalado vipcode (la que contiene dist/)
+export const INSTALL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+// Lo que el agente no puede tocar: los datos de vipcode (claves, configuración, carpetas de confianza) ni leerlos,
+// y su propio código no modificarlo. Quien desarrolle vipcode con vipcode puede permitir lo segundo con
+// VIPCODE_ALLOW_SELF_EDIT=1.
+export function protectedDirs(): { dir: string; read: boolean }[] {
+  const dirs = [{ dir: HOME_DIR, read: true }];
+  if (process.env.VIPCODE_ALLOW_SELF_EDIT !== "1") {
+    dirs.push({ dir: INSTALL_DIR, read: false });
+  }
+  return dirs;
+}
+

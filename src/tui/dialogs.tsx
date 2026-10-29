@@ -2,6 +2,7 @@ import { Box, Text, useInput, usePaste } from "ink";
 import React, { useMemo, useState } from "react";
 import type { SelectItem } from "../app.js";
 import { type PermissionReply, type PermissionRequest, suggestPattern } from "../permissions.js";
+import { showControl, stripControl } from "../sanitize.js";
 import { colorPreview } from "../ui.js";
 import { type EditorState, EMPTY, backspace, deleteWordBack, insert, moveLeft, moveRight, splitEnter } from "./editor.js";
 
@@ -99,7 +100,7 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
       <Text bold color="yellow">
-        ? {request.title}
+        ? {showControl(request.title)}
         {props.agent !== "build" ? <Text dimColor> ({props.agent})</Text> : null}
       </Text>
       <Box marginY={1} flexDirection="column">
@@ -197,8 +198,8 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
         return (
           <Text key={`${start + index}-${item.label}`} color={active ? "cyan" : undefined} wrap="truncate-end">
             {active ? "❯ " : "  "}
-            {item.label}
-            {item.description ? <Text dimColor> {item.description}</Text> : null}
+            {stripControl(item.label)}
+            {item.description ? <Text dimColor> {stripControl(item.description)}</Text> : null}
           </Text>
         );
       })}

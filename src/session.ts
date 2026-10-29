@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import { EXPORTS_DIR, HISTORY_PATH, HOME_DIR, SESSIONS_DIR } from "./paths.js";
+import { EXPORTS_DIR, HISTORY_PATH, SESSIONS_DIR, ensureHomeDir } from "./paths.js";
 import type { Todo } from "./tools.js";
 
 // Un mensaje tuyo y todo lo que hizo el agente después (para /undo y /redo)
@@ -239,7 +239,7 @@ export function appendHistory(text: string) {
     return;
   }
   try {
-    fs.mkdirSync(HOME_DIR, { recursive: true });
+    ensureHomeDir();
     fs.appendFileSync(HISTORY_PATH, `${JSON.stringify(text)}\n`);
     // De vez en cuando lo recortamos para que no crezca sin fin
     const stat = fs.statSync(HISTORY_PATH);

@@ -314,7 +314,8 @@ export function installSkills(source: string, root: string, options: { project?:
         throw new Error(`No encuentro ${source}: pon la ruta de una carpeta con SKILL.md o la dirección de un repositorio git.`);
       }
       temp = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-skill-"));
-      const args = ["clone", "--depth", "1", ...(git.ref ? ["--branch", git.ref] : []), git.url, temp];
+      // Con «--» un origen que empiece por - no se toma como una opción de git (por ejemplo --upload-pack)
+      const args = ["clone", "--depth", "1", ...(git.ref ? [`--branch=${git.ref}`] : []), "--", git.url, temp];
       const clone = spawnSync("git", args, { encoding: "utf8", timeout: 120000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
       if (clone.error || clone.status !== 0) {
         throw new Error(`No he podido descargar ${git.url}: ${(clone.stderr || clone.error?.message || "").trim().split("\n").pop()}`);

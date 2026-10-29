@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { readAuth } from "./auth.js";
 import { debugLog } from "./debug.js";
-import { HOME_DIR, RANKING_PATH } from "./paths.js";
+import { RANKING_PATH, ensureHomeDir } from "./paths.js";
 
 // Ranking de modelos con los datos de LLM Stats (https://llm-stats.com).
 // vipcode no trae sus datos: sus condiciones no permiten redistribuirlos, así que cada usuario
@@ -261,7 +261,7 @@ export async function refreshRanking(apiKey: string, signal?: AbortSignal): Prom
     throw new Error("la API no devolvió puntuaciones que vipcode sepa leer");
   }
   const data: RankingData = { updated: new Date().toISOString().slice(0, 10), source: "https://llm-stats.com (API)", models: rated };
-  fs.mkdirSync(HOME_DIR, { recursive: true });
+  ensureHomeDir();
   fs.writeFileSync(RANKING_PATH, JSON.stringify(data));
   debugLog("ranking actualizado", rated.length);
   return { count: rated.length };

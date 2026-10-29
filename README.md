@@ -5,11 +5,12 @@
 Agente de programación para la terminal (comando `vipcode`), al estilo de opencode, que solo usa **modelos gratuitos** y **rota automáticamente** entre proveedores cuando uno se agota.
 
 - **Funciona nada más instalarlo, sin claves ni registro**: usa los proveedores que permiten el acceso anónimo (Kilo Gateway, OVHcloud, LLM7 y Pollinations).
-- Si quieres más límites y mejores modelos, añade claves gratuitas de los más de 20 proveedores incluidos (Gemini, NVIDIA, Mistral, Cerebras, OpenRouter, Groq, Z.ai…). Los modelos gratis nuevos se descubren solos.
+- Si quieres más límites y mejores modelos, añade claves gratuitas de los más de 20 proveedores incluidos (Gemini, NVIDIA, Mistral, Cerebras, OpenRouter, Groq, Z.ai…); con OpenRouter basta con iniciar sesión en el navegador. Los modelos gratis nuevos se descubren solos.
 - Con una clave gratis de [LLM Stats](https://llm-stats.com), **usa primero los mejores modelos** según su ranking.
-- Interfaz en la terminal con Markdown y código coloreado, diffs, diálogos de permiso, autocompletado de `@ficheros` y `/comandos`, historial y barra de estado.
-- Herramientas: leer, escribir y editar ficheros, `list_dir`, `glob`, `grep`, `bash`, `webfetch`, `websearch`, lista de tareas, subagentes, diagnósticos LSP y herramientas MCP.
-- `/undo` y `/redo` con instantáneas de git (deshacen también lo que haya cambiado `bash`), sesiones guardadas, resumen automático del contexto, imágenes, agentes y comandos propios.
+- Interfaz en la terminal con Markdown y código coloreado, diffs, diálogos de permiso, autocompletado de `@ficheros` y `/comandos`, paleta de comandos (Ctrl+P), `!comandos`, historial y barra de estado.
+- Herramientas: leer, escribir y editar ficheros, `list_dir`, `glob`, `grep`, `bash`, `webfetch`, `websearch`, lista de tareas, subagentes, diagnósticos LSP, herramientas MCP y [skills](#skills).
+- `/undo` y `/redo` con instantáneas de git (deshacen también lo que haya cambiado `bash`), sesiones guardadas, resumen automático del contexto, imágenes, agentes y comandos propios, y `/update` para actualizarlo.
+- **Seguro por defecto**: pregunta antes de editar, ejecutar o salir a internet, no sale de la carpeta del proyecto y no usa la configuración que traiga un proyecto hasta que confías en él (ver [Seguridad](#seguridad)).
 
 ## Instalación
 
@@ -107,6 +108,7 @@ vipcode run "tarea" --yolo   # hace la tarea sin interfaz y termina
 vipcode --plan               # empieza en modo solo lectura
 vipcode run "/review"        # también acepta comandos y skills: vipcode run "/mi-skill tarea"
 vipcode update               # actualiza vipcode
+vipcode trust                # confiar en la configuración que trae esta carpeta (vipcode untrust lo deshace)
 ```
 
 ### Actualizar
@@ -198,7 +200,7 @@ Una vez al día (o con `/models refresh`, o `vipcode models refresh` desde la te
 ## Configuración
 
 - Global: `~/.vipcode/config.json` (se crea la primera vez).
-- Por proyecto: `vipcode.json` o `.vipcode/config.json` en la carpeta del proyecto (se mezcla con la global).
+- Por proyecto: `vipcode.json` o `.vipcode/config.json` en la carpeta del proyecto (se mezcla con la global). Solo se usa si confías en la carpeta: ver [Seguridad](#seguridad).
 
 ```json
 {
@@ -250,7 +252,7 @@ Una vez al día (o con `/models refresh`, o `vipcode models refresh` desde la te
 - **ranking**: `enabled: false` vuelve al orden del catálogo; `metric: "general"` ordena por el índice general de LLM Stats en vez de por programación; `anonymousLast: true` pone los anónimos (sin clave) detrás de los que tienen clave aunque tengan mejor nota.
 - **providers**: si el nombre coincide con uno del catálogo, solo cambia lo que pongas (los modelos se añaden o se sobrescriben por id; con `"replaceModels": true` se usan solo los tuyos). Si es nuevo, es un proveedor propio compatible con la API de OpenAI y va el primero en la rotación. Admite `apiKeyEnv`, `apiKey`, `headers`, `noKey`, `discover: "openai"` para descubrir sus modelos, y en cada modelo `context`, `vision` y `disabled`.
 - **order**: patrones `proveedor/modelo` que van primero. **model**: modelo fijado al arrancar.
-- **permission**: `allow`, `ask` o `deny`. En `bash` y `mcp` gana el patrón más concreto, y los comandos encadenados (`&&`, `|`, `;`) se comprueban por separado. Las reglas `deny` se respetan incluso con `--yolo`.
+- **permission**: `allow`, `ask` o `deny`. En `bash` y `mcp` gana el patrón más concreto, y los comandos encadenados (`&&`, `&`, `|`, `;`, saltos de línea) se comprueban por separado. Aunque un comando esté permitido, se pregunta siempre si escribe en un fichero (`>`, `--output`) o lleva `$(…)` o comillas invertidas. Las reglas `deny` se respetan incluso con `--yolo`.
 - **mcp**: servidores locales (`command`) o remotos (`url`, con HTTP o SSE). Sus herramientas aparecen como `servidor_herramienta`. En modo plan solo se usan las marcadas como de solo lectura.
 - **lsp**: `false` desactiva los diagnósticos; `"id": false` desactiva un servidor concreto.
 
@@ -286,6 +288,8 @@ Arréglalos. Céntrate en $ARGUMENTS.
 ```
 
 `$ARGUMENTS` es todo lo que escribes detrás del comando, `$1`…`$9` cada palabra (respetando comillas), y `` !`comando` `` se sustituye por su salida. Con `subtask: true` el comando se ejecuta como subagente y no llena la conversación.
+
+Los agentes y comandos que traiga un proyecto se cargan siempre, pero hasta que confías en la carpeta un agente del proyecto no puede cambiar sus permisos (`permission`, `readOnly`) y los `` !`comando` `` de sus comandos no se ejecutan.
 
 ### Skills
 
@@ -335,6 +339,19 @@ vipcode lee `AGENTS.md` (o `CLAUDE.md`, o `.vipcode.md`) de la raíz del proyect
 
 Después de cada edición, vipcode pregunta al servidor de lenguaje si hay errores y se los pasa al modelo. Para TypeScript y JavaScript no hace falta instalar nada: usa el servidor que trae TypeScript 7. Para otros lenguajes usa el servidor si lo tienes instalado: pyright o basedpyright, pylsp, gopls, rust-analyzer, clangd, intelephense o phpactor, ruby-lsp, bash-language-server, yaml-language-server, los de VS Code para CSS, HTML y JSON, lua-language-server, zls, dart, csharp-ls, sourcekit-lsp, kotlin-language-server y svelte.
 
+## Seguridad
+
+vipcode ejecuta lo que le pide un modelo de IA, así que está hecho para que nada importante pase sin que lo veas:
+
+- **Permisos.** Antes de editar un fichero, ejecutar un comando, salir a internet o usar una herramienta MCP, pregunta enseñando el diff o el comando. De serie solo se aprueban solos unos pocos comandos que no cambian nada (`git status`, `git diff`, `git log`, `git show`, `ls`, `pwd`), y ni siquiera esos si llevan otro comando detrás (`&`, `;`, `&&`, `|`), escriben en un fichero (`>`, `--output`) o llevan `$(…)`. Con `--yolo` o `/yolo` se aprueba todo menos lo que tengas en `deny`: úsalo solo en carpetas sin nada que perder.
+- **Carpetas en las que confías.** Un proyecto puede traer su propia configuración de vipcode (`vipcode.json`, `.vipcode/config.json`, agentes con permisos propios, comandos con `` !`órdenes` ``). Como eso podría arrancar programas, mandar tus claves a otro servidor o quitar las preguntas de permiso, vipcode no lo usa hasta que confías en la carpeta. Al abrirlo te enseña qué cambiaría y te pregunta; con `vipcode run` solo avisa. Si la configuración cambia después (por ejemplo tras un `git pull`), vuelve a preguntar. `vipcode trust` y `vipcode untrust` lo cambian a mano.
+- **Ficheros.** Las herramientas solo leen y escriben dentro de la carpeta del proyecto. Un enlace simbólico que lleve fuera (por ejemplo a `~/.ssh` o a tus claves) se rechaza.
+- **vipcode no puede tocarse a sí mismo.** Aunque lo abras en una carpeta que las contenga (por ejemplo tu carpeta personal), el agente no puede leer ni cambiar `~/.vipcode` (tus claves, tu configuración y las carpetas en las que confías) ni modificar la carpeta donde está instalado vipcode, así que tampoco puede desactivar estas protecciones. Los comandos que nombran esas carpetas se preguntan siempre, aunque tengas una regla `allow` o hayas dicho «sí a todo», y con `--yolo` sin nadie delante se rechazan.
+- **Terminal.** Lo que escriben el modelo o las herramientas no puede manejar tu terminal (borrar líneas, cambiar el portapapeles, falsear enlaces). En los diálogos de permiso esos caracteres se ven como `␛` en vez de actuar, para que nadie pueda disfrazar un comando.
+- **Tus datos.** `~/.vipcode` solo lo puede abrir tu usuario y `auth.json` tiene permisos 600. vipcode no envía datos de uso a nadie.
+
+Si encuentras un fallo de seguridad, avísalo en privado como explica [SECURITY.md](SECURITY.md).
+
 ## Privacidad
 
 La primera vez que vipcode va a usar un proveedor que no pide clave, te lo avisa y te deja elegir entre seguir, añadir antes una clave o no usarlos nunca.
@@ -345,7 +362,7 @@ Los planes gratuitos tienen letra pequeña: los proveedores anónimos (Kilo, OVH
 
 Todo está en `~/.vipcode` (o en `VIPCODE_HOME` si la defines):
 
-- `config.json`: tu configuración. `auth.json`: claves (permisos 600). `state.json`: pausas de los proveedores. `notices.json`: avisos que ya has visto. `update.json`: última comprobación de versiones nuevas.
+- `config.json`: tu configuración. `auth.json`: claves (permisos 600). `state.json`: pausas de los proveedores. `notices.json`: avisos que ya has visto. `update.json`: última comprobación de versiones nuevas. `trusted.json`: carpetas en las que confías.
 - `models.json`: modelos descubiertos. `ranking.json`: puntuaciones de LLM Stats descargadas con tu clave. `sessions/`: conversaciones. `history.jsonl`: lo que has escrito.
 - `snapshots/`: instantáneas para `/undo` (un repositorio git aparte por proyecto; no toca tu `.git`).
 - `exports/`: conversaciones exportadas. `agents/`, `commands/` y `skills/`: tus agentes, comandos y skills globales.
@@ -357,6 +374,8 @@ npm run build       # compila a dist/
 npm test            # compila y pasa las pruebas (servidor de IA simulado, sin claves ni internet)
 VIPCODE_DEBUG=1 vipcode # apunta los detalles internos en ~/.vipcode/debug.log
 ```
+
+vipcode no se deja modificar a sí mismo. Si quieres trabajar en su código con un vipcode instalado desde esa misma carpeta (`npm link`), arráncalo con `VIPCODE_ALLOW_SELF_EDIT=1 vipcode`; o usa el instalado con npm para trabajar en tu copia del código.
 
 ### Publicar una versión
 
@@ -378,6 +397,6 @@ Sube el número en `package.json`, pasa las pruebas, crea el commit y la etiquet
 
 ## Licencia
 
-[MIT](LICENSE).
+[MIT](LICENSE) © Pablo Vicente Juan.
 
 vipcode no envía datos de uso a nadie. Solo se conecta a los proveedores de IA que uses, a las webs que consulte el agente con `webfetch` y `websearch`, a tus servidores MCP, a npm y a GitHub una vez al día para ver si hay versión nueva (`"checkUpdates": false` lo desactiva) y, si le das tu clave, a LLM Stats para descargar el ranking (datos de LLM Stats, llm-stats.com).

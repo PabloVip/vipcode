@@ -3,6 +3,7 @@ import type { AgentInput, Config, PermissionConfig } from "./config.js";
 import { readMarkdownDir } from "./frontmatter.js";
 import { wildcardMatch } from "./match.js";
 import { GLOBAL_AGENTS_DIR } from "./paths.js";
+import { isProjectFile, projectTrust } from "./trust.js";
 
 export interface AgentDefinition {
   name: string;
@@ -138,7 +139,7 @@ function fromInput(name: string, input: AgentInput, base: AgentDefinition | unde
 }
 
 // Agentes integrados + ~/.vipcode/agents + .vipcode/agents y .opencode/agent(s) del proyecto + "agents" del config
-export function loadAgents(root: string, config: Config): AgentDefinition[] {
+export function loadAgents(root: string, config: Config, trusted = projectTrust(root).trusted): AgentDefinition[] {
   const agents = new Map<string, AgentDefinition>();
   for (const agent of BUILTIN) {
     agents.set(agent.name, { ...agent, tools: { ...agent.tools } });
@@ -161,6 +162,8 @@ export function loadAgents(root: string, config: Config): AgentDefinition[] {
 
   for (const entry of readMarkdownDir(dirs)) {
     const data = entry.data as Record<string, any>;
+    // Un agente del proyecto en el que no confías no puede cambiar permisos ni dejar editar al modo plan
+    const own = trusted || !isProjectFile(root, entry.file);
     apply(
       entry.name,
       {
@@ -170,10 +173,10 @@ export function loadAgents(root: string, config: Config): AgentDefinition[] {
         model: data.model,
         temperature: data.temperature,
         tools: data.tools,
-        permission: data.permission,
+        permission: own ? data.permission : undefined,
         maxSteps: data.maxSteps ?? data.steps,
         color: data.color,
-        readOnly: data.readOnly,
+        readOnly: own ? data.readOnly : undefined,
         disable: data.disable,
       },
       entry.file,

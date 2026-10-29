@@ -5,6 +5,8 @@ import fg from "fast-glob";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { isImagePath, toDataUrl } from "./images.js";
 import type { Permission, PermissionReply, PermissionRequest } from "./permissions.js";
+import { stripControl } from "./sanitize.js";
+import { protectedDirs } from "./paths.js";
 
 export type { Permission } from "./permissions.js";
 
@@ -62,7 +64,30 @@ export function truncate(text: string, max = MAX_OUTPUT): string {
 }
 
 // Convierte una ruta relativa en absoluta y comprueba que no sale del proyecto
-export function resolvePath(root: string, p: string | undefined): string {
+// Ruta real siguiendo los enlaces simbólicos, aunque el destino (o parte de él) todavía no exista
+function realPathOf(file: string, depth = 0): string {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    // no existe (todavía) o es un enlace roto
+  }
+  if (depth < 40) {
+    try {
+      if (fs.lstatSync(file).isSymbolicLink()) {
+        return realPathOf(path.resolve(path.dirname(file), fs.readlinkSync(file)), depth + 1);
+      }
+    } catch {
+      // no existe
+    }
+  }
+  const parent = path.dirname(file);
+  if (parent === file || depth >= 40) {
+    return file;
+  }
+  return path.join(realPathOf(parent, depth + 1), path.basename(file));
+}
+
+export function resolvePath(root: string, p: string | undefined, options: { write?: boolean } = {}): string {
   let input = p;
   if (!input) {
     input = ".";
@@ -71,7 +96,36 @@ export function resolvePath(root: string, p: string | undefined): string {
   if (abs !== root && !abs.startsWith(root + path.sep)) {
     throw new Error(`La ruta ${p} está fuera del proyecto (${root})`);
   }
+  // Un enlace simbólico dentro del proyecto tampoco puede llevar fuera (por ejemplo a ~/.ssh o a tus claves)
+  const real = realPathOf(abs);
+  const realRoot = realPathOf(root);
+  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+    throw new Error(`La ruta ${p} es un enlace que lleva fuera del proyecto (${real})`);
+  }
+  // vipcode no puede tocarse a sí mismo: ni sus datos (claves, configuración) ni, para escribir, su instalación
+  for (const { dir, read } of protectedDirs()) {
+    const realDir = realPathOf(dir);
+    if ((read || options.write) && (real === realDir || real.startsWith(realDir + path.sep))) {
+      if (read) {
+        throw new Error(`La ruta ${p} está en la carpeta de datos de vipcode (${dir}), que guarda tus claves y tu configuración: no se puede leer ni cambiar desde aquí.`);
+      }
+      throw new Error(`La ruta ${p} es parte de la instalación de vipcode (${dir}): vipcode no puede modificarse a sí mismo.`);
+    }
+  }
   return abs;
+}
+
+// Patrones para que glob y grep no recorran la carpeta de datos de vipcode si está dentro del proyecto
+function protectedIgnore(root: string): string[] {
+  const realRoot = realPathOf(root);
+  const patterns: string[] = [];
+  for (const { dir, read } of protectedDirs()) {
+    const relative = path.relative(realRoot, realPathOf(dir));
+    if (read && relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
+      patterns.push(`${relative.split(path.sep).join("/")}/**`);
+    }
+  }
+  return patterns;
 }
 
 export function rel(root: string, abs: string): string {
@@ -360,7 +414,7 @@ const writeFile: Tool = {
   permission: "write",
   readOnly: false,
   async run(args, ctx) {
-    const file = resolvePath(ctx.root, args.path);
+    const file = resolvePath(ctx.root, args.path, { write: true });
     const content = String(args.content ?? "");
     const exists = fs.existsSync(file);
     let previous: string | null = null;
@@ -504,7 +558,7 @@ const editFile: Tool = {
   permission: "write",
   readOnly: false,
   async run(args, ctx) {
-    const file = resolvePath(ctx.root, args.path);
+    const file = resolvePath(ctx.root, args.path, { write: true });
     if (!fs.existsSync(file)) {
       return { output: `Error: ${args.path} no existe. Para crear un fichero usa write_file.`, isError: true };
     }
@@ -582,7 +636,7 @@ const globTool: Tool = {
   readOnly: true,
   async run(args, ctx) {
     const cwd = resolvePath(ctx.root, args.path);
-    const files = await fg(String(args.pattern), { cwd, ignore: IGNORE, dot: true, onlyFiles: true });
+    const files = await fg(String(args.pattern), { cwd, ignore: [...IGNORE, ...protectedIgnore(cwd)], dot: true, onlyFiles: true, followSymbolicLinks: false });
     if (files.length === 0) {
       return "Sin resultados.";
     }
@@ -656,6 +710,9 @@ const grepTool: Tool = {
       if (args.include) {
         rgArgs.push("-g", String(args.include));
       }
+      for (const pattern of protectedIgnore(ctx.root)) {
+        rgArgs.push("-g", `!${pattern}`);
+      }
       rgArgs.push(".");
       const found = await ripgrep(rgArgs, ctx.root, ctx.signal);
       if (found) {
@@ -687,7 +744,7 @@ const grepTool: Tool = {
     if (args.include) {
       include = String(args.include);
     }
-    const files = await fg(include, { cwd: ctx.root, ignore: IGNORE, dot: false, onlyFiles: true });
+    const files = await fg(include, { cwd: ctx.root, ignore: [...IGNORE, ...protectedIgnore(ctx.root)], dot: false, onlyFiles: true, followSymbolicLinks: false });
     const results: string[] = [];
     for (const file of files) {
       const abs = path.join(ctx.root, file);
@@ -720,6 +777,12 @@ const grepTool: Tool = {
     return results.join("\n");
   },
 };
+
+// Un .git/config con core.fsmonitor ejecutaría un programa en cada «git status» (que se aprueba solo)
+function gitSafetyEnv(): Record<string, string> {
+  const count = Number(process.env.GIT_CONFIG_COUNT) || 0;
+  return { GIT_CONFIG_COUNT: String(count + 1), [`GIT_CONFIG_KEY_${count}`]: "core.fsmonitor", [`GIT_CONFIG_VALUE_${count}`]: "false" };
+}
 
 const bashTool: Tool = {
   name: "bash",
@@ -760,7 +823,7 @@ const bashTool: Tool = {
       }
       const child = spawn(shell, shellArgs, {
         cwd: ctx.root,
-        env: { ...process.env, VIPCODE: "1", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat" },
+        env: { ...process.env, ...gitSafetyEnv(), VIPCODE: "1", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat" },
         stdio: ["ignore", "pipe", "pipe"],
         // Grupo de procesos propio para poder matar también a los hijos (npm test, servidores…)
         detached: process.platform !== "win32",
@@ -1019,7 +1082,7 @@ export function formatTodos(todos: Todo[]): string {
   if (todos.length === 0) {
     return "(lista de tareas vacía)";
   }
-  return todos.map((todo) => `${STATUS_ICON[todo.status] || "[ ]"} ${todo.content}`).join("\n");
+  return todos.map((todo) => `${STATUS_ICON[todo.status] || "[ ]"} ${stripControl(String(todo.content))}`).join("\n");
 }
 
 const todoWrite: Tool = {
@@ -1300,7 +1363,9 @@ export function projectFiles(root: string): string[] {
   }
   let files: string[] = [];
   try {
-    files = fg.sync("**/*", { cwd: root, ignore: IGNORE, dot: true, onlyFiles: false, markDirectories: true, deep: 8, suppressErrors: true }).slice(0, 20000);
+    files = fg
+      .sync("**/*", { cwd: root, ignore: [...IGNORE, ...protectedIgnore(root)], dot: true, onlyFiles: false, markDirectories: true, deep: 8, suppressErrors: true, followSymbolicLinks: false })
+      .slice(0, 20000);
   } catch {
     files = [];
   }

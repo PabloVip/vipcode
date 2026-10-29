@@ -2,15 +2,14 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { PACKAGE_NAME, REPO_URL, VERSION } from "./meta.js";
-import { HOME_DIR, UPDATE_PATH } from "./paths.js";
+import { INSTALL_DIR, UPDATE_PATH, ensureHomeDir } from "./paths.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Carpeta donde está instalado vipcode (la que contiene dist/). VIPCODE_INSTALL_ROOT permite fingir otra en las pruebas
 export function packageRoot(): string {
-  return process.env.VIPCODE_INSTALL_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  return process.env.VIPCODE_INSTALL_ROOT || INSTALL_DIR;
 }
 
 // "v0.10.1" frente a "0.9.3": positivo si a es más nueva
@@ -125,7 +124,7 @@ export async function checkForUpdate(): Promise<string | null> {
     try {
       const release = await latestRelease();
       cache = { checked: Date.now(), latest: release?.version || VERSION };
-      fs.mkdirSync(HOME_DIR, { recursive: true });
+      ensureHomeDir();
       fs.writeFileSync(UPDATE_PATH, JSON.stringify(cache, null, 2));
     } catch {
       return null;
@@ -248,6 +247,9 @@ async function updateFromRelease(root: string, log: (text: string) => void): Pro
       status: "manual",
       message: `Hay una versión nueva (${release.version}, tienes la ${VERSION}), pero este vipcode no está instalado con «npm install -g». Instálala con:\n  npm install -g ${release.spec}`,
     };
+  }
+  if (!/^[\w@.:/+~%-]+$/.test(release.spec) || release.spec.startsWith("-")) {
+    return { status: "error", message: `La última versión publicada tiene un nombre de paquete raro (${release.spec}): no la instalo.` };
   }
   log(`Instalando vipcode ${release.version} desde ${release.source}…`);
   // Desde la carpeta temporal, para que no se mezcle con la configuración de npm del proyecto en el que estás
