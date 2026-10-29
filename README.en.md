@@ -2,13 +2,13 @@
 
 [![npm](https://img.shields.io/npm/v/vipcode.svg)](https://www.npmjs.com/package/vipcode) [![Tests](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) · [Español](README.md)
 
-A coding agent for your terminal (command `vipcode`), in the style of opencode, that only uses **free AI models** and **automatically switches provider** when one runs out. The interface and messages are in Spanish.
+A coding agent for your terminal (command `vipcode`) that only uses **free AI models** and **automatically switches provider** when one runs out. The interface and messages are in Spanish.
 
 - **Works right after installing, with no keys or sign-up**: it uses providers that allow anonymous access (Kilo Gateway, OVHcloud, LLM7 and Pollinations).
 - For higher limits and better models, add free keys from the 20+ included providers (Gemini, NVIDIA, Mistral, Cerebras, OpenRouter, Groq, Z.ai…). With OpenRouter you just sign in through the browser: `vipcode auth login openrouter`.
 - With a free [LLM Stats](https://llm-stats.com) key, the best models are tried first according to their ranking.
 - Terminal UI with Markdown, syntax highlighting, diffs, permission prompts, `@file` and `/command` completion, a command palette (Ctrl+P) and `!command` to run shell commands.
-- Tools: read, write and edit files, `list_dir`, `glob`, `grep`, `bash`, `webfetch`, `websearch`, todo list, subagents, LSP diagnostics, MCP tools and **skills** (the open Agent Skills format used by Claude Code and opencode).
+- Tools: read, write and edit files, `list_dir`, `glob`, `grep`, `bash`, `webfetch`, `websearch`, todo list, subagents, LSP diagnostics, MCP tools and **skills** (the open Agent Skills format used by many coding agents).
 - `/undo` and `/redo` backed by git snapshots, saved sessions, automatic context compaction, images, custom agents and commands.
 
 ## Install

@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/vipcode.svg)](https://www.npmjs.com/package/vipcode) [![Pruebas](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![Licencia MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE) · [English](README.en.md)
 
-Agente de programación para la terminal (comando `vipcode`), al estilo de opencode, que solo usa **modelos gratuitos** y **rota automáticamente** entre proveedores cuando uno se agota.
+Agente de programación para la terminal (comando `vipcode`) que solo usa **modelos gratuitos** y **rota automáticamente** entre proveedores cuando uno se agota.
 
 - **Funciona nada más instalarlo, sin claves ni registro**: usa los proveedores que permiten el acceso anónimo (Kilo Gateway, OVHcloud, LLM7 y Pollinations).
 - Si quieres más límites y mejores modelos, añade claves gratuitas de los más de 20 proveedores incluidos (Gemini, NVIDIA, Mistral, Cerebras, OpenRouter, Groq, Z.ai…); con OpenRouter basta con iniciar sesión en el navegador. Los modelos gratis nuevos se descubren solos.
@@ -58,10 +58,9 @@ Con **OpenRouter** no hace falta copiar nada: `vipcode auth login openrouter` (o
 Otros inicios de sesión no se incluyen porque sus dueños no permiten usarlos desde otros programas o ya no existen:
 
 - **Google (Gemini CLI, Antigravity)**: Google bloquea las cuentas que los usan fuera de sus programas. La vía permitida es la clave gratis de https://aistudio.google.com/apikey.
-- **GitHub Copilot**: solo está autorizado en opencode y en los editores oficiales, y además es de pago.
+- **GitHub Copilot**: GitHub solo lo permite en los editores y programas que aprueba, y además es de pago.
 - **ChatGPT**: «Iniciar sesión con ChatGPT» existe, pero solo para Plus o Pro, pide que OpenAI dé de alta la aplicación y usa otra API.
 - **Qwen Code**: su plan gratis con cuenta cerró el 15/04/2026.
-- **Modelos gratis de opencode (Zen)**: solo funcionan dentro de opencode.
 
 Para elegir el navegador, pon el comando en `VIPCODE_BROWSER` (por ejemplo `export VIPCODE_BROWSER=firefox`).
 
@@ -95,7 +94,7 @@ Si la misma clave está en `auth.json` y en el entorno, gana la de `auth.json`.
 | Pollinations | sin clave (opcional `POLLINATIONS_API_KEY`) | https://auth.pollinations.ai | Límite por hora y por IP |
 | Ollama, LM Studio, llama.cpp | sin clave | se detectan solos si están encendidos | En tu ordenador, sin límites |
 
-GitHub Models ya no aparece: cerró el 30 de julio de 2026. Los modelos gratis de OpenCode Zen tampoco: opencode los paga y solo deja usarlos desde su propia aplicación.
+GitHub Models ya no aparece: cerró el 30 de julio de 2026.
 
 ## Uso
 
@@ -262,12 +261,12 @@ Una vez al día (o con `/models refresh`, o `vipcode models refresh` desde la te
 - **providers**: si el nombre coincide con uno del catálogo, solo cambia lo que pongas (los modelos se añaden o se sobrescriben por id; con `"replaceModels": true` se usan solo los tuyos). Si es nuevo, es un proveedor propio compatible con la API de OpenAI y va el primero en la rotación. Admite `apiKeyEnv`, `apiKey`, `headers`, `noKey`, `discover: "openai"` para descubrir sus modelos, y en cada modelo `context`, `vision` y `disabled`.
 - **order**: patrones `proveedor/modelo` que van primero. **model**: modelo fijado al arrancar.
 - **permission**: `allow`, `ask` o `deny`. En `bash` y `mcp` gana el patrón más concreto, y los comandos encadenados (`&&`, `&`, `|`, `;`, saltos de línea) se comprueban por separado. Aunque un comando esté permitido, se pregunta siempre si escribe en un fichero (`>`, `--output`) o lleva `$(…)` o comillas invertidas. Las reglas `deny` se respetan incluso con `--yolo`.
-- **mcp**: servidores locales (`command`) o remotos (`url`, con HTTP o SSE). Sus herramientas aparecen como `servidor_herramienta`. En modo plan solo se usan las marcadas como de solo lectura.
+- **mcp**: servidores locales (`command`) o remotos (`url`, con HTTP o SSE). Los remotos que piden iniciar sesión con OAuth todavía no funcionan; los que usan una cabecera con token, sí. Sus herramientas aparecen como `servidor_herramienta`. En modo plan solo se usan las marcadas como de solo lectura.
 - **lsp**: `false` desactiva los diagnósticos; `"id": false` desactiva un servidor concreto.
 
 ### Agentes y comandos propios
 
-Ficheros Markdown en `~/.vipcode/agents/`, `.vipcode/agents/` o `.opencode/agent/` (compatible con opencode):
+Ficheros Markdown en `~/.vipcode/agents/` (para todos tus proyectos) o `.vipcode/agents/` (solo para ese proyecto):
 
 ```markdown
 ---
@@ -283,7 +282,7 @@ tools:
 Eres un experto en seguridad. Busca inyecciones, secretos en el código y permisos mal puestos.
 ```
 
-Comandos en `~/.vipcode/commands/`, `.vipcode/commands/` o `.opencode/command/`. Se lanzan con `/nombre argumentos`:
+Comandos en `~/.vipcode/commands/` o `.vipcode/commands/`. Se lanzan con `/nombre argumentos`:
 
 ```markdown
 ---
@@ -298,11 +297,11 @@ Arréglalos. Céntrate en $ARGUMENTS.
 
 `$ARGUMENTS` es todo lo que escribes detrás del comando, `$1`…`$9` cada palabra (respetando comillas), y `` !`comando` `` se sustituye por su salida. Con `subtask: true` el comando se ejecuta como subagente y no llena la conversación.
 
-Los agentes y comandos que traiga un proyecto se cargan siempre, pero hasta que confías en la carpeta un agente del proyecto no puede cambiar sus permisos (`permission`, `readOnly`) y los `` !`comando` `` de sus comandos no se ejecutan.
+Los agentes y comandos que traiga un proyecto (también los de `.opencode/agent/` y `.opencode/command/`, si ya los tiene) se cargan siempre, pero hasta que confías en la carpeta un agente del proyecto no puede cambiar sus permisos (`permission`, `readOnly`) y los `` !`comando` `` de sus comandos no se ejecutan.
 
 ### Skills
 
-Una skill es una carpeta con un `SKILL.md`: instrucciones (y, si hace falta, scripts y documentos) para un tipo de tarea concreto, como rellenar PDF, seguir la guía de estilo de la empresa o preparar un informe. Es el formato abierto [Agent Skills](https://agentskills.io), el mismo que usan Claude Code y opencode, así que las que encuentres para ellos también sirven aquí.
+Una skill es una carpeta con un `SKILL.md`: instrucciones (y, si hace falta, scripts y documentos) para un tipo de tarea concreto, como rellenar PDF, seguir la guía de estilo de la empresa o preparar un informe. Es el formato abierto [Agent Skills](https://agentskills.io), que usan muchos agentes de programación, así que las skills que encuentres para ellos también sirven aquí.
 
 ```markdown
 ---
@@ -330,13 +329,13 @@ vipcode skills remove informes-semanales
 
 `vipcode skills add` copia las skills a `~/.vipcode/skills`, o con `--project` a `.vipcode/skills`. Si ya existe una con el mismo nombre la deja como está, salvo que añadas `--force`. Para los repositorios hace falta tener `git` instalado.
 
-vipcode también lee las skills de `~/.claude/skills`, `~/.config/opencode/skill`, `~/.agents/skills` y las mismas carpetas dentro del proyecto. Si dos tienen el mismo nombre, gana la del proyecto. En la configuración:
+vipcode también lee las skills que ya tengas de otros programas (`~/.claude/skills`, `~/.config/opencode/skill`, `~/.agents/skills` y las mismas carpetas dentro del proyecto). Si dos tienen el mismo nombre, gana la del proyecto. En la configuración:
 
 ```json
 "skills": { "enabled": true, "paths": ["~/mis-skills"], "disabled": ["una-que-no-quiero"], "external": true }
 ```
 
-`paths` añade carpetas, `disabled` ignora skills por nombre y `external: false` deja de leer las carpetas de Claude Code, opencode y `.agents`. En la cabecera de la skill, `user-invocable: false` hace que solo la use el agente, y `disable-model-invocation: true` que solo la uses tú con `/nombre`.
+`paths` añade carpetas, `disabled` ignora skills por nombre y `external: false` deja de leer esas carpetas de otros programas. En la cabecera de la skill, `user-invocable: false` hace que solo la use el agente, y `disable-model-invocation: true` que solo la uses tú con `/nombre`.
 
 Las skills pueden traer scripts: revisa las que instales si no conoces su origen. vipcode no ejecuta nada por su cuenta; si la skill pide lanzar un script, el agente usa `bash` y te pide permiso igual que con cualquier otro comando.
 
@@ -352,7 +351,7 @@ Después de cada edición, vipcode pregunta al servidor de lenguaje si hay error
 
 vipcode ejecuta lo que le pide un modelo de IA, así que está hecho para que nada importante pase sin que lo veas:
 
-- **Permisos.** Antes de editar un fichero, ejecutar un comando, salir a internet o usar una herramienta MCP, pregunta enseñando el diff o el comando. De serie solo se aprueban solos unos pocos comandos que no cambian nada (`git status`, `git diff`, `git log`, `git show`, `ls`, `pwd`), y ni siquiera esos si llevan otro comando detrás (`&`, `;`, `&&`, `|`), escriben en un fichero (`>`, `--output`) o llevan `$(…)`. Con `--yolo` o `/yolo` se aprueba todo menos lo que tengas en `deny`: úsalo solo en carpetas sin nada que perder.
+- **Permisos.** Antes de editar un fichero, ejecutar un comando, salir a internet o usar una herramienta MCP, pregunta enseñando el diff o el comando. De serie solo se aprueban solos unos pocos comandos que no cambian nada (`git status`, `git diff`, `git log`, `git show`, `ls`, `pwd`), y ni siquiera esos si llevan otro comando detrás (`&`, `;`, `&&`, `|`), escriben en un fichero (`>`, `--output`) o llevan `$(…)`. Con `--yolo` o `/yolo` se aprueba todo menos lo que tengas en `deny`: úsalo solo en carpetas sin nada que perder, porque los comandos no se ejecutan aislados en un sandbox.
 - **Carpetas en las que confías.** Un proyecto puede traer su propia configuración de vipcode (`vipcode.json`, `.vipcode/config.json`, agentes con permisos propios, comandos con `` !`órdenes` ``). Como eso podría arrancar programas, mandar tus claves a otro servidor o quitar las preguntas de permiso, vipcode no lo usa hasta que confías en la carpeta. Al abrirlo te enseña qué cambiaría y te pregunta; con `vipcode run` solo avisa. Si la configuración cambia después (por ejemplo tras un `git pull`), vuelve a preguntar. `vipcode trust` y `vipcode untrust` lo cambian a mano.
 - **Ficheros.** Las herramientas solo leen y escriben dentro de la carpeta del proyecto. Un enlace simbólico que lleve fuera (por ejemplo a `~/.ssh` o a tus claves) se rechaza.
 - **vipcode no puede tocarse a sí mismo.** Aunque lo abras en una carpeta que las contenga (por ejemplo tu carpeta personal), el agente no puede leer ni cambiar `~/.vipcode` (tus claves, tu configuración y las carpetas en las que confías) ni modificar la carpeta donde está instalado vipcode, así que tampoco puede desactivar estas protecciones. Los comandos que nombran esas carpetas se preguntan siempre, aunque tengas una regla `allow` o hayas dicho «sí a todo», y con `--yolo` sin nadie delante se rechazan.
@@ -395,14 +394,6 @@ npm run release -- 0.3.0             # o patch, minor o major
 ```
 
 Sube el número en `package.json`, pasa las pruebas, crea el commit y la etiqueta, lo sube a GitHub, crea la release con el paquete compilado y lo publica en npm. Quien ya tenga vipcode verá el aviso de versión nueva en menos de un día.
-
-## Lo que aún no tiene respecto a opencode
-
-- La interfaz se dibuja en la propia terminal, no en pantalla completa con paneles.
-- No hay `/share` para publicar la conversación en la web: `/export` la guarda en Markdown.
-- Los servidores MCP remotos con OAuth no funcionan; sí los que usan una cabecera con token.
-- No tiene integración con GitHub (responder a issues o PR) ni cliente/servidor para controlarlo desde otras aplicaciones.
-- `bash` no está aislado en un sandbox: se protege con los permisos.
 
 ## Licencia
 
