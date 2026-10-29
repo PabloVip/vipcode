@@ -1,6 +1,6 @@
 # vipcode
 
-[![Tests](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) · [Español](README.md)
+[![npm](https://img.shields.io/npm/v/vipcode.svg)](https://www.npmjs.com/package/vipcode) [![Tests](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) · [Español](README.md)
 
 A coding agent for your terminal (command `vipcode`), in the style of opencode, that only uses **free AI models** and **automatically switches provider** when one runs out. The interface and messages are in Spanish.
 
@@ -16,10 +16,10 @@ A coding agent for your terminal (command `vipcode`), in the style of opencode, 
 Requires Node.js 22 or later.
 
 ```bash
-npm install -g https://github.com/PabloVip/vipcode/releases/latest/download/vipcode.tgz
+npm install -g vipcode
 ```
 
-Run the same command again to update. Or from source:
+To update, type `/update` inside vipcode or run `vipcode update` (it installs the latest published version, or pulls the repository if you installed from source). Without the npm registry you can also install the latest GitHub release (`npm install -g https://github.com/PabloVip/vipcode/releases/latest/download/vipcode.tgz`) or run it from source:
 
 ```bash
 git clone https://github.com/PabloVip/vipcode.git
@@ -38,13 +38,14 @@ vipcode "fix the failing test"         # UI, starting with that message
 vipcode run "task" --yolo              # non-interactive: does the task and exits
 vipcode auth login                     # add a free key (or /connect inside the UI)
 vipcode skills add anthropics/skills   # install skills from GitHub
+vipcode update                         # update vipcode
 ```
 
 Inside the UI: Enter sends, Tab switches between the `build` and `plan` agents, Ctrl+P opens the command palette, `@path` attaches files, `!command` runs a shell command, Esc interrupts and `/help` lists everything.
 
 ## Privacy
 
-Free plans have fine print: anonymous providers and several free tiers may store what you send or use it for training. The first time vipcode is about to use a provider that needs no key, it tells you and lets you continue, add a key first or never use them (`"keyless": false`). Don't send secrets or confidential code; for that, use a local model with Ollama or LM Studio. vipcode itself sends no telemetry.
+Free plans have fine print: anonymous providers and several free tiers may store what you send or use it for training. The first time vipcode is about to use a provider that needs no key, it tells you and lets you continue, add a key first or never use them (`"keyless": false`). Don't send secrets or confidential code; for that, use a local model with Ollama or LM Studio. vipcode itself sends no telemetry; it only checks npm and GitHub once a day for a new version (`"checkUpdates": false` turns it off).
 
 ## Ranking data
 

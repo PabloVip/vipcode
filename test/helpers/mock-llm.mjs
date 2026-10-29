@@ -66,6 +66,12 @@ export async function startMock(handler) {
         res.end(JSON.stringify(reply.json));
         return;
       }
+      // Ficheros (por ejemplo un paquete .tgz)
+      if (reply.body) {
+        res.writeHead(200, { "content-type": reply.contentType || "application/octet-stream" });
+        res.end(reply.body);
+        return;
+      }
       res.writeHead(200, { "content-type": "text/event-stream" });
       const send = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
       if (reply.reasoning) {

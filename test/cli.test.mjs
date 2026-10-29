@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -526,6 +527,104 @@ test("aviso de privacidad: solo la primera vez que se usan proveedores sin clave
   assert.match(result.output, /HOLA-ANONIMO/);
   assert.ok(!result.output.includes("Pueden guardar lo que les envías y usarlo"));
   await mock.close();
+  ws.cleanup();
+});
+
+// npm sin preguntar a internet por auditorías, donaciones ni versiones nuevas de npm
+const QUIET_NPM = { npm_config_audit: "false", npm_config_fund: "false", npm_config_update_notifier: "false" };
+// Sin las variables npm_* del «npm test» que lanza las pruebas: apuntan a la carpeta real del proyecto y al npm global
+const BASE_ENV = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toLowerCase().startsWith("npm_")));
+
+test("vipcode update instalado con npm: instala el paquete de la última versión publicada", async () => {
+  const ws = tempWorkspace();
+  // Un paquete «vipcode 9.9.9» de mentira, como el que se sube a cada versión
+  const fake = path.join(ws.dir, "paquete");
+  fs.mkdirSync(fake);
+  fs.writeFileSync(path.join(fake, "package.json"), JSON.stringify({ name: "vipcode", version: "9.9.9", bin: { vipcode: "index.js" } }));
+  fs.writeFileSync(path.join(fake, "index.js"), "#!/usr/bin/env node\nconsole.log('9.9.9');\n");
+  const pack = spawnSync("npm", ["pack", "--pack-destination", ws.dir], { cwd: fake, encoding: "utf8", env: { ...BASE_ENV, HOME: ws.home, ...QUIET_NPM } });
+  assert.equal(pack.status, 0, pack.stderr);
+  const tarball = fs.readFileSync(path.join(ws.dir, "vipcode-9.9.9.tgz"));
+  let latest = "v9.9.9";
+  const mock = await startMock(({ path: url }) => {
+    if (url === "/repos/PabloVip/vipcode/releases/latest") {
+      return { json: { tag_name: latest, assets: [{ name: "vipcode.tgz", browser_download_url: `${mock.url}/descargas/vipcode.tgz` }] } };
+    }
+    if (url === "/descargas/vipcode.tgz") {
+      return { body: tarball };
+    }
+    return { status: 404, json: {} };
+  });
+  // Un npm global de prueba con vipcode 0.2.0 «instalado» dentro
+  const prefix = path.join(ws.dir, "npm-global");
+  const installed = path.join(prefix, "lib", "node_modules", "vipcode");
+  fs.mkdirSync(installed, { recursive: true });
+  fs.writeFileSync(path.join(installed, "package.json"), JSON.stringify({ name: "vipcode", version: "0.2.0" }));
+  const update = (root) =>
+    runVip(["update"], {
+      cwd: ws.proj,
+      home: ws.home,
+      timeout: 120000,
+      env: {
+        ...QUIET_NPM,
+        npm_config_prefix: prefix,
+        VIPCODE_INSTALL_ROOT: root,
+        VIPCODE_UPDATE_URL: `${mock.url}/repos/PabloVip/vipcode`,
+        // En npm todavía no está: se instala el paquete de la release de GitHub
+        VIPCODE_REGISTRY_URL: `${mock.url}/npm`,
+      },
+    });
+  // Si no está instalado con npm -g, explica cómo hacerlo en vez de instalar nada
+  let result = await update(ws.proj);
+  assert.match(result.output, /no está instalado con «npm install -g»/, result.output);
+  assert.match(result.output, /npm install -g http:\/\/127\.0\.0\.1:\d+\/descargas\/vipcode\.tgz/);
+  result = await update(installed);
+  assert.match(result.output, /vipcode 9\.9\.9 instalado \(tenías la 0\.2\.0\)/, result.output);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(installed, "package.json"), "utf8")).version, "9.9.9");
+  latest = "v0.2.0";
+  result = await update(installed);
+  assert.match(result.output, /Ya tienes la última versión \(0\.2\.0\)/);
+  await mock.close();
+  ws.cleanup();
+});
+
+test("vipcode update instalado desde el código: trae lo último del repositorio y compila", async () => {
+  const ws = tempWorkspace();
+  const env = { ...BASE_ENV, HOME: ws.home, ...QUIET_NPM };
+  const git = (cwd, ...args) => spawnSync("git", ["-c", "user.name=prueba", "-c", "user.email=prueba@example.com", ...args], { cwd, encoding: "utf8", env });
+  // Un «GitHub» de prueba y la copia desde la que alguien usa vipcode
+  const origin = path.join(ws.dir, "origen.git");
+  const work = path.join(ws.dir, "trabajo");
+  const clone = path.join(ws.dir, "vipcode");
+  git(ws.dir, "init", "-q", "--bare", "-b", "main", origin);
+  git(ws.dir, "clone", "-q", origin, work);
+  fs.writeFileSync(
+    path.join(work, "package.json"),
+    JSON.stringify({ name: "vipcode", version: "0.2.0", scripts: { build: "node -e \"require('fs').writeFileSync('compilado.txt', 'si')\"" } }, null, 2),
+  );
+  fs.writeFileSync(path.join(work, ".gitignore"), "node_modules/\ncompilado.txt\n");
+  assert.equal(spawnSync("npm", ["install", "--package-lock-only"], { cwd: work, encoding: "utf8", env }).status, 0);
+  git(work, "add", ".");
+  git(work, "commit", "-q", "-m", "uno");
+  git(work, "push", "-q", "origin", "HEAD:main");
+  git(ws.dir, "clone", "-q", origin, clone);
+  const update = () => runVip(["update"], { cwd: ws.proj, home: ws.home, timeout: 120000, env: { ...QUIET_NPM, VIPCODE_INSTALL_ROOT: clone } });
+
+  let result = await update();
+  assert.match(result.output, /Ya tienes lo último del repositorio/, result.output);
+  fs.writeFileSync(path.join(work, "nuevo.txt"), "hola");
+  git(work, "add", ".");
+  git(work, "commit", "-q", "-m", "dos");
+  git(work, "push", "-q", "origin", "HEAD:main");
+  result = await update();
+  assert.match(result.output, /Actualizado desde el repositorio \(1 cambio nuevo\)/, result.output);
+  assert.equal(fs.readFileSync(path.join(clone, "nuevo.txt"), "utf8"), "hola");
+  assert.equal(fs.readFileSync(path.join(clone, "compilado.txt"), "utf8"), "si");
+  // Con cambios sin guardar no toca nada
+  fs.appendFileSync(path.join(clone, "nuevo.txt"), " y un cambio mío");
+  result = await update();
+  assert.match(result.output, /Tienes cambios sin guardar/);
+  assert.equal(fs.readFileSync(path.join(clone, "nuevo.txt"), "utf8"), "hola y un cambio mío");
   ws.cleanup();
 });
 

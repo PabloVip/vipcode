@@ -11,6 +11,7 @@ import { REPO_URL, VERSION } from "./meta.js";
 import { NoSlotError } from "./router.js";
 import { appendHistory, exportMarkdown, listSessions, loadSession, saveExport } from "./session.js";
 import { createSkill, installSkills, loadSkills, removeSkill } from "./skills.js";
+import { updateVipcode } from "./update.js";
 import { completeMention } from "./tools.js";
 import { plainAdapter, plainEvents, plainPermissionPrompt, ui } from "./ui.js";
 
@@ -28,6 +29,7 @@ Uso:
   vipcode skills add <origen>      instala skills de una carpeta o de un repositorio git (p. ej. anthropics/skills)
   vipcode skills new <nombre>      crea una skill vacía para rellenar
   vipcode skills remove <nombre>   borra una skill instalada con vipcode
+  vipcode update                   actualiza vipcode (del repositorio o a la última versión publicada)
   vipcode sessions                 sesiones guardadas de esta carpeta
   vipcode export [id]              guarda una sesión en Markdown (por defecto la última)
 
@@ -93,7 +95,7 @@ function parseArgs(argv: string[]): Options {
     project: false,
     force: false,
   };
-  const commands = ["run", "auth", "models", "skills", "sessions", "export", "help"];
+  const commands = ["run", "auth", "models", "skills", "sessions", "export", "update", "help"];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "-c" || arg === "--continue") {
@@ -456,6 +458,18 @@ async function main() {
   }
   if (options.command === "skills") {
     runSkills(options, root);
+    return;
+  }
+  if (options.command === "update") {
+    const result = await updateVipcode((text) => ui.info(text));
+    if (result.status === "error") {
+      ui.error(result.message);
+      process.exitCode = 1;
+    } else if (result.status === "manual") {
+      ui.notice(result.message);
+    } else {
+      ui.info(result.message);
+    }
     return;
   }
   if (options.command === "sessions") {

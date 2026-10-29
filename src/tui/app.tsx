@@ -16,6 +16,7 @@ import { NoSlotError } from "../router.js";
 import { appendHistory, loadHistory } from "../session.js";
 import { type Todo, suggestFiles } from "../tools.js";
 import { colorPreview } from "../ui.js";
+import { checkForUpdate } from "../update.js";
 import { type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
 import * as E from "./editor.js";
 
@@ -937,6 +938,14 @@ function Main(props: { app: App; initial: string }) {
       }
       refresh();
     });
+    // Una vez al día mira en GitHub si hay una versión nueva de vipcode
+    if (app.config.checkUpdates !== false) {
+      void checkForUpdate().then((version) => {
+        if (version) {
+          push({ kind: "notice", text: `Hay una versión nueva de vipcode (${version}, tienes la ${VERSION}). Escribe /update para instalarla.` });
+        }
+      });
+    }
     if (app.config.autoUpdateModels && discoveryIsStale()) {
       void app
         .refreshModels()

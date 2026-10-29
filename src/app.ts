@@ -18,6 +18,7 @@ import { Router } from "./router.js";
 import { type SkillDefinition, loadSkills, skillContent } from "./skills.js";
 import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession } from "./session.js";
 import { Snapshots } from "./snapshot.js";
+import { updateVipcode } from "./update.js";
 import { formatTodos, truncate } from "./tools.js";
 
 export interface SelectItem<T> {
@@ -78,6 +79,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "yolo", args: "[on|off]", description: "aprobar todo sin preguntar en esta sesión" },
   { name: "reset-limits", description: "olvidar las pausas guardadas de los proveedores" },
   { name: "config", description: "rutas de configuración" },
+  { name: "update", description: "actualiza vipcode a lo último del repositorio o a la última versión publicada" },
   { name: "exit", description: "salir" },
 ];
 
@@ -957,6 +959,17 @@ export class App {
           ui.notice("Modo yolo: apruebo todo sin preguntar en esta sesión (las reglas «deny» se respetan).");
         } else {
           ui.info("Modo yolo desactivado: vuelvo a preguntar.");
+        }
+        return {};
+      }
+      case "/update": {
+        const result = await updateVipcode((text) => ui.info(text));
+        if (result.status === "error") {
+          ui.error(result.message);
+        } else if (result.status === "manual") {
+          ui.notice(result.message);
+        } else {
+          ui.info(result.message);
         }
         return {};
       }

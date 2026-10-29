@@ -14,6 +14,8 @@ export const RANKING_PATH = path.join(HOME_DIR, "ranking.json");
 export const HISTORY_PATH = path.join(HOME_DIR, "history.jsonl");
 // Avisos que ya has visto (por ejemplo el de privacidad de los proveedores sin clave)
 export const NOTICES_PATH = path.join(HOME_DIR, "notices.json");
+// Última comprobación de versiones nuevas en GitHub
+export const UPDATE_PATH = path.join(HOME_DIR, "update.json");
 export const SESSIONS_DIR = path.join(HOME_DIR, "sessions");
 export const SNAPSHOTS_DIR = path.join(HOME_DIR, "snapshots");
 export const EXPORTS_DIR = path.join(HOME_DIR, "exports");

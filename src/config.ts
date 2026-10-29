@@ -168,6 +168,8 @@ export interface Config {
   snapshot: boolean;
   // Buscar modelos gratis nuevos una vez al día
   autoUpdateModels: boolean;
+  // Mirar una vez al día en GitHub si hay una versión nueva de vipcode
+  checkUpdates: boolean;
   // Usar los proveedores gratuitos que no piden clave (Kilo, OVHcloud, LLM7, Pollinations); pueden guardar lo que envías
   keyless: boolean;
   // Ordenar los modelos de mejor a peor según LLM Stats
@@ -211,6 +213,7 @@ export const DEFAULT_CONFIG: Config = {
   instructions: [],
   snapshot: true,
   autoUpdateModels: true,
+  checkUpdates: true,
   keyless: true,
   ranking: { enabled: true, metric: "coding", anonymousLast: false },
   skills: { enabled: true, paths: [], disabled: [], external: true },

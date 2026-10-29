@@ -27,7 +27,7 @@ test("interfaz completa en una pseudo-terminal", { skip: !hasExpect && "falta el
     return { text: "RESPUESTA-UNO" };
   });
   const ws = tempWorkspace({ "hola.txt": "hola\n" });
-  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false });
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
 
   const result = await new Promise((resolve) => {
     const child = spawn("expect", [path.join(ROOT, "test", "fixtures", "tui.exp"), CLI], {

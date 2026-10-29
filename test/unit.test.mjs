@@ -577,3 +577,48 @@ test("skills: instalar desde una carpeta o un repositorio git, crear y borrar", 
   fs.rmSync(path.join(HOME, "skills"), { recursive: true, force: true });
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test("actualizaciones: comparar versiones y mirar en GitHub como mucho una vez al día", async () => {
+  const update = await import("../dist/update.js");
+  assert.ok(update.compareVersions("v0.10.1", "0.9.3") > 0);
+  assert.equal(update.compareVersions("0.2.0", "v0.2.0"), 0);
+  assert.ok(update.compareVersions("0.2.0", "0.3.0-beta.1") < 0);
+  assert.ok(update.compareVersions("1.0", "0.99.99") > 0);
+  const { startMock } = await import("./helpers/mock-llm.mjs");
+  // npm y GitHub simulados: cada prueba cambia lo que responden
+  let npm = { status: 404, json: {} };
+  let github = { status: 404, json: {} };
+  const tarball = (version) => ({ json: { tag_name: `v${version}`, assets: [{ name: "vipcode.tgz", browser_download_url: `https://descargas/${version}/vipcode.tgz` }] } });
+  const ours = (version) => ({ json: { name: "vipcode", version, repository: { url: "git+https://github.com/PabloVip/vipcode.git" } } });
+  const mock = await startMock(({ path: url }) => (url === "/npm/vipcode/latest" ? npm : url.endsWith("/releases/latest") ? github : { status: 404, json: {} }));
+  process.env.VIPCODE_UPDATE_URL = `${mock.url}/repos/PabloVip/vipcode`;
+  process.env.VIPCODE_REGISTRY_URL = `${mock.url}/npm`;
+  try {
+    github = tarball("9.9.9");
+    assert.equal(await update.checkForUpdate(), "9.9.9");
+    // La segunda vez sale de la caché, sin preguntar a nadie
+    assert.equal(await update.checkForUpdate(), "9.9.9");
+    assert.equal(mock.requests.length, 2);
+
+    // Con la misma versión en los dos sitios se instala la de npm; si GitHub va por delante, la de GitHub
+    npm = ours("9.9.9");
+    assert.deepEqual(await update.latestRelease(), { version: "9.9.9", spec: "vipcode@9.9.9", source: "npm" });
+    github = tarball("10.0.0");
+    assert.deepEqual(await update.latestRelease(), { version: "10.0.0", spec: "https://descargas/10.0.0/vipcode.tgz", source: "GitHub" });
+    // Un paquete «vipcode» de npm que no es este proyecto no cuenta
+    npm = { json: { name: "vipcode", version: "99.0.0", repository: "https://github.com/otra-persona/vipcode" } };
+    assert.equal((await update.latestRelease()).source, "GitHub");
+    // Sin nada publicado, null; si no responde ninguno, error
+    github = { status: 404, json: {} };
+    assert.equal(await update.latestRelease(), null);
+    npm = { status: 500, json: {} };
+    github = { status: 500, json: {} };
+    await assert.rejects(update.latestRelease(), /no he podido consultar npm ni GitHub/);
+  } finally {
+    delete process.env.VIPCODE_UPDATE_URL;
+    delete process.env.VIPCODE_REGISTRY_URL;
+    fs.rmSync(path.join(HOME, "update.json"), { force: true });
+    await mock.close();
+  }
+});
+

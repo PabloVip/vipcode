@@ -1,6 +1,6 @@
 # vipcode
 
-[![Pruebas](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![Licencia MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE) · [English](README.en.md)
+[![npm](https://img.shields.io/npm/v/vipcode.svg)](https://www.npmjs.com/package/vipcode) [![Pruebas](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![Licencia MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE) · [English](README.en.md)
 
 Agente de programación para la terminal (comando `vipcode`), al estilo de opencode, que solo usa **modelos gratuitos** y **rota automáticamente** entre proveedores cuando uno se agota.
 
@@ -16,10 +16,12 @@ Agente de programación para la terminal (comando `vipcode`), al estilo de openc
 Requiere Node.js 22 o superior.
 
 ```bash
-npm install -g https://github.com/PabloVip/vipcode/releases/latest/download/vipcode.tgz
+npm install -g vipcode
 ```
 
-Para actualizar, repite el mismo comando. O desde el código:
+Para actualizar, escribe `/update` dentro de vipcode o `vipcode update` en la terminal.
+
+Sin el registro de npm, también puedes instalar el paquete de la última versión de GitHub (`npm install -g https://github.com/PabloVip/vipcode/releases/latest/download/vipcode.tgz`) o usarlo desde el código:
 
 ```bash
 git clone https://github.com/PabloVip/vipcode.git
@@ -104,7 +106,17 @@ vipcode -c                   # continúa la última sesión de esta carpeta
 vipcode run "tarea" --yolo   # hace la tarea sin interfaz y termina
 vipcode --plan               # empieza en modo solo lectura
 vipcode run "/review"        # también acepta comandos y skills: vipcode run "/mi-skill tarea"
+vipcode update               # actualiza vipcode
 ```
+
+### Actualizar
+
+`/update` (o `vipcode update`) se adapta a cómo lo instalaste:
+
+- **Con npm** (`npm install -g vipcode` o el paquete de la release): mira cuál es la última versión publicada en npm y en GitHub y, si es más nueva que la tuya, la instala.
+- **Desde el código** (`git clone` + `npm link`): trae lo último del repositorio con `git pull`, instala las dependencias y compila. Si tienes cambios sin guardar en esa carpeta, no toca nada y te avisa.
+
+Después cierra vipcode y vuelve a abrirlo. Además, una vez al día vipcode mira si hay una versión nueva y te avisa al abrirlo; se desactiva con `"checkUpdates": false` en la configuración.
 
 ### En la interfaz
 
@@ -137,6 +149,7 @@ Antes de editar un fichero, ejecutar un comando o salir a internet, vipcode preg
 | `/mcp`, `/lsp` | Estado de los servidores MCP y de lenguaje |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión |
 | `/reset-limits` | Olvidar las pausas guardadas de los proveedores |
+| `/update` | Actualizar vipcode (ver [Actualizar](#actualizar)) |
 | `/init` | Crea o mejora `AGENTS.md` con las instrucciones del proyecto |
 | `/review` | Revisa los cambios sin confirmar (sin tocar nada) |
 | `/config`, `/help`, `/exit` | |
@@ -225,6 +238,7 @@ Una vez al día (o con `/models refresh`, o `vipcode models refresh` desde la te
   "maxWaitMs": 90000,
   "snapshot": true,
   "autoUpdateModels": true,
+  "checkUpdates": true,
   "keyless": true,
   "ranking": { "enabled": true, "metric": "coding", "anonymousLast": false },
   "skills": { "enabled": true, "paths": [], "disabled": [], "external": true },
@@ -331,7 +345,7 @@ Los planes gratuitos tienen letra pequeña: los proveedores anónimos (Kilo, OVH
 
 Todo está en `~/.vipcode` (o en `VIPCODE_HOME` si la defines):
 
-- `config.json`: tu configuración. `auth.json`: claves (permisos 600). `state.json`: pausas de los proveedores. `notices.json`: avisos que ya has visto.
+- `config.json`: tu configuración. `auth.json`: claves (permisos 600). `state.json`: pausas de los proveedores. `notices.json`: avisos que ya has visto. `update.json`: última comprobación de versiones nuevas.
 - `models.json`: modelos descubiertos. `ranking.json`: puntuaciones de LLM Stats descargadas con tu clave. `sessions/`: conversaciones. `history.jsonl`: lo que has escrito.
 - `snapshots/`: instantáneas para `/undo` (un repositorio git aparte por proyecto; no toca tu `.git`).
 - `exports/`: conversaciones exportadas. `agents/`, `commands/` y `skills/`: tus agentes, comandos y skills globales.
@@ -343,6 +357,16 @@ npm run build       # compila a dist/
 npm test            # compila y pasa las pruebas (servidor de IA simulado, sin claves ni internet)
 VIPCODE_DEBUG=1 vipcode # apunta los detalles internos en ~/.vipcode/debug.log
 ```
+
+### Publicar una versión
+
+```bash
+npm login                            # la primera vez (y gh auth login si no lo tienes)
+npm run release -- 0.3.0 --dry-run   # comprueba que todo está listo y enseña lo que haría
+npm run release -- 0.3.0             # o patch, minor o major
+```
+
+Sube el número en `package.json`, pasa las pruebas, crea el commit y la etiqueta, lo sube a GitHub, crea la release con el paquete compilado y lo publica en npm. Quien ya tenga vipcode verá el aviso de versión nueva en menos de un día.
 
 ## Lo que aún no tiene respecto a opencode
 
@@ -356,4 +380,4 @@ VIPCODE_DEBUG=1 vipcode # apunta los detalles internos en ~/.vipcode/debug.log
 
 [MIT](LICENSE).
 
-vipcode no envía datos de uso a nadie. Solo se conecta a los proveedores de IA que uses, a las webs que consulte el agente con `webfetch` y `websearch`, a tus servidores MCP y, si le das tu clave, a LLM Stats para descargar el ranking (datos de LLM Stats, llm-stats.com).
+vipcode no envía datos de uso a nadie. Solo se conecta a los proveedores de IA que uses, a las webs que consulte el agente con `webfetch` y `websearch`, a tus servidores MCP, a npm y a GitHub una vez al día para ver si hay versión nueva (`"checkUpdates": false` lo desactiva) y, si le das tu clave, a LLM Stats para descargar el ranking (datos de LLM Stats, llm-stats.com).
