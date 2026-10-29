@@ -18,6 +18,7 @@ for (const name of Object.keys(process.env)) {
   }
 }
 const { App } = await import("../dist/app.js");
+const sessions = await import("../dist/session.js");
 
 function makeApp(ws, url, extra = {}) {
   fs.writeFileSync(
@@ -206,7 +207,8 @@ test("comandos con plantilla, agentes y ayuda", async () => {
   const { app } = makeApp(ws, mock.url);
   const { out, adapter } = capture();
   let result = await app.handleCommand("/test src/app", adapter);
-  assert.deepEqual(result.run, { input: { text: "Ejecuta los tests de src/app" }, options: { agent: "plan", model: undefined, subtask: false } });
+  // Al modelo le llega la plantilla; en el historial queda lo que escribiste
+  assert.deepEqual(result.run, { input: { text: "Ejecuta los tests de src/app", display: "/test src/app" }, options: { agent: "plan", model: undefined, subtask: false } });
   result = await app.handleCommand("/plan", adapter);
   assert.equal(app.agent.agent.name, "plan");
   assert.equal(app.cycleAgent().name, "build");
@@ -275,3 +277,84 @@ test("varios task seguidos se ejecutan a la vez", async () => {
   await mock.close();
   ws.cleanup();
 });
+
+test("sesiones: el historial guarda toda la conversación aunque se resuma, y se escribe solo en .md", async () => {
+  const mock = await startMock(({ body }) => {
+    const last = lastMessage(body);
+    const text = contentText(last.content);
+    if (last.role === "tool") {
+      return { text: "LISTO-DESPUES-DE-LEER" };
+    }
+    if (text.includes("Summarize this conversation")) {
+      return { text: "RESUMEN-CORTO" };
+    }
+    if (text.startsWith("lee")) {
+      return { tools: [{ name: "read_file", args: { path: "nota.txt" } }] };
+    }
+    return { text: "RESPUESTA-NORMAL" };
+  });
+  const ws = tempWorkspace({ "nota.txt": "hola\n" });
+  const { app } = makeApp(ws, mock.url);
+  await app.runPrompt({ text: "lee nota.txt" }, {});
+  // Un comando: al modelo le llega su plantilla y en el historial queda lo que escribiste
+  await app.runPrompt({ text: "PLANTILLA-LARGA del comando", display: "/mi-comando" }, {});
+  await app.agent.compact();
+  await app.runPrompt({ text: "después del resumen" }, {});
+
+  const session = app.agent.session;
+  const log = session.log.map((entry) => `${entry.role}:${entry.tool ? entry.tool.name : entry.text.slice(0, 22)}`);
+  assert.deepEqual(log, [
+    "user:lee nota.txt",
+    "tool:read_file",
+    "assistant:LISTO-DESPUES-DE-LEER",
+    "user:/mi-comando",
+    "assistant:RESPUESTA-NORMAL",
+    "info:Conversación resumida ",
+    "user:después del resumen",
+    "assistant:RESPUESTA-NORMAL",
+  ]);
+  assert.equal(session.log[2].model, "p/m");
+  // El modelo ya no tiene lo de antes del resumen, pero el historial sí
+  assert.ok(!JSON.stringify(session.messages).includes("lee nota.txt"));
+  const md = fs.readFileSync(sessions.sessionMarkdownPath(session), "utf8");
+  for (const piece of ["# lee nota.txt", "### Tú", "lee nota.txt", "- **Lee** `nota.txt`", "### vipcode · p/m", "LISTO-DESPUES-DE-LEER", "/mi-comando", "_Conversación resumida", "después del resumen"]) {
+    assert.ok(md.includes(piece), `falta «${piece}» en:\n${md}`);
+  }
+  assert.ok(!md.includes("PLANTILLA-LARGA"));
+
+  // Volver a ella con /sessions
+  app.newSession();
+  assert.equal(app.agent.session.log.length, 0);
+  const result = await app.handleCommand("/sessions", { ...capture().adapter, select: async (_title, items) => items[0].value });
+  assert.equal(result.loaded, true);
+  assert.equal(app.agent.session.id, session.id);
+  assert.ok(app.agent.session.log.some((entry) => entry.text === "lee nota.txt"));
+
+  // Una sesión de antes, sin historial, lo saca de sus mensajes
+  const old = {
+    id: "20260101-000000-old",
+    title: "vieja",
+    cwd: ws.proj,
+    created: 1,
+    updated: 2,
+    messages: [
+      { role: "user", content: "pregunta vieja" },
+      { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: "a.txt" }) } }] },
+      { role: "tool", tool_call_id: "c1", content: "contenido" },
+      { role: "assistant", content: "respuesta vieja" },
+    ],
+  };
+  fs.mkdirSync(path.join(shared.home, "sessions"), { recursive: true });
+  fs.writeFileSync(path.join(shared.home, "sessions", `${old.id}.json`), JSON.stringify(old));
+  const loaded = sessions.loadSession(old.id);
+  assert.deepEqual(
+    loaded.log.map((entry) => `${entry.role}:${entry.tool ? `${entry.tool.name} ${entry.tool.summary}` : entry.text}`),
+    ["user:pregunta vieja", "tool:read_file a.txt", "assistant:respuesta vieja"],
+  );
+  // Y al listar las sesiones también le aparece su .md
+  sessions.listSessions(ws.proj);
+  assert.match(fs.readFileSync(sessions.sessionMarkdownPath(loaded), "utf8"), /### Tú · [^\n]+\n\npregunta vieja[\s\S]*respuesta vieja/);
+  await mock.close();
+  ws.cleanup();
+});
+

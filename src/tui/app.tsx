@@ -9,12 +9,13 @@ import type { App, RunOptions, SelectItem, UiAdapter } from "../app.js";
 import { configNotices } from "../config.js";
 import { discoveryIsStale } from "../discovery.js";
 import { isImagePath, readClipboardImage, toDataUrl } from "../images.js";
+import { toolLabel } from "../labels.js";
 import { renderMarkdown } from "../markdown.js";
 import { VERSION } from "../meta.js";
 import type { PermissionReply, PermissionRequest } from "../permissions.js";
 import { NoSlotError } from "../router.js";
 import { showControl, stripControl, stripUnsafe } from "../sanitize.js";
-import { appendHistory, loadHistory } from "../session.js";
+import { type Session, appendHistory, loadHistory, sessionMarkdownPath } from "../session.js";
 import { type Todo, suggestFiles } from "../tools.js";
 import { colorPreview } from "../ui.js";
 import { checkForUpdate } from "../update.js";
@@ -58,28 +59,13 @@ interface Live {
   shell: { command: string; output: string } | null;
 }
 
+// Al volver a una sesión se enseñan sus últimos pasos (el .md los tiene todos)
+const REPLAY_MAX = 300;
+
 // Comandos que se pueden usar mientras el agente trabaja (solo consultan)
 const SAFE_WHILE_BUSY = ["/help", "/usage", "/todos", "/mcp", "/lsp", "/providers", "/skills"];
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-// Cómo se cuenta cada herramienta en pantalla
-const TOOL_LABEL: Record<string, string> = {
-  read_file: "Lee",
-  write_file: "Escribe",
-  edit_file: "Edita",
-  list_dir: "Lista",
-  glob: "Busca ficheros",
-  grep: "Busca",
-  bash: "Ejecuta",
-  webfetch: "Abre",
-  websearch: "Busca en internet",
-  todowrite: "Tareas",
-  todoread: "Tareas",
-  diagnostics: "Diagnósticos",
-  task: "Subagente",
-  skill: "Skill",
-};
 
 function Spinner(props: { color?: string }) {
   const { frame } = useAnimation({ interval: 80 });
@@ -219,7 +205,7 @@ function toolDetail(event: ToolEndEvent): string[] {
 function ToolHeader(props: { name: string; summary: string }) {
   return (
     <>
-      <Text bold>{TOOL_LABEL[props.name] || showControl(props.name)}</Text>
+      <Text bold>{showControl(toolLabel(props.name))}</Text>
       {props.summary ? <Text> {showControl(props.summary)}</Text> : null}
     </>
   );
@@ -758,6 +744,9 @@ function Main(props: { app: App; initial: string }) {
           await quit();
           return;
         }
+        if (result.loaded) {
+          replay(app.agent.session);
+        }
         if (result.run) {
           void runAgent({ ...result.run.input, images }, result.run.options);
         }
@@ -798,6 +787,33 @@ function Main(props: { app: App; initial: string }) {
       }
     }
     refresh();
+  };
+
+  // La conversación de una sesión a la que vuelves, tal como la viste
+  const replay = (session: Session) => {
+    const entries = session.log;
+    if (entries.length === 0) {
+      push({ kind: "info", text: `Sesión «${session.title}» cargada.` });
+      return;
+    }
+    const shown = entries.slice(-REPLAY_MAX);
+    push({ kind: "info", text: `── Conversación anterior: «${session.title}» · ${new Date(session.updated).toLocaleString()} ──` });
+    if (entries.length > shown.length) {
+      push({ kind: "info", text: `… ${entries.length - shown.length} pasos antes; la conversación entera está en ${sessionMarkdownPath(session)}` });
+    }
+    shown.forEach((entry, index) => {
+      if (entry.role === "user") {
+        push({ kind: "user", text: entry.text, images: entry.images || 0, color: agentColor() });
+      } else if (entry.role === "assistant") {
+        push({ kind: "assistant", text: entry.text, color: agentColor() });
+      } else if (entry.role === "tool" && entry.tool) {
+        const event = { id: `historial-${index}`, name: entry.tool.name, summary: entry.tool.summary, depth: 0, agent: "" };
+        push({ kind: "tool", event: { ...event, output: entry.text, display: entry.tool.display, isError: entry.tool.isError }, ms: 0 });
+      } else {
+        push({ kind: "info", text: entry.text });
+      }
+    });
+    push({ kind: "info", text: "── Sigues desde aquí (/new empieza otra conversación) ──" });
   };
 
   // Paleta de comandos (Ctrl+P): todos los comandos, skills y agentes con su descripción
@@ -919,9 +935,8 @@ function Main(props: { app: App; initial: string }) {
     for (const notice of configNotices) {
       push({ kind: "notice", text: notice });
     }
-    const session = app.agent.session;
-    if (session.messages.length > 0) {
-      push({ kind: "info", text: `Continúas «${session.title}» (${session.turns.length} mensajes tuyos). /new empieza otra.` });
+    if (app.agent.session.log.length > 0) {
+      replay(app.agent.session);
     }
     if (app.router.slots.length === 0) {
       push({

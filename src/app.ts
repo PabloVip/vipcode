@@ -16,7 +16,7 @@ import { type PermissionReply, type PermissionRequest, SessionGrants, createAske
 import { Ranking, loadRankingData, rankingKey, refreshRanking } from "./ranking.js";
 import { Router } from "./router.js";
 import { type SkillDefinition, loadSkills, skillContent } from "./skills.js";
-import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession } from "./session.js";
+import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession, sessionMarkdownPath } from "./session.js";
 import { Snapshots } from "./snapshot.js";
 import { updateVipcode } from "./update.js";
 import { formatTodos, truncate } from "./tools.js";
@@ -50,6 +50,8 @@ export interface RunOptions {
 export interface CommandResult {
   exit?: boolean;
   run?: { input: UserInput; options: RunOptions };
+  // Se ha cargado otra sesión: la interfaz enseña su conversación
+  loaded?: boolean;
 }
 
 export const BUILTIN_COMMANDS: { name: string; args?: string; description: string }[] = [
@@ -887,7 +889,7 @@ export class App {
           );
           if (choice) {
             this.loadSession(choice);
-            ui.info(`Cargada: ${choice.title} (${choice.messages.length} mensajes)`);
+            return { loaded: true };
           }
           return {};
         }
@@ -902,10 +904,9 @@ export class App {
         const chosen = this.lastSessions[Number(arg) - 1];
         if (chosen) {
           this.loadSession(chosen);
-          ui.info(`Cargada: ${chosen.title} (${chosen.messages.length} mensajes)`);
-        } else {
-          ui.error("Número no válido. Usa /sessions primero.");
+          return { loaded: true };
         }
+        ui.error("Número no válido. Usa /sessions primero.");
         return {};
       }
       case "/delete": {
@@ -923,7 +924,7 @@ export class App {
         if (this.agent.session.messages.length === 0) {
           ui.info("La conversación está vacía.");
         } else {
-          ui.info(`Conversación guardada en ${saveExport(this.agent.session)}`);
+          ui.info(`Conversación guardada en ${saveExport(this.agent.session)} (además se guarda sola en ${sessionMarkdownPath(this.agent.session)})`);
         }
         return {};
       }
@@ -1005,13 +1006,13 @@ export class App {
     const custom = this.commands.find((item) => item.name === name);
     if (custom) {
       const expanded = await expandCommand(custom, arg, this.root);
-      return { run: { input: { text: expanded }, options: { agent: custom.agent, model: custom.model, subtask: custom.subtask } } };
+      return { run: { input: { text: expanded, display: text.trim() }, options: { agent: custom.agent, model: custom.model, subtask: custom.subtask } } };
     }
     // /nombre-de-skill tarea: se le da la skill ya cargada junto con la tarea
     const skill = this.skills.find((item) => item.name === name && item.userInvocable);
     if (skill) {
       const task = arg ? `\n\nTarea: ${arg}` : "";
-      return { run: { input: { text: `Usa la skill «${skill.name}» para esto.${task}\n\n${skillContent(skill)}` }, options: {} } };
+      return { run: { input: { text: `Usa la skill «${skill.name}» para esto.${task}\n\n${skillContent(skill)}`, display: text.trim() }, options: {} } };
     }
     const agent = this.primaryAgents().find((item) => item.name === name);
     if (agent) {
@@ -1082,6 +1083,8 @@ export class App {
         signal?.removeEventListener("abort", stop);
         const clean = output.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").trimEnd();
         this.agent.addNote(`(El usuario ha ejecutado en la terminal \`${command}\`, código de salida ${code ?? "desconocido"}:\n\`\`\`\n${truncate(clean, 8000)}\n\`\`\`)\n\n`);
+        this.agent.logEntry({ role: "tool", text: truncate(clean, 4000), tool: { name: "bash", summary: `(tú) ${command}`, isError: code !== 0 } });
+        saveSession(this.agent.session);
         resolve({ output: clean, code });
       };
       child.on("error", (err) => {

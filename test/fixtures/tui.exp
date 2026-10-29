@@ -114,7 +114,32 @@ expect {
   timeout { falla "no vuelve a quedar libre tras el !comando" }
 }
 
-# 7. /models abre la lista y Esc la cierra
+# 7. Volver a la sesión: /new y luego /sessions enseña la conversación anterior
+send "/new\r"
+expect {
+  "Sesión nueva" {}
+  timeout { falla "/new no empieza otra sesión" }
+}
+send "/sessions\r"
+expect {
+  "Sesiones de esta carpeta" {}
+  timeout { falla "/sessions no abre la lista" }
+}
+send "\r"
+expect {
+  "Conversación anterior" {}
+  timeout { falla "al cargar la sesión no se ve la conversación" }
+}
+expect {
+  "RESPUESTA-UNO" {}
+  timeout { falla "no se ve lo que contestó antes" }
+}
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre tras cargar la sesión" }
+}
+
+# 8. /models abre la lista y Esc la cierra
 send "/models\r"
 expect {
   "Elige el modelo" {}
@@ -123,7 +148,7 @@ expect {
 send "\033"
 sleep 0.5
 
-# 8. /exit sale
+# 9. /exit sale
 send "/exit\r"
 expect {
   eof {}

@@ -41,6 +41,8 @@ vipcode skills add anthropics/skills   # install skills from GitHub
 vipcode update                         # update vipcode
 ```
 
+Every conversation is saved automatically in `~/.vipcode/sessions/` as `.json` (to resume it) and `.md` (the whole conversation, readable and never truncated by context compaction). When you resume one (`vipcode -c`, `/sessions`), the previous conversation is shown on screen.
+
 Inside the UI: Enter sends, Tab switches between the `build` and `plan` agents, Ctrl+P opens the command palette, `@path` attaches files, `!command` runs a shell command, Esc interrupts and `/help` lists everything.
 
 ## Security

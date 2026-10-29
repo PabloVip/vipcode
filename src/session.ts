@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { toolLabel } from "./labels.js";
 import { EXPORTS_DIR, HISTORY_PATH, SESSIONS_DIR, ensureHomeDir } from "./paths.js";
-import type { Todo } from "./tools.js";
+import { type Todo, describeCall } from "./tools.js";
 
 // Un mensaje tuyo y todo lo que hizo el agente después (para /undo y /redo)
 export interface Turn {
@@ -14,6 +15,20 @@ export interface Turn {
   // Cambia cada vez que se resume la conversación
   epoch: number;
   userText: string;
+}
+
+// Lo que fue pasando en la conversación tal como lo viste. A diferencia de los mensajes que recibe el modelo,
+// no se resume nunca: con esto se enseña la conversación al volver a ella y se escribe el .md
+export interface LogEntry {
+  role: "user" | "assistant" | "tool" | "info";
+  text: string;
+  time: number;
+  // assistant: modelo que contestó
+  model?: string;
+  // tool: herramienta, resumen de la llamada, si falló y el diff que enseñó
+  tool?: { name: string; summary: string; isError: boolean; display?: string };
+  // user: imágenes que adjuntaste
+  images?: number;
 }
 
 export interface Session {
@@ -29,6 +44,7 @@ export interface Session {
   epoch: number;
   usage: { prompt: number; completion: number };
   agent?: string;
+  log: LogEntry[];
 }
 
 export function newSession(cwd: string): Session {
@@ -48,28 +64,102 @@ export function newSession(cwd: string): Session {
     redo: [],
     epoch: 0,
     usage: { prompt: 0, completion: 0 },
+    log: [],
   };
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part: any) => {
+        if (part.type === "text") {
+          return part.text;
+        }
+        if (part.type === "image_url") {
+          return "[imagen]";
+        }
+        return "";
+      })
+      .join("\n");
+  }
+  return "";
+}
+
+// Lo que escribiste, sin los ficheros adjuntos con @ ni las notas que añade vipcode
+function userText(text: string): string {
+  let clean = text;
+  const attached = clean.indexOf("\n\nFicheros adjuntos con @");
+  if (attached >= 0) {
+    const names = [...clean.slice(attached).matchAll(/<(?:fichero|carpeta) ruta="([^"]+)">/g)].map((match) => match[1]);
+    clean = `${clean.slice(0, attached)}\n\n_Adjuntos: ${names.join(", ")}_`;
+  }
+  return clean.replace(/^\((?:Nota|El usuario ha ejecutado)[\s\S]*?\)\n\n/, "").replace(/^\[Mensaje nuevo del usuario mientras trabajabas\] /, "");
+}
+
+// Las sesiones de antes no tenían historial: se saca de los mensajes que quedan
+function logFromMessages(messages: ChatCompletionMessageParam[], time: number): LogEntry[] {
+  const log: LogEntry[] = [];
+  const results = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role === "tool") {
+      results.set(String((message as any).tool_call_id), contentText(message.content));
+    }
+  }
+  for (const message of messages) {
+    if (message.role === "user") {
+      const text = contentText(message.content);
+      if (/^(Continúa con la tarea pendiente\.|Has hecho la misma llamada|Has repetido la misma llamada|Imágenes devueltas por las herramientas:)/.test(text)) {
+        continue;
+      }
+      if (text.startsWith("Resumen de la conversación anterior:")) {
+        log.push({ role: "info", text: "Conversación resumida para ahorrar contexto (lo anterior al resumen ya no se guardaba entonces).", time });
+        continue;
+      }
+      log.push({ role: "user", text: userText(text), time });
+    } else if (message.role === "assistant") {
+      const text = contentText(message.content);
+      if (text.trim() !== "" && text !== "Entendido, sigo desde aquí.") {
+        log.push({ role: "assistant", text, time });
+      }
+      for (const call of ((message as any).tool_calls || []) as any[]) {
+        const name = String(call.function?.name || "");
+        const output = results.get(String(call.id)) || "";
+        log.push({ role: "tool", text: output.slice(0, 4000), time, tool: { name, summary: describeCall(name, call.function?.arguments || ""), isError: output.startsWith("Error") } });
+      }
+    }
+  }
+  return log;
 }
 
 // Las sesiones de la versión anterior no tenían todos los campos
 function normalize(data: Partial<Session>): Session {
+  const messages = Array.isArray(data.messages) ? data.messages : [];
   return {
     id: String(data.id),
     title: data.title || "(sin título)",
     cwd: data.cwd || "",
     created: data.created || data.updated || Date.now(),
     updated: data.updated || Date.now(),
-    messages: Array.isArray(data.messages) ? data.messages : [],
+    messages,
     todos: Array.isArray(data.todos) ? data.todos : [],
     turns: Array.isArray(data.turns) ? data.turns : [],
     redo: Array.isArray(data.redo) ? data.redo : [],
     epoch: data.epoch || 0,
     usage: data.usage || { prompt: 0, completion: 0 },
     agent: data.agent,
+    log: Array.isArray(data.log) ? data.log : logFromMessages(messages, data.updated || Date.now()),
   };
 }
 
 function firstUserText(session: Session): string {
+  // Lo que escribiste (por ejemplo «/review»), mejor que el mensaje ya expandido
+  const logged = session.log.find((entry) => entry.role === "user");
+  if (logged) {
+    return logged.text;
+  }
   const first = session.messages.find((m) => m.role === "user");
   if (!first) {
     return "";
@@ -98,6 +188,16 @@ export function saveSession(session: Session) {
     }
   }
   fs.writeFileSync(path.join(SESSIONS_DIR, `${session.id}.json`), JSON.stringify(session));
+  // Y la conversación entera en Markdown, para leerla cuando quieras
+  try {
+    fs.writeFileSync(sessionMarkdownPath(session), exportMarkdown(session));
+  } catch {
+    // no es grave: lo importante es el .json
+  }
+}
+
+export function sessionMarkdownPath(session: Session): string {
+  return path.join(SESSIONS_DIR, `${session.id}.md`);
 }
 
 export function listSessions(cwd?: string): Session[] {
@@ -113,6 +213,10 @@ export function listSessions(cwd?: string): Session[] {
       const data = normalize(JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, file), "utf8")));
       if (!cwd || data.cwd === cwd) {
         sessions.push(data);
+      }
+      // Las conversaciones de antes de que existiera el .md también lo tienen
+      if (data.log.length > 0 && !fs.existsSync(sessionMarkdownPath(data))) {
+        fs.writeFileSync(sessionMarkdownPath(data), exportMarkdown(data));
       }
     } catch {
       // sesión corrupta: la ignoramos
@@ -136,75 +240,56 @@ export function deleteSession(id: string): boolean {
     return false;
   }
   fs.rmSync(file);
+  fs.rmSync(path.join(SESSIONS_DIR, `${id}.md`), { force: true });
   return true;
 }
 
-function contentText(content: unknown): string {
-  if (typeof content === "string") {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part: any) => {
-        if (part.type === "text") {
-          return part.text;
-        }
-        if (part.type === "image_url") {
-          return "[imagen]";
-        }
-        return "";
-      })
-      .join("\n");
-  }
-  return "";
+// Un bloque de código que no se rompe aunque el texto lleve ```
+function fence(text: string, lang = ""): string[] {
+  const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map((match) => match[0].length));
+  const ticks = "`".repeat(longest + 1);
+  return [`${ticks}${lang}`, text, ticks];
 }
 
-// La conversación en Markdown, para guardarla o compartirla
+// En español aunque el sistema no diga el idioma: 29/10/2026, 20:06:06
+function when(time: number): string {
+  return new Date(time).toLocaleString("es-ES");
+}
+
+// La conversación entera en Markdown (sale del historial, que no se resume nunca)
 export function exportMarkdown(session: Session): string {
   const lines: string[] = [
     `# ${session.title}`,
     "",
     `- Carpeta: \`${session.cwd}\``,
-    `- Empezada: ${new Date(session.created).toLocaleString()}`,
-    `- Última actividad: ${new Date(session.updated).toLocaleString()}`,
+    `- Empezada: ${when(session.created)} · Última actividad: ${when(session.updated)}`,
     `- Tokens: ${session.usage.prompt} de entrada, ${session.usage.completion} de salida`,
     "",
+    "---",
+    "",
   ];
-  for (const message of session.messages) {
-    if (message.role === "system") {
-      continue;
-    }
-    if (message.role === "user") {
-      let text = contentText(message.content);
-      const attached = text.indexOf("\n\nFicheros adjuntos con @");
-      if (attached >= 0) {
-        const names = [...text.slice(attached).matchAll(/<(?:fichero|carpeta) ruta="([^"]+)">/g)].map((match) => match[1]);
-        text = `${text.slice(0, attached)}\n\n_Adjuntos: ${names.join(", ")}_`;
-      }
-      lines.push("## Tú", "", text, "");
-    } else if (message.role === "assistant") {
-      const text = contentText(message.content);
-      lines.push("## vipcode", "");
-      if (text.trim() !== "") {
-        lines.push(text, "");
-      }
-      const calls = (message as any).tool_calls || [];
-      for (const call of calls) {
-        let args = call.function?.arguments || "";
-        if (args.length > 600) {
-          args = `${args.slice(0, 600)}…`;
+  for (const entry of session.log) {
+    if (entry.role === "user") {
+      const images = entry.images ? ` · ${entry.images} imagen${entry.images > 1 ? "es" : ""}` : "";
+      lines.push(`### Tú · ${when(entry.time)}${images}`, "", entry.text, "");
+    } else if (entry.role === "assistant") {
+      lines.push(`### vipcode${entry.model ? ` · ${entry.model}` : ""}`, "", entry.text, "");
+    } else if (entry.role === "tool" && entry.tool) {
+      const summary = entry.tool.summary ? ` \`${entry.tool.summary.replace(/`/g, "'")}\`` : "";
+      lines.push(`- **${toolLabel(entry.tool.name)}**${summary}${entry.tool.isError ? " — ✗ falló" : ""}`);
+      if (entry.tool.display) {
+        lines.push("", ...fence(entry.tool.display, "diff"), "");
+      } else if (entry.tool.isError || entry.tool.name === "bash") {
+        const output = entry.text.split("\n").slice(0, 15).join("\n");
+        if (output.trim() !== "") {
+          lines.push("", ...fence(output), "");
         }
-        lines.push(`> 🔧 **${call.function?.name}** \`${args.replace(/`/g, "'")}\``, "");
       }
-    } else if (message.role === "tool") {
-      let text = contentText(message.content);
-      if (text.length > 2000) {
-        text = `${text.slice(0, 2000)}\n[…]`;
-      }
-      lines.push("<details><summary>Resultado</summary>", "", "```", text.replace(/```/g, "'''"), "```", "", "</details>", "");
+    } else if (entry.role === "info") {
+      lines.push("", `_${entry.text}_`, "");
     }
   }
-  return lines.join("\n");
+  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
 }
 
 export function saveExport(session: Session): string {

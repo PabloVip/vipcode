@@ -651,3 +651,23 @@ test("seguridad: un proyecto en el que no confías no puede desviar tus claves a
   ws.cleanup();
 });
 
+test("sesiones: queda guardada en .md y al continuar con -c se ve la conversación anterior", async () => {
+  const mock = await startMock(() => ({ text: "RESPUESTA-GUARDADA" }));
+  const ws = tempWorkspace();
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  await runVip(["run", "primera pregunta"], { cwd: ws.proj, home: ws.home });
+  const dir = path.join(ws.home, "sessions");
+  const md = fs.readdirSync(dir).find((file) => file.endsWith(".md"));
+  assert.ok(md, "no se ha guardado el .md");
+  const text = fs.readFileSync(path.join(dir, md), "utf8");
+  assert.match(text, /### Tú · [^\n]+\n\nprimera pregunta/);
+  assert.match(text, /### vipcode · p\/m\n\nRESPUESTA-GUARDADA/);
+  // Sin terminal se usa el modo de texto: enseña lo anterior antes de seguir
+  const result = await runVip(["-c"], { cwd: ws.proj, home: ws.home, input: "/exit\n" });
+  assert.match(result.output, /Conversación anterior: «primera pregunta»/, result.output);
+  assert.match(result.output, /❯ primera pregunta/);
+  assert.match(result.output, /RESPUESTA-GUARDADA/);
+  await mock.close();
+  ws.cleanup();
+});
+

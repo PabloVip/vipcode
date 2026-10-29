@@ -134,6 +134,15 @@ Mientras trabaja ves qué modelo está pensando, cada herramienta con su acción
 
 Antes de editar un fichero, ejecutar un comando o salir a internet, vipcode pregunta enseñando el diff o el comando. Puedes contestar que sí una vez, que sí a todo lo de ese tipo durante la sesión, que sí siempre a un comando concreto (por ejemplo `npm test*`), que no, o que no y explicarle qué hacer.
 
+### Sesiones
+
+Cada conversación se guarda sola en `~/.vipcode/sessions/`, en dos ficheros:
+
+- **`.json`**, para poder seguirla.
+- **`.md`**, con la conversación entera para leerla o compartirla: lo que escribiste, cada respuesta con el modelo que contestó, las herramientas que usó y los cambios que hizo en cada fichero. Se actualiza solo mientras hablas y no pierde nada aunque la conversación se resuma para que quepa en el modelo.
+
+Para volver a una conversación: `vipcode -c` (la última de esta carpeta), `/sessions` (eliges de la lista) o `vipcode -s <id>`. Al volver ves en pantalla toda la conversación anterior, y el modelo tiene su contexto para seguir donde lo dejasteis. `/export` guarda además una copia en `~/.vipcode/exports/`.
+
 ### Comandos
 
 | Comando | Qué hace |
@@ -363,7 +372,7 @@ Los planes gratuitos tienen letra pequeña: los proveedores anónimos (Kilo, OVH
 Todo está en `~/.vipcode` (o en `VIPCODE_HOME` si la defines):
 
 - `config.json`: tu configuración. `auth.json`: claves (permisos 600). `state.json`: pausas de los proveedores. `notices.json`: avisos que ya has visto. `update.json`: última comprobación de versiones nuevas. `trusted.json`: carpetas en las que confías.
-- `models.json`: modelos descubiertos. `ranking.json`: puntuaciones de LLM Stats descargadas con tu clave. `sessions/`: conversaciones. `history.jsonl`: lo que has escrito.
+- `models.json`: modelos descubiertos. `ranking.json`: puntuaciones de LLM Stats descargadas con tu clave. `sessions/`: conversaciones (un `.json` para seguirlas y un `.md` para leerlas). `history.jsonl`: lo que has escrito.
 - `snapshots/`: instantáneas para `/undo` (un repositorio git aparte por proyecto; no toca tu `.git`).
 - `exports/`: conversaciones exportadas. `agents/`, `commands/` y `skills/`: tus agentes, comandos y skills globales.
 

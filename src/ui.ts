@@ -2,8 +2,11 @@ import type { Interface } from "node:readline/promises";
 import pc from "picocolors";
 import type { AgentEvents } from "./agent.js";
 import type { UiAdapter } from "./app.js";
+import { toolLabel } from "./labels.js";
+import { renderMarkdown } from "./markdown.js";
 import { type PermissionReply, type PermissionRequest, type SessionGrants, suggestPattern } from "./permissions.js";
 import { showControl, stripControl, stripUnsafe } from "./sanitize.js";
+import { type Session, sessionMarkdownPath } from "./session.js";
 import { formatTodos } from "./tools.js";
 
 export const ui = {
@@ -179,6 +182,31 @@ export function plainPermissionPrompt(getReadline: () => Interface | null, grant
       }
     }
   };
+}
+
+// La conversación de una sesión a la que vuelves, en el modo de texto simple
+export function printLog(session: Session, max = 300) {
+  const entries = session.log;
+  if (entries.length === 0) {
+    return;
+  }
+  const shown = entries.slice(-max);
+  console.log(pc.dim(`── Conversación anterior: «${stripControl(session.title)}» · ${new Date(session.updated).toLocaleString()} ──`));
+  if (entries.length > shown.length) {
+    console.log(pc.dim(`… ${entries.length - shown.length} pasos antes; la conversación entera está en ${sessionMarkdownPath(session)}`));
+  }
+  for (const entry of shown) {
+    if (entry.role === "user") {
+      console.log(`\n${pc.magenta("❯")} ${stripControl(entry.text)}`);
+    } else if (entry.role === "assistant") {
+      console.log(`\n${renderMarkdown(entry.text, process.stdout.columns || 80)}`);
+    } else if (entry.role === "tool" && entry.tool) {
+      ui.tool(toolLabel(entry.tool.name), entry.tool.summary);
+    } else {
+      console.log(pc.dim(stripControl(entry.text)));
+    }
+  }
+  console.log(pc.dim("\n── Sigues desde aquí (/new empieza otra conversación) ──"));
 }
 
 // Interfaz mínima para los comandos / en el modo de texto

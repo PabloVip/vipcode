@@ -10,7 +10,7 @@ import type { McpManager } from "./mcp.js";
 import type { PermissionReply, PermissionRequest } from "./permissions.js";
 import { systemPrompt } from "./prompt.js";
 import { type ChatResult, type Router, type Usage, estimateTokens } from "./router.js";
-import { type Session, type Turn, saveSession } from "./session.js";
+import { type LogEntry, type Session, type Turn, saveSession } from "./session.js";
 import { type SkillDefinition, skillTool } from "./skills.js";
 import type { Snapshots } from "./snapshot.js";
 import {
@@ -66,6 +66,8 @@ export interface AgentEvents {
 export interface UserInput {
   text: string;
   images?: string[];
+  // Lo que escribiste, si es distinto de lo que se manda (por ejemplo «/review» frente a su plantilla)
+  display?: string;
 }
 
 export interface AgentDeps {
@@ -182,6 +184,11 @@ export class Agent {
     this.pendingNote += text;
   }
 
+  // Apunta algo en el historial de la sesión (lo que se enseña al volver y se guarda en el .md)
+  logEntry(entry: Omit<LogEntry, "time">) {
+    this.session.log.push({ ...entry, time: Date.now() });
+  }
+
   private toolContext(agent: AgentDefinition, signal: AbortSignal | undefined, depth: number): ToolContext {
     const lsp = this.deps.lsp;
     const ctx: ToolContext = {
@@ -294,6 +301,7 @@ export class Agent {
       { role: "assistant", content: "Entendido, sigo desde aquí." },
     ];
     this.session.epoch++;
+    this.logEntry({ role: "info", text: "Conversación resumida para ahorrar contexto: el modelo sigue con un resumen, pero aquí sigue todo lo anterior." });
     saveSession(this.session);
     this.events.onInfo?.(`Conversación resumida (~${estimateTokens(this.session.messages)} tokens).`);
   }
@@ -389,6 +397,13 @@ export class Agent {
       this.events.onToolStart?.(event);
       const result = await runTool(tools, name, args, { ...ctx, onProgress: (text) => this.events.onToolProgress?.(event, text) }, agent.readOnly);
       this.events.onToolEnd?.({ ...event, output: result.output, display: result.display, isError: Boolean(result.isError) });
+      if (depth === 0) {
+        this.logEntry({
+          role: "tool",
+          text: truncate(result.output, 4000),
+          tool: { name, summary: event.summary, isError: Boolean(result.isError), display: result.display ? truncate(result.display, 4000) : undefined },
+        });
+      }
       if (result.images) {
         images.push(...result.images);
       }
@@ -450,11 +465,12 @@ export class Agent {
 
       const before = this.deps.snapshots ? await this.deps.snapshots.track() : null;
       beginTurn();
-      turn = { messageIndex: this.session.messages.length, before, after: null, epoch: this.session.epoch, userText: input.text };
+      turn = { messageIndex: this.session.messages.length, before, after: null, epoch: this.session.epoch, userText: input.display ?? input.text };
       this.session.turns.push(turn);
       this.session.redo = [];
       this.session.agent = this.agent.name;
       this.session.messages.push(this.buildUserMessage(input));
+      this.logEntry({ role: "user", text: input.display ?? input.text, images: input.images?.length || undefined });
       saveSession(this.session);
 
       await this.loop(tools, signal);
@@ -482,6 +498,9 @@ export class Agent {
       const result = await this.step(this.fullMessages(tools), tools, agent, signal, 0);
       const message = result.message;
       this.session.messages.push(message as Message);
+      if (typeof message.content === "string" && message.content.trim() !== "") {
+        this.logEntry({ role: "assistant", text: message.content, model: result.slot.key });
+      }
       saveSession(this.session);
 
       if (!message.tool_calls || message.tool_calls.length === 0) {
@@ -512,6 +531,7 @@ export class Agent {
       if (this.queue.length > 0) {
         for (const queued of this.queue.splice(0)) {
           this.session.messages.push(this.buildUserMessage({ text: `[Mensaje nuevo del usuario mientras trabajabas] ${queued.text}`, images: queued.images }));
+          this.logEntry({ role: "user", text: queued.text, images: queued.images?.length || undefined });
         }
         this.events.onInfo?.("(mensaje entregado al agente)");
         saveSession(this.session);
@@ -595,6 +615,7 @@ export class Agent {
     }
     this.session.redo.push({ turn, messages: removed });
     this.readTimes.clear();
+    this.logEntry({ role: "info", text: `Deshecho: «${turn.userText}»${files.length > 0 ? ` (ficheros restaurados: ${files.join(", ")})` : ""}` });
     saveSession(this.session);
     return { files, text: turn.userText, restoredMessages };
   }
@@ -613,6 +634,7 @@ export class Agent {
     }
     this.session.turns.push(entry.turn);
     this.readTimes.clear();
+    this.logEntry({ role: "info", text: `Rehecho: «${entry.turn.userText}»` });
     saveSession(this.session);
     return { files };
   }

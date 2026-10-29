@@ -15,7 +15,7 @@ import { createSkill, installSkills, loadSkills, removeSkill } from "./skills.js
 import { type ProjectTrust, projectTrust, trustProject, untrustProject } from "./trust.js";
 import { updateVipcode } from "./update.js";
 import { completeMention } from "./tools.js";
-import { plainAdapter, plainEvents, plainPermissionPrompt, ui } from "./ui.js";
+import { plainAdapter, plainEvents, plainPermissionPrompt, printLog, ui } from "./ui.js";
 
 
 const USAGE = `vipcode ${VERSION} · agente de programación para la terminal con IAs gratuitas
@@ -426,6 +426,7 @@ async function plainLoop(app: App, options: Options, root: string) {
 
   const adapter: UiAdapter = { ...plainAdapter, setInput: (text) => ui.info(`Tu mensaje era: ${text}`) };
   ui.banner(app.agent.agent.name, app.router.slots.length);
+  printLog(app.agent.session);
   if (options.args.length > 0) {
     await runTask(options.args.join(" "), {}, loadImages(options.images, root));
   }
@@ -458,6 +459,9 @@ async function plainLoop(app: App, options: Options, root: string) {
       const result = await app.handleCommand(text, adapter);
       if (result.exit) {
         break;
+      }
+      if (result.loaded) {
+        printLog(app.agent.session);
       }
       if (result.run) {
         await runTask(result.run.input.text, result.run.options);
