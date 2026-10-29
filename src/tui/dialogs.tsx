@@ -183,12 +183,19 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
   const windowSize = 12;
   const start = Math.max(0, Math.min(selected - Math.floor(windowSize / 2), filtered.length - windowSize));
   const visible = filtered.slice(start, start + windowSize);
+  // La primera línea del título va destacada; las siguientes, si las hay, explican la pregunta
+  const [heading, ...body] = props.title.split("\n");
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
       <Text bold color="cyan">
-        {props.title}
+        {heading}
       </Text>
+      {body.length > 0 ? (
+        <Box marginBottom={1}>
+          <Text>{body.join("\n")}</Text>
+        </Box>
+      ) : null}
       <Text dimColor>
         {filter ? `Filtro: ${filter}` : "Escribe para filtrar · ↑↓ elegir · Enter aceptar · Esc salir"}
       </Text>

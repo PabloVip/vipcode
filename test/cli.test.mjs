@@ -275,13 +275,13 @@ test("sin clave: funciona sin configurar nada y no manda la cabecera Authorizati
   let result = await runVip(["run", "hola"], { cwd: ws.proj, home: ws.home });
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /anon auth=ninguna/);
-  assert.doesNotMatch(result.output, /Sin claves/);
+  assert.doesNotMatch(result.output, /IAs gratuitas sin registro/);
   result = await runVip(["run", "--model", "conclave/m", "hola"], { cwd: ws.proj, home: ws.home });
   assert.match(result.output, /conclave auth=Bearer x/);
   // Solo con anónimos se avisa de que pueden guardar lo que envías
   ws.writeConfig({ providers: [{ name: "anon", baseURL: `${mock.url}/anon/v1`, noKey: true, models: [{ id: "m", context: 100000 }] }], enabledProviders: ["anon"] });
   result = await runVip(["run", "hola"], { cwd: ws.proj, home: ws.home });
-  assert.match(result.output, /Sin claves: usando modelos gratis anónimos \(anon\)/);
+  assert.match(result.output, /Estás usando IAs gratuitas sin registro \(anon\)/);
   // Y con "keyless": false no se usan
   ws.writeConfig({ providers: [{ name: "anon", baseURL: `${mock.url}/anon/v1`, noKey: true, models: [{ id: "m", context: 100000 }] }], enabledProviders: ["anon"], keyless: false });
   result = await runVip(["run", "hola"], { cwd: ws.proj, home: ws.home });
@@ -521,11 +521,11 @@ test("aviso de privacidad: solo la primera vez que se usan proveedores sin clave
   ws.writeConfig({ enabledProviders: ["llm7"], providers: [{ name: "llm7", baseURL: `${mock.url}/llm7/v1` }] });
   let result = await runVip(["run", "hola"], { cwd: ws.proj, home: ws.home });
   assert.match(result.output, /HOLA-ANONIMO/, result.output);
-  assert.match(result.output, /Pueden guardar lo que les envías y usarlo para mejorar sus modelos/);
+  assert.match(result.output, /pueden guardar lo que les escribes para mejorar sus modelos/);
   assert.ok(JSON.parse(fs.readFileSync(path.join(ws.home, "notices.json"), "utf8")).privacy);
   result = await runVip(["run", "otra vez"], { cwd: ws.proj, home: ws.home });
   assert.match(result.output, /HOLA-ANONIMO/);
-  assert.ok(!result.output.includes("Pueden guardar lo que les envías y usarlo"));
+  assert.ok(!result.output.includes("pueden guardar lo que les escribes"));
   await mock.close();
   ws.cleanup();
 });

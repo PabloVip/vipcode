@@ -162,6 +162,10 @@ export class App {
   yolo = false;
   local: Record<string, ModelConfig[]> = {};
   lastSessions: Session[] = [];
+  // Versión nueva de vipcode publicada: la interfaz la recuerda abajo hasta que la instalas con /update
+  newVersion: string | null = null;
+  // /update ya la ha instalado: se usa al cerrar y volver a abrir vipcode
+  updateInstalled = false;
   // La interfaz pone aquí cómo preguntar los permisos
   promptPermission: (request: PermissionRequest, agent: AgentDefinition) => Promise<PermissionReply> = async () => ({
     allow: false,
@@ -255,7 +259,11 @@ export class App {
 
   privacyNotice(): string {
     const names = [...new Set(this.router.slots.filter((slot) => slot.anonymous).map((slot) => (slot.provider.label || slot.provider.name).replace(/ \(sin clave\)$/, "")))];
-    return `Sin clave, vipcode usa proveedores gratuitos que no piden registro (${names.join(", ")}). Pueden guardar lo que les envías y usarlo para mejorar sus modelos: no les mandes contraseñas, claves ni código confidencial. Con /connect añades un proveedor con clave, y con "keyless": false en la configuración dejas de usar los anónimos.`;
+    return [
+      `Para que puedas empezar ya mismo, vipcode usa IAs gratuitas que no piden registro (${names.join(", ")}).`,
+      "Como son gratis, pueden guardar lo que les escribes para mejorar sus modelos, así que mejor no compartas contraseñas, claves ni datos privados.",
+      "Cuando quieras, conecta una cuenta gratuita con /connect y tendrás más mensajes y más modelos.",
+    ].join("\n");
   }
 
   acceptPrivacyNotice() {
@@ -362,7 +370,7 @@ export class App {
 
   anonymousNotice(): string {
     const names = [...new Set(this.router.slots.map((slot) => (slot.provider.label || slot.provider.name).replace(/ \(sin clave\)/, "")))];
-    return `Sin claves: usando modelos gratis anónimos (${names.join(", ")}). Tienen pocas peticiones por hora y pueden guardar lo que envías; con /connect añades claves gratis con más límites.`;
+    return `Estás usando IAs gratuitas sin registro (${names.join(", ")}). Consejo: conecta una cuenta gratuita con /connect para tener más mensajes y más modelos (y recuerda no compartir datos privados).`;
   }
 
   // Siguiente agente principal (Tab)
@@ -983,6 +991,8 @@ export class App {
           ui.notice(result.message);
         } else {
           ui.info(result.message);
+          this.newVersion = null;
+          this.updateInstalled ||= result.status === "updated";
         }
         return {};
       }

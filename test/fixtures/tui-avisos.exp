@@ -1,0 +1,43 @@
+# Avisos al abrir vipcode: la versión nueva y la bienvenida de la primera vez (lo lanza test/tui.test.mjs)
+set timeout 20
+log_user 1
+set cli [lindex $argv 0]
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+spawn -noecho node $cli
+stty rows 40 columns 120 < $spawn_out(slave,name)
+
+# 1. Recuadro de versión nueva
+expect {
+  "nueva de vipcode" {}
+  timeout { falla "no aparece el recuadro de versión nueva" }
+}
+
+# 2. Bienvenida: se acepta con Enter («Empezar»)
+expect {
+  "Te damos la bienvenida" {}
+  timeout { falla "no aparece la bienvenida" }
+}
+send "\r"
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "la bienvenida no se cierra" }
+}
+
+# 3. La barra de abajo sigue recordando la versión nueva
+expect {
+  "99.0.0 disponible" {}
+  timeout { falla "la barra de abajo no recuerda la versión nueva" }
+}
+
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-AVISOS-OK"
+exit 0

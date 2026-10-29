@@ -31,6 +31,8 @@ type Item =
   // Pie de cada respuesta: qué modelo contestó, cuánto tardó y cuántos tokens gastó
   | { id: number; kind: "answer"; slot: string; score: number | null; ms: number; tokens: number }
   | { id: number; kind: "shell"; command: string; output: string; code: number | null }
+  // Recuadro de versión nueva de vipcode
+  | { id: number; kind: "update"; version: string }
   | { id: number; kind: "info" | "notice" | "error" | "block"; text: string };
 
 type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never;
@@ -344,6 +346,21 @@ function ItemView(props: { item: Item; app: App; width: number }) {
         </Box>
       );
     }
+    case "update":
+      return (
+        <Box marginY={1} alignSelf="flex-start" flexDirection="column" borderStyle="round" borderColor="green" paddingX={2}>
+          <Text bold color="green">
+            ↑ ¡Hay una versión nueva de vipcode!
+          </Text>
+          <Text>
+            {VERSION} → <Text bold color="green">{stripControl(item.version)}</Text> · escribe{" "}
+            <Text bold color="cyan">
+              /update
+            </Text>{" "}
+            para instalarla
+          </Text>
+        </Box>
+      );
     // Avisos y bloques pueden llevar mensajes de los proveedores o datos de fuera: solo se dejan los colores
     case "info":
       return <Text dimColor>{stripUnsafe(item.text)}</Text>;
@@ -486,9 +503,17 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   const usage = app.agent.session.usage;
   const spent = usage.prompt + usage.completion;
   const queued = app.agent.queue.length;
-  let hint = "ctrl+p comandos · /help";
+  let hint = <Text dimColor>ctrl+p comandos · /help</Text>;
   if (props.busy) {
-    hint = "esc interrumpe · escribe para añadir instrucciones";
+    hint = <Text dimColor>esc interrumpe · escribe para añadir instrucciones</Text>;
+  } else if (app.updateInstalled) {
+    hint = <Text color="green">✓ vipcode actualizado · ciérralo y vuelve a abrirlo para usarlo</Text>;
+  } else if (app.newVersion) {
+    hint = (
+      <Text bold color="green">
+        ↑ vipcode {stripControl(app.newVersion)} disponible · escribe /update
+      </Text>
+    );
   }
   return (
     <Box justifyContent="space-between" paddingX={1}>
@@ -511,9 +536,7 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
         </Text>
         {app.yolo ? <Text color="red"> · yolo</Text> : null}
       </Text>
-      <Text dimColor wrap="truncate-start">
-        {hint}
-      </Text>
+      <Text wrap="truncate-start">{hint}</Text>
     </Box>
   );
 }
@@ -767,10 +790,10 @@ function Main(props: { app: App; initial: string }) {
 
   // La primera vez que se van a usar proveedores sin clave, explicamos qué pasa con lo que envías
   const askPrivacy = async () => {
-    const choice = await adapter.select!(`Antes de empezar: ${app.privacyNotice()}`, [
-      { label: "Entendido, empezar", value: "ok" },
-      { label: "Añadir antes un proveedor con clave", description: "como /connect", value: "connect" },
-      { label: "No usar nunca los que no piden clave", description: 'guarda "keyless": false en tu configuración', value: "off" },
+    const choice = await adapter.select!(`¡Te damos la bienvenida a vipcode!\n${app.privacyNotice()}`, [
+      { label: "Empezar", description: "con las IAs gratuitas sin registro", value: "ok" },
+      { label: "Conectar antes una cuenta gratuita", description: "para tener más mensajes y más modelos", value: "connect" },
+      { label: "Prefiero usar solo mis cuentas", description: "y no las IAs sin registro", value: "off" },
     ]);
     if (!choice) {
       // Con Esc se vuelve a preguntar la próxima vez
@@ -781,7 +804,7 @@ function Main(props: { app: App; initial: string }) {
       await app.connect(adapter, "");
     } else if (choice === "off") {
       app.disableKeyless();
-      push({ kind: "info", text: "No usaré los proveedores sin clave (lo puedes cambiar con \"keyless\" en la configuración)." });
+      push({ kind: "info", text: 'Hecho: solo usaré las cuentas que conectes. Si cambias de idea, pon "keyless": true en tu configuración (/config te dice dónde está).' });
       if (app.router.slots.length === 0) {
         await app.connect(adapter, "");
       }
@@ -941,7 +964,7 @@ function Main(props: { app: App; initial: string }) {
     if (app.router.slots.length === 0) {
       push({
         kind: "notice",
-        text: "Todavía no tienes ningún modelo. Elige un proveedor gratuito y pega su clave (puedes repetirlo con /connect).",
+        text: "Para empezar, conecta una IA gratuita: elige una de la lista y sigue los pasos (puedes repetirlo cuando quieras con /connect).",
       });
       void app.connect(adapter, "").then(refresh);
     } else if (app.needsPrivacyNotice()) {
@@ -961,7 +984,8 @@ function Main(props: { app: App; initial: string }) {
     if (app.config.checkUpdates !== false) {
       void checkForUpdate().then((version) => {
         if (version) {
-          push({ kind: "notice", text: `Hay una versión nueva de vipcode (${version}, tienes la ${VERSION}). Escribe /update para instalarla.` });
+          app.newVersion = version;
+          push({ kind: "update", version });
         }
       });
     }

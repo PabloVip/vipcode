@@ -118,7 +118,7 @@ vipcode trust                # confiar en la configuración que trae esta carpet
 - **Con npm** (`npm install -g vipcode` o el paquete de la release): mira cuál es la última versión publicada en npm y en GitHub y, si es más nueva que la tuya, la instala.
 - **Desde el código** (`git clone` + `npm link`): trae lo último del repositorio con `git pull`, instala las dependencias y compila. Si tienes cambios sin guardar en esa carpeta, no toca nada y te avisa.
 
-Después cierra vipcode y vuelve a abrirlo. Además, una vez al día vipcode mira si hay una versión nueva y te avisa al abrirlo; se desactiva con `"checkUpdates": false` en la configuración.
+Después cierra vipcode y vuelve a abrirlo. Además, una vez al día vipcode mira si hay una versión nueva y te avisa al abrirlo con un recuadro verde, y te lo recuerda en la barra de abajo hasta que actualizas; se desactiva con `"checkUpdates": false` en la configuración.
 
 ### En la interfaz
 
