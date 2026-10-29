@@ -33,8 +33,20 @@ expect {
 }
 # Y en la barra de abajo, cuánto queda del plan gratis
 expect {
-  "quedan 99 de 100 hoy" {}
+  "quedan 99/100 hoy" {}
   timeout { falla "la barra de abajo no dice cuánto queda" }
+}
+
+# 1b. Una respuesta más ancha que la terminal se parte dentro de su hueco (120 columnas menos el «● »), no en el
+# borde de la terminal, que la cortaría por en medio
+send "largo\r"
+expect {
+  -re {y{118}\r?\n  y{12}} {}
+  timeout { falla "la respuesta larga no se parte en su hueco" }
+}
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre tras la respuesta larga" }
 }
 
 # 2. Edición con diálogo de permiso: se ve el diff y se acepta con «s»

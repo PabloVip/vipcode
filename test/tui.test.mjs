@@ -35,6 +35,10 @@ test("interfaz completa en una pseudo-terminal", { skip: !hasExpect && "falta el
     if (text.includes('<fichero ruta="hola.txt">')) {
       return { text: "ADJUNTO-OK" };
     }
+    // Una respuesta más larga que la terminal, para ver que se parte bien
+    if (text.startsWith("largo")) {
+      return { text: "y".repeat(130) };
+    }
     if (text.startsWith("cambia")) {
       return {
         tools: [

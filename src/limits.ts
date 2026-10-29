@@ -10,9 +10,22 @@ const PERIOD: Record<string, string> = { day: "hoy", hour: "esta hora", minute: 
 
 export interface Quota {
   text: string;
+  // Para la barra de abajo: «quedan 991/1000 hoy»
+  short: string;
   remaining: number;
   limit: number | null;
   period?: LimitWindow["period"];
+}
+
+function quota(remaining: number, limit: number | null, period: string, estimated = false): Quota {
+  const mark = estimated ? "≈ " : "";
+  const tail = period ? ` ${period}` : "";
+  return {
+    text: `${mark}quedan ${number(remaining)}${limit !== null ? ` de ${number(limit)}` : ""}${tail}`,
+    short: `${mark}quedan ${number(remaining)}${limit !== null ? `/${number(limit)}` : ""}${tail}`,
+    remaining,
+    limit,
+  };
 }
 
 function number(n: number): string {
@@ -49,10 +62,12 @@ function fromHeaders(window: LimitWindow | undefined, now: number, unit = ""): Q
   if (!window || (window.resetAt !== null && window.resetAt <= now)) {
     return null;
   }
-  const amount = unit ? short : number;
-  const of = window.limit !== null ? ` de ${amount(window.limit)}` : "";
-  const period = window.period ? ` ${PERIOD[window.period]}` : "";
-  return { text: `quedan ${amount(window.remaining)}${of}${unit}${period}`, remaining: window.remaining, limit: window.limit, period: window.period };
+  const period = window.period ? PERIOD[window.period] : "";
+  if (unit) {
+    const text = `quedan ${short(window.remaining)}${window.limit !== null ? ` de ${short(window.limit)}` : ""}${unit}${period ? ` ${period}` : ""}`;
+    return { text, short: text, remaining: window.remaining, limit: window.limit, period: window.period };
+  }
+  return { ...quota(window.remaining, window.limit, period), period: window.period };
 }
 
 // Lo último que ha dicho el proveedor de este modelo (o de cualquiera de los suyos si el límite es de toda la cuenta)
@@ -86,13 +101,13 @@ export function quotaFor(router: Router, slot: Slot, now = Date.now()): Quota | 
     const used = slot.provider.limitScope === "provider" ? usage?.requests || 0 : usage?.models[slot.model.id] || 0;
     // Si ya llevas más de las que dice el plan, es que tu límite es mayor (por ejemplo OpenRouter con créditos)
     if (used <= limits.perDay) {
-      return { text: `≈ quedan ${number(limits.perDay - used)} de ${number(limits.perDay)} hoy`, remaining: limits.perDay - used, limit: limits.perDay };
+      return quota(limits.perDay - used, limits.perDay, PERIOD.day, true);
     }
   }
   if (limits.perHour) {
     const used = (router.recent[slot.provider.name] || []).filter((time) => now - time < HOUR_MS).length;
     if (used <= limits.perHour) {
-      return { text: `≈ quedan ${number(limits.perHour - used)} de ${number(limits.perHour)} esta hora`, remaining: limits.perHour - used, limit: limits.perHour };
+      return quota(limits.perHour - used, limits.perHour, PERIOD.hour, true);
     }
   }
   return header;

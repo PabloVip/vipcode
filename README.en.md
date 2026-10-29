@@ -4,6 +4,8 @@
 
 A coding agent for your terminal (command `vipcode`) that only uses **free AI models** and **automatically switches provider** when one runs out. The interface and messages are in Spanish.
 
+![vipcode fixing a bug in carrito.js: it reads the file, shows the change, asks for permission and applies it](https://raw.githubusercontent.com/PabloVip/vipcode/main/docs/demo.svg)
+
 - **Works right after installing, with no keys or sign-up**: it uses providers that allow anonymous access (Kilo Gateway, OVHcloud, LLM7 and Pollinations).
 - For higher limits and better models, add free keys from the 20+ included providers (Gemini, NVIDIA, Mistral, Cerebras, OpenRouter, Groq, Z.ai…). With OpenRouter you just sign in through the browser: `vipcode auth login openrouter`.
 - With a free [LLM Stats](https://llm-stats.com) key, the best models are tried first according to their ranking.

@@ -257,7 +257,7 @@ function Banner(props: { app: App }) {
     extras.push(`${mcp} MCP`);
   }
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={2}>
+    <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="magenta" paddingX={2}>
       <Text>
         <Text bold color="magenta">
           ◆ vipcode
@@ -281,6 +281,16 @@ function Banner(props: { app: App }) {
       <Text dimColor wrap="truncate-end">
         Ctrl+P comandos · @ adjunta · ! terminal · Tab cambia de agente · /help ayuda
       </Text>
+    </Box>
+  );
+}
+
+// El «●» delante de cada respuesta, en un hueco fijo de dos columnas: escrito como <Text>● </Text>, Ink no cuenta el
+// espacio al repartir el ancho y el texto de al lado se pasa una columna (y la terminal lo corta)
+function Bullet(props: { color: string }) {
+  return (
+    <Box width={2} flexShrink={0}>
+      <Text color={props.color}>●</Text>
     </Box>
   );
 }
@@ -309,7 +319,7 @@ function ItemView(props: { item: Item; app: App; width: number }) {
     case "assistant":
       return (
         <Box marginTop={1}>
-          <Text color={item.color}>● </Text>
+          <Bullet color={item.color} />
           <Box flexDirection="column" flexGrow={1}>
             <Text>{renderMarkdown(item.text, Math.max(20, width - 4))}</Text>
           </Box>
@@ -471,7 +481,13 @@ function InputBox(props: { editor: E.EditorState; color: string; placeholder: st
 }
 
 // Medidor de contexto: ▰▰▰▱▱▱▱▱ 34 %
-function ContextGauge(props: { used: number; total: number }) {
+// Texto del indicador de contexto («75% de 128k», o solo «75%» si falta sitio)
+function gaugeLabel(used: number, total: number, detail: boolean): string {
+  const percent = `${Math.round(Math.min(1, used / total) * 100)}%`;
+  return detail ? `${percent} de ${shortTokens(total)}` : percent;
+}
+
+function ContextGauge(props: { used: number; total: number; detail: boolean }) {
   if (props.used <= 0 || props.total <= 0) {
     return null;
   }
@@ -488,13 +504,13 @@ function ContextGauge(props: { used: number; total: number }) {
       <Text dimColor> · </Text>
       <Text color={color}>{"▰".repeat(filled)}</Text>
       <Text dimColor>
-        {"▱".repeat(8 - filled)} {Math.round(ratio * 100)}% de {shortTokens(props.total)}
+        {"▱".repeat(8 - filled)} {gaugeLabel(props.used, props.total, props.detail)}
       </Text>
     </Text>
   );
 }
 
-function StatusBar(props: { app: App; agentName: string; busy: boolean; model: string }) {
+function StatusBar(props: { app: App; agentName: string; busy: boolean; model: string; width: number }) {
   const { app } = props;
   const agent = app.agents.find((item) => item.name === props.agentName);
   const current = props.model || app.router.pinned || app.agent.lastSlot;
@@ -512,46 +528,74 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   } else if (quota && quota.limit && quota.remaining / quota.limit <= 0.1) {
     quotaColor = "yellow";
   }
-  let hint = <Text dimColor>ctrl+p comandos · /help</Text>;
+  // A la derecha, la ayuda (y su versión corta por si no cabe)
+  let hint = { text: "ctrl+p comandos · /help", short: "/help", color: undefined as string | undefined, bold: false };
   if (props.busy) {
-    hint = <Text dimColor>esc interrumpe · escribe para añadir instrucciones</Text>;
+    hint = { text: "esc interrumpe · escribe para añadir instrucciones", short: "esc interrumpe", color: undefined, bold: false };
   } else if (app.updateInstalled) {
-    hint = <Text color="green">✓ vipcode actualizado · ciérralo y vuelve a abrirlo para usarlo</Text>;
+    hint = { text: "✓ vipcode actualizado · ciérralo y vuelve a abrirlo para usarlo", short: "✓ reinicia vipcode", color: "green", bold: false };
   } else if (app.newVersion) {
-    hint = (
-      <Text bold color="green">
-        ↑ vipcode {stripControl(app.newVersion)} disponible · escribe /update
-      </Text>
-    );
+    const version = stripControl(app.newVersion);
+    hint = { text: `↑ vipcode ${version} disponible · escribe /update`, short: `↑ ${version} · /update`, color: "green", bold: true };
   }
+
+  // Si no cabe todo en una línea se quitan, para dejar sitio a la ayuda corta, los tokens y el detalle del contexto;
+  // si aun así no cabe, los modelos disponibles y la ayuda
+  const model = ` · ${current || "rotación automática"}${slot && slot.score !== null ? ` ★${slot.score}` : ""}${app.router.pinned ? " (fijado)" : ""}`;
+  const gauge = app.agent.lastTokens > 0 && context > 0;
+  const fit = { tokens: spent > 0, detail: true, models: true };
+  const left = () =>
+    props.agentName.length +
+    model.length +
+    (quota ? quota.short.length + 3 : 0) +
+    (gauge ? 12 + gaugeLabel(app.agent.lastTokens, context, fit.detail).length : 0) +
+    (fit.models ? ` · ${available}/${app.router.slots.length} modelos`.length : 0) +
+    (fit.tokens ? ` · ${shortTokens(spent)} tokens`.length : 0) +
+    (queued > 0 ? ` · ${queued} en cola`.length : 0) +
+    (app.yolo ? 7 : 0);
+  const room = props.width - 2;
+  for (const drop of ["tokens", "detail"] as const) {
+    if (left() + 2 + hint.short.length <= room) {
+      break;
+    }
+    fit[drop] = false;
+  }
+  if (left() > room) {
+    fit.models = false;
+  }
+  let hintText = "";
+  if (left() + 2 + hint.text.length <= room) {
+    hintText = hint.text;
+  } else if (left() + 2 + hint.short.length <= room) {
+    hintText = hint.short;
+  }
+
   return (
     <Box justifyContent="space-between" paddingX={1}>
       <Text wrap="truncate-end">
         <Text bold color={(agent?.color as any) || "magenta"}>
           {props.agentName}
         </Text>
-        <Text dimColor>
-          {" "}
-          · {current || "rotación automática"}
-          {slot && slot.score !== null ? ` ★${slot.score}` : ""}
-          {app.router.pinned ? " (fijado)" : ""}
-        </Text>
+        <Text dimColor>{model}</Text>
         {quota ? (
           <Text color={quotaColor} dimColor={!quotaColor}>
             {" "}
-            · {quota.text}
+            · {quota.short}
           </Text>
         ) : null}
-        <ContextGauge used={app.agent.lastTokens} total={context} />
+        <ContextGauge used={app.agent.lastTokens} total={context} detail={fit.detail} />
         <Text dimColor>
-          {" "}
-          · {available}/{app.router.slots.length} modelos
-          {spent > 0 ? ` · ${shortTokens(spent)} tokens` : ""}
+          {fit.models ? ` · ${available}/${app.router.slots.length} modelos` : ""}
+          {fit.tokens ? ` · ${shortTokens(spent)} tokens` : ""}
           {queued > 0 ? ` · ${queued} en cola` : ""}
         </Text>
         {app.yolo ? <Text color="red"> · yolo</Text> : null}
       </Text>
-      <Text wrap="truncate-start">{hint}</Text>
+      {hintText ? (
+        <Text wrap="truncate-start" color={hint.color} dimColor={!hint.color} bold={hint.bold}>
+          {hintText}
+        </Text>
+      ) : null}
     </Box>
   );
 }
@@ -1321,7 +1365,15 @@ function Main(props: { app: App; initial: string }) {
 
   return (
     <>
-      <Static items={items}>{(item) => <ItemView key={item.id} item={item} app={app} width={columns} />}</Static>
+      {/* Con el ancho fijo: si no, Ink parte las líneas largas al ancho de la terminal sin contar lo que llevan delante
+          (el «● » de las respuestas, el borde de tus mensajes) y la terminal las corta por en medio de una palabra */}
+      <Static items={items}>
+        {(item) => (
+          <Box key={item.id} width={columns} flexDirection="column">
+            <ItemView item={item} app={app} width={columns} />
+          </Box>
+        )}
+      </Static>
       <Box flexDirection="column">
         {live.current.reasoning ? (
           <Text dimColor italic wrap="truncate-end">
@@ -1330,7 +1382,7 @@ function Main(props: { app: App; initial: string }) {
         ) : null}
         {liveText ? (
           <Box marginTop={1}>
-            <Text color={color}>● </Text>
+            <Bullet color={color} />
             <Box flexDirection="column" flexGrow={1}>
               <Text>
                 {liveText}
@@ -1390,7 +1442,7 @@ function Main(props: { app: App; initial: string }) {
             ))}
           </Box>
         ) : null}
-        <StatusBar app={app} agentName={agentName} busy={busy} model={busy ? live.current.model : ""} />
+        <StatusBar app={app} agentName={agentName} busy={busy} model={busy ? live.current.model : ""} width={columns} />
       </Box>
     </>
   );

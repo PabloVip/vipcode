@@ -4,6 +4,8 @@
 
 Agente de programación para la terminal (comando `vipcode`) que solo usa **modelos gratuitos** y **rota automáticamente** entre proveedores cuando uno se agota.
 
+![vipcode arreglando un fallo en carrito.js: lee el fichero, enseña el cambio, pide permiso y lo aplica](https://raw.githubusercontent.com/PabloVip/vipcode/main/docs/demo.svg)
+
 - **Funciona nada más instalarlo, sin claves ni registro**: usa los proveedores que permiten el acceso anónimo (Kilo Gateway, OVHcloud, LLM7 y Pollinations).
 - Si quieres más límites y mejores modelos, añade claves gratuitas de los más de 20 proveedores incluidos (Gemini, NVIDIA, Mistral, Cerebras, OpenRouter, Groq, Z.ai…); con OpenRouter basta con iniciar sesión en el navegador. Los modelos gratis nuevos se descubren solos.
 - Con una clave gratis de [LLM Stats](https://llm-stats.com), **usa primero los mejores modelos** según su ranking.
@@ -396,6 +398,7 @@ Todo está en `~/.vipcode` (o en `VIPCODE_HOME` si la defines):
 npm run build       # compila a dist/
 npm test            # compila y pasa las pruebas (servidor de IA simulado, sin claves ni internet)
 VIPCODE_DEBUG=1 vipcode # apunta los detalles internos en ~/.vipcode/debug.log
+npm run demo        # vuelve a grabar la animación del README (sesión real con los modelos gratis; necesita python3)
 ```
 
 vipcode no se deja modificar a sí mismo. Si quieres trabajar en su código con un vipcode instalado desde esa misma carpeta (`npm link`), arráncalo con `VIPCODE_ALLOW_SELF_EDIT=1 vipcode`; o usa el instalado con npm para trabajar en tu copia del código.

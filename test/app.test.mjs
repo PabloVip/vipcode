@@ -408,7 +408,8 @@ test("límites: cuánto queda de cada plan gratis (/limites y la barra de abajo)
   assert.match(report, /quedan 997 de 1000 hoy/);
   assert.match(report, /quedan 11 k de 12 k tokens por minuto/);
   assert.match(report, /contado: 2 peticiones · ≈ quedan 48 de 50 hoy/);
-  assert.match(report, /lleno: 1 petición\n +m +1 petición · en pausa hasta las \d\d:\d\d/);
+  // Cerca de la medianoche la pausa acaba «mañana a las…»
+  assert.match(report, /lleno: 1 petición\n +m +1 petición · en pausa hasta (mañana a )?las \d\d:\d\d/);
   // Lo que se enseña en la barra de abajo
   assert.equal(quotaFor(app.router, app.router.slotFor("contado/m")).text, "≈ quedan 48 de 50 hoy");
   // Se guarda para la próxima vez que abras vipcode
