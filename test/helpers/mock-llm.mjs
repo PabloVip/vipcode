@@ -128,7 +128,8 @@ export function tempWorkspace(files = {}) {
       return fs.existsSync(path.join(proj, name));
     },
     cleanup() {
-      fs.rmSync(dir, { recursive: true, force: true });
+      // En Windows una carpeta no se puede borrar mientras algún programa la use: se reintenta un poco
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     },
   };
 }

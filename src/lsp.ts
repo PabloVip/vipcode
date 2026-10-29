@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Config, LspServerConfig } from "./config.js";
 import { debugLog } from "./debug.js";
-import { spawnProgram } from "./shell.js";
+import { killTree, spawnProgram } from "./shell.js";
 
 export interface Diagnostic {
   line: number;
@@ -332,20 +332,24 @@ class LspClient {
   }
 
   async shutdown() {
-    if (this.dead) {
+    if (this.dead || this.child.exitCode !== null) {
       return;
     }
+    const exited = new Promise<void>((resolve) => this.child.once("exit", () => resolve()));
     try {
       await this.request("shutdown", null, 1500);
       this.notify("exit", null);
     } catch {
       // si no contesta, lo matamos
     }
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       if (!this.dead) {
-        this.child.kill("SIGTERM");
+        killTree(this.child);
       }
-    }, 300).unref();
+    }, 300);
+    // Hasta que no termina no acabamos: en Windows la carpeta del proyecto sigue ocupada mientras viva
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2000).unref())]);
+    clearTimeout(timer);
   }
 }
 
