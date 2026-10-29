@@ -16,15 +16,16 @@ Agente de programación para la terminal (comando `vipcode`), al estilo de openc
 Requiere Node.js 22 o superior.
 
 ```bash
-npm install -g github:PabloVip/vipcode
+npm install -g https://github.com/PabloVip/vipcode/releases/latest/download/vipcode.tgz
 ```
 
-O desde el código:
+Para actualizar, repite el mismo comando. O desde el código:
 
 ```bash
 git clone https://github.com/PabloVip/vipcode.git
 cd vipcode
-npm install     # instala las dependencias y compila
+npm install
+npm run build
 npm link        # deja el comando «vipcode» disponible en cualquier carpeta
 ```
 

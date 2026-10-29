@@ -16,15 +16,16 @@ A coding agent for your terminal (command `vipcode`), in the style of opencode, 
 Requires Node.js 22 or later.
 
 ```bash
-npm install -g github:PabloVip/vipcode
+npm install -g https://github.com/PabloVip/vipcode/releases/latest/download/vipcode.tgz
 ```
 
-Or from source:
+Run the same command again to update. Or from source:
 
 ```bash
 git clone https://github.com/PabloVip/vipcode.git
 cd vipcode
-npm install     # installs dependencies and builds
+npm install
+npm run build
 npm link        # makes the «vipcode» command available everywhere
 ```
 

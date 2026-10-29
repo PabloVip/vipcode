@@ -8,6 +8,8 @@ import { ROOT, contentText, lastMessage, lastUserText, provider, startMock, temp
 const shared = tempWorkspace();
 process.env.VIPCODE_HOME = shared.home;
 process.env.HOME = shared.home;
+// Sin colores aunque se ejecute en GitHub Actions (allí picocolors los activa por la variable CI)
+process.env.NO_COLOR = "1";
 for (const name of Object.keys(process.env)) {
   if (/_API_KEY$|_TOKEN$/.test(name)) {
     delete process.env[name];
