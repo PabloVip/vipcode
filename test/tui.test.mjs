@@ -46,7 +46,8 @@ test("interfaz completa en una pseudo-terminal", { skip: !hasExpect && "falta el
     return { text: "RESPUESTA-UNO" };
   });
   const ws = tempWorkspace({ "hola.txt": "hola\n" });
-  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  // Con un límite diario conocido, la barra de abajo dice cuántas peticiones quedan
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"], { freeLimits: { perDay: 100 } })], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
 
   const result = await runExpect("tui.exp", ws);
   assert.equal(result.code, 0, result.plain.slice(-3000));

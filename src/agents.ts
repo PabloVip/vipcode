@@ -39,7 +39,7 @@ Your final answer is the only thing the main agent will see: give precise findin
 
 const BUILTIN: AgentDefinition[] = [
   {
-    name: "build",
+    name: "programar",
     description: "Agente principal: lee, edita ficheros y ejecuta comandos",
     mode: "primary",
     prompt: "",
@@ -49,7 +49,7 @@ const BUILTIN: AgentDefinition[] = [
     builtIn: true,
   },
   {
-    name: "plan",
+    name: "planear",
     description: "Solo lectura: investiga y propone un plan sin tocar nada",
     mode: "primary",
     prompt: PLAN_PROMPT,
@@ -60,7 +60,7 @@ const BUILTIN: AgentDefinition[] = [
     builtIn: true,
   },
   {
-    name: "general",
+    name: "ayudante",
     description: "Subagente para investigar preguntas complejas o hacer tareas de varios pasos de forma autónoma (puede editar)",
     mode: "subagent",
     prompt: GENERAL_PROMPT,
@@ -70,7 +70,7 @@ const BUILTIN: AgentDefinition[] = [
     builtIn: true,
   },
   {
-    name: "explore",
+    name: "explorar",
     description: "Subagente rápido de solo lectura para encontrar ficheros, símbolos o entender cómo funciona algo del código",
     mode: "subagent",
     prompt: EXPLORE_PROMPT,
@@ -80,6 +80,17 @@ const BUILTIN: AgentDefinition[] = [
     builtIn: true,
   },
 ];
+
+// Los agentes integrados se llamaban como en opencode: esos nombres siguen valiendo (en /agent, --agent, el config,
+// los ficheros .md que los ajustan, las sesiones guardadas y lo que pida el modelo a la herramienta task)
+const AGENT_ALIASES: Record<string, string> = { build: "programar", plan: "planear", general: "ayudante", explore: "explorar" };
+
+export const MAIN_AGENT = "programar";
+
+// Nombre de verdad de un agente aunque se use el antiguo
+export function agentName(name: string): string {
+  return AGENT_ALIASES[name] || name;
+}
 
 // Nombres de herramientas de opencode → los de vipcode
 const ALIASES: Record<string, string> = {
@@ -154,10 +165,11 @@ export function loadAgents(root: string, config: Config, trusted = projectTrust(
   const disabled = new Set<string>();
   const apply = (name: string, input: AgentInput, source?: string) => {
     if (input.disable) {
-      disabled.add(name);
+      disabled.add(agentName(name));
       return;
     }
-    agents.set(name, fromInput(name, input, agents.get(name), source));
+    const real = agentName(name);
+    agents.set(real, fromInput(real, input, agents.get(real), source));
   };
 
   for (const entry of readMarkdownDir(dirs)) {
@@ -188,8 +200,8 @@ export function loadAgents(root: string, config: Config, trusted = projectTrust(
   for (const name of disabled) {
     agents.delete(name);
   }
-  if (!agents.has("build")) {
-    agents.set("build", { ...BUILTIN[0] });
+  if (!agents.has(MAIN_AGENT)) {
+    agents.set(MAIN_AGENT, { ...BUILTIN[0] });
   }
   return [...agents.values()];
 }

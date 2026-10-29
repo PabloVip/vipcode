@@ -209,9 +209,14 @@ test("comandos con plantilla, agentes y ayuda", async () => {
   let result = await app.handleCommand("/test src/app", adapter);
   // Al modelo le llega la plantilla; en el historial queda lo que escribiste
   assert.deepEqual(result.run, { input: { text: "Ejecuta los tests de src/app", display: "/test src/app" }, options: { agent: "plan", model: undefined, subtask: false } });
+  // Los agentes tienen nombre propio; los de antes (/plan, /build) siguen valiendo
   result = await app.handleCommand("/plan", adapter);
-  assert.equal(app.agent.agent.name, "plan");
-  assert.equal(app.cycleAgent().name, "build");
+  assert.equal(app.agent.agent.name, "planear");
+  assert.equal(app.cycleAgent().name, "programar");
+  await app.handleCommand("/planear", adapter);
+  assert.equal(app.agent.agent.name, "planear");
+  await app.handleCommand("/agent build", adapter);
+  assert.equal(app.agent.agent.name, "programar");
   await app.handleCommand("/help", adapter);
   assert.match(out.block.join("\n"), /\/test +Pasa los tests/);
   await app.handleCommand("/nada", adapter);
@@ -358,3 +363,60 @@ test("sesiones: el historial guarda toda la conversación aunque se resuma, y se
   ws.cleanup();
 });
 
+
+test("límites: cuánto queda de cada plan gratis (/limites y la barra de abajo)", async () => {
+  const { quotaFor } = await import("../dist/limits.js");
+  const mock = await startMock(({ path: url }) => {
+    // Como Groq: dice en las cabeceras cuántas peticiones le quedan hoy y cuántos tokens por minuto
+    if (url.startsWith("/cabeceras/")) {
+      return {
+        text: "uno",
+        headers: {
+          "x-ratelimit-limit-requests": "1000",
+          "x-ratelimit-remaining-requests": "997",
+          "x-ratelimit-reset-requests": "2m59.56s",
+          "x-ratelimit-limit-tokens": "12000",
+          "x-ratelimit-remaining-tokens": "11200",
+          "x-ratelimit-reset-tokens": "6s",
+        },
+      };
+    }
+    if (url.startsWith("/lleno/")) {
+      return { status: 429, json: { error: { message: "Rate limit exceeded" } }, headers: { "retry-after": "600" } };
+    }
+    return { text: "dos" };
+  });
+  const ws = tempWorkspace();
+  const { app } = makeApp(ws, mock.url, {
+    providers: [
+      provider("cabeceras", mock.url, ["m"], { rateHeaders: { requests: "day", tokens: "minute" } }),
+      // No dice nada: se cuenta con el límite conocido de su plan
+      provider("contado", mock.url, ["m"], { freeLimits: { perDay: 50 }, limitScope: "provider" }),
+      provider("lleno", mock.url, ["m"]),
+    ],
+    enabledProviders: ["cabeceras", "contado", "lleno"],
+  });
+  // El último se queda sin peticiones y vipcode salta a otro
+  for (const key of ["cabeceras/m", "contado/m", "contado/m", "lleno/m"]) {
+    app.router.pinned = key;
+    await app.runPrompt({ text: "hola" }, {});
+  }
+  const { out, adapter } = capture();
+  await app.handleCommand("/limites", adapter);
+  const report = out.block.join("\n");
+  assert.match(report, /cabeceras: 2 peticiones/);
+  assert.match(report, /quedan 997 de 1000 hoy/);
+  assert.match(report, /quedan 11 k de 12 k tokens por minuto/);
+  assert.match(report, /contado: 2 peticiones · ≈ quedan 48 de 50 hoy/);
+  assert.match(report, /lleno: 1 petición\n +m +1 petición · en pausa hasta las \d\d:\d\d/);
+  // Lo que se enseña en la barra de abajo
+  assert.equal(quotaFor(app.router, app.router.slotFor("contado/m")).text, "≈ quedan 48 de 50 hoy");
+  // Se guarda para la próxima vez que abras vipcode
+  const again = new App(ws.proj);
+  assert.equal(again.router.today().providers.contado.requests, 2);
+  assert.equal(quotaFor(again.router, again.router.slotFor("cabeceras/m")).text, "quedan 997 de 1000 hoy");
+  await app.shutdown();
+  await again.shutdown();
+  await mock.close();
+  ws.cleanup();
+});

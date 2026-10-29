@@ -3,7 +3,7 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
 } from "openai/resources/chat/completions";
-import { type AgentDefinition, subagents, toolEnabled } from "./agents.js";
+import { type AgentDefinition, MAIN_AGENT, agentName, subagents, toolEnabled } from "./agents.js";
 import type { Config } from "./config.js";
 import type { LspManager } from "./lsp.js";
 import type { McpManager } from "./mcp.js";
@@ -105,9 +105,9 @@ export class Agent {
   constructor(
     private deps: AgentDeps,
     public session: Session,
-    agentName = "build",
+    name = MAIN_AGENT,
   ) {
-    this.agent = deps.agents.find((agent) => agent.name === agentName) || deps.agents.find((agent) => agent.name === "build")!;
+    this.agent = deps.agents.find((agent) => agent.name === agentName(name)) || deps.agents.find((agent) => agent.name === MAIN_AGENT)!;
   }
 
   get mode(): Mode {
@@ -118,7 +118,7 @@ export class Agent {
   }
 
   setAgent(name: string): boolean {
-    const found = this.deps.agents.find((agent) => agent.name === name);
+    const found = this.deps.agents.find((agent) => agent.name === agentName(name));
     if (!found) {
       return false;
     }
@@ -543,9 +543,9 @@ export class Agent {
 
   // Un subagente trabaja con su propio historial y devuelve solo su informe final
   async runSubagent(type: string, prompt: string, description: string, parent: AgentDefinition, signal?: AbortSignal): Promise<string> {
-    let sub = subagents(this.deps.agents).find((agent) => agent.name === type);
+    let sub = subagents(this.deps.agents).find((agent) => agent.name === agentName(type));
     if (!sub) {
-      sub = subagents(this.deps.agents).find((agent) => agent.name === "general");
+      sub = subagents(this.deps.agents).find((agent) => agent.name === "ayudante");
     }
     if (!sub) {
       return `Error: no existe el subagente ${type}.`;

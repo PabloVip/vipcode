@@ -32,7 +32,8 @@ export function systemText(body) {
 }
 
 // Servidor que imita la API de OpenAI; "handler" decide qué contestar en cada petición:
-// { text, tools: [{ name, args }], reasoning, usage } en streaming, { status, json } para errores, { json } para /models
+// { text, tools: [{ name, args }], reasoning, usage, headers } en streaming, { status, json, headers } para errores,
+// { json } para /models
 export async function startMock(handler) {
   const requests = [];
   const server = http.createServer((req, res) => {
@@ -72,7 +73,7 @@ export async function startMock(handler) {
         res.end(reply.body);
         return;
       }
-      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.writeHead(200, { "content-type": "text/event-stream", ...(reply.headers || {}) });
       const send = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
       if (reply.reasoning) {
         send({ choices: [{ delta: { reasoning: reply.reasoning } }] });

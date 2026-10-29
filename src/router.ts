@@ -71,6 +71,27 @@ export interface SlotRow {
   score: number | null;
 }
 
+// Lo que dice un proveedor sobre un límite en las cabeceras x-ratelimit-* de su respuesta
+export interface LimitWindow {
+  limit: number | null;
+  remaining: number;
+  // Cuándo se recupera (null si no lo dice)
+  resetAt: number | null;
+  period: "day" | "hour" | "minute" | null;
+}
+
+export interface LimitSnapshot {
+  at: number;
+  requests?: LimitWindow;
+  tokens?: LimitWindow;
+}
+
+// Peticiones y tokens de un día (UTC) por proveedor y por modelo
+export interface UsageDay {
+  day: string;
+  providers: Record<string, { requests: number; tokens: number; models: Record<string, number> }>;
+}
+
 export class NoSlotError extends Error {}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -313,6 +334,84 @@ interface RouterState {
   unsupported: Record<string, number>;
   // Proveedores que rechazan stream_options
   noStreamUsage: Record<string, boolean>;
+  // Para /limites: uso de hoy, lo último que dijo cada modelo de sus límites y las peticiones de la última hora
+  usage?: UsageDay;
+  limits?: Record<string, LimitSnapshot>;
+  recent?: Record<string, number[]>;
+}
+
+function utcDay(time = Date.now()): string {
+  return new Date(time).toISOString().slice(0, 10);
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+// Cuándo se recupera un límite: segundos que faltan ("33011.38"), duración ("2m59.56s") o fecha en segundos o milisegundos
+function parseReset(value: string | null, now: number): number | null {
+  if (!value) {
+    return null;
+  }
+  const text = value.trim();
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const n = Number(text);
+    if (n > 1e12) {
+      return n;
+    }
+    if (n > 1e9) {
+      return n * 1000;
+    }
+    return now + n * 1000;
+  }
+  const ms = parseDuration(text);
+  if (ms > 0) {
+    return now + ms;
+  }
+  const date = Date.parse(text);
+  return Number.isNaN(date) ? null : date;
+}
+
+// Las cabeceras x-ratelimit-* de una respuesta (o de un error): peticiones y tokens que quedan
+export function readLimitHeaders(headers: unknown, provider: ProviderConfig, now = Date.now()): LimitSnapshot | null {
+  if (!headers || typeof headers !== "object") {
+    return null;
+  }
+  const get = (name: string): string | null => {
+    const h = headers as { get?: (name: string) => string | null } & Record<string, unknown>;
+    if (typeof h.get === "function") {
+      return h.get(name);
+    }
+    const value = h[name] ?? h[name.toLowerCase()];
+    return typeof value === "string" ? value : null;
+  };
+  const read = (sets: [string, LimitWindow["period"]][]): LimitWindow | undefined => {
+    for (const [base, period] of sets) {
+      const remaining = get(`x-ratelimit-remaining${base}`);
+      if (remaining === null || remaining.trim() === "" || Number.isNaN(Number(remaining))) {
+        continue;
+      }
+      const limit = get(`x-ratelimit-limit${base}`);
+      return {
+        limit: limit !== null && !Number.isNaN(Number(limit)) ? Number(limit) : null,
+        remaining: Number(remaining),
+        resetAt: parseReset(get(`x-ratelimit-reset${base}`), now),
+        period,
+      };
+    }
+    return undefined;
+  };
+  const requests = read([
+    ["-requests-day", "day"],
+    ["-requests", provider.rateHeaders?.requests ?? null],
+    ["", null],
+  ]);
+  const tokens = read([
+    ["-tokens-minute", "minute"],
+    ["-tokens", provider.rateHeaders?.tokens ?? null],
+  ]);
+  if (!requests && !tokens) {
+    return null;
+  }
+  return { at: now, requests, tokens };
 }
 
 export class Router {
@@ -321,6 +420,10 @@ export class Router {
   cooldowns: Record<string, number> = {};
   unsupported: Record<string, number> = {};
   noStreamUsage: Record<string, boolean> = {};
+  // Para /limites (se guardan en state.json con las pausas)
+  usage: UsageDay = { day: utcDay(), providers: {} };
+  limits: Record<string, LimitSnapshot> = {};
+  recent: Record<string, number[]> = {};
   // Slots descartados durante esta ejecución (clave mala…)
   skipped = new Set<string>();
   // Si no es null, se usa ese slot primero
@@ -430,6 +533,11 @@ export class Router {
       this.cooldowns = data.cooldowns || {};
       this.unsupported = data.unsupported || {};
       this.noStreamUsage = data.noStreamUsage || {};
+      if (data.usage?.day === utcDay() && data.usage.providers) {
+        this.usage = data.usage;
+      }
+      this.limits = data.limits || {};
+      this.recent = data.recent || {};
     } catch {
       this.cooldowns = {};
       this.unsupported = {};
@@ -447,8 +555,27 @@ export class Router {
         }
       }
     }
+    // Lo que dijeron los proveedores hace más de dos días ya no sirve
+    for (const [key, snapshot] of Object.entries(this.limits)) {
+      if (now - snapshot.at > 2 * DAY_MS) {
+        delete this.limits[key];
+      }
+    }
+    for (const [name, times] of Object.entries(this.recent)) {
+      this.recent[name] = times.filter((time) => now - time < HOUR_MS);
+      if (this.recent[name].length === 0) {
+        delete this.recent[name];
+      }
+    }
     try {
-      const state: RouterState = { cooldowns: this.cooldowns, unsupported: this.unsupported, noStreamUsage: this.noStreamUsage };
+      const state: RouterState = {
+        cooldowns: this.cooldowns,
+        unsupported: this.unsupported,
+        noStreamUsage: this.noStreamUsage,
+        usage: this.usage,
+        limits: this.limits,
+        recent: this.recent,
+      };
       fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
     } catch {
       // no es grave si no se puede guardar
@@ -460,6 +587,40 @@ export class Router {
       this.cooldowns[slot.key] = until;
     }
     this.saveState();
+  }
+
+  // Uso de hoy (si ha cambiado el día, empieza de cero)
+  today(): UsageDay {
+    if (this.usage.day !== utcDay()) {
+      this.usage = { day: utcDay(), providers: {} };
+    }
+    return this.usage;
+  }
+
+  private countRequest(slot: Slot) {
+    const day = this.today();
+    const entry = (day.providers[slot.provider.name] ??= { requests: 0, tokens: 0, models: {} });
+    entry.requests++;
+    entry.models[slot.model.id] = (entry.models[slot.model.id] || 0) + 1;
+    const now = Date.now();
+    const times = (this.recent[slot.provider.name] || []).filter((time) => now - time < HOUR_MS);
+    times.push(now);
+    // Basta con saber cuántas van en la última hora; más de 1.000 no hace falta guardarlas
+    this.recent[slot.provider.name] = times.slice(-1000);
+  }
+
+  private countTokens(slot: Slot, usage: Usage | null) {
+    const entry = this.today().providers[slot.provider.name];
+    if (entry && usage) {
+      entry.tokens += usage.prompt + usage.completion;
+    }
+  }
+
+  private noteLimits(slot: Slot, headers: unknown) {
+    const snapshot = readLimitHeaders(headers, slot.provider);
+    if (snapshot) {
+      this.limits[slot.key] = snapshot;
+    }
   }
 
   slotFor(key: string): Slot | undefined {
@@ -622,6 +783,7 @@ export class Router {
       const slot = list[0];
       let streamedText = false;
       handlers.onAttempt?.(slot.key);
+      this.countRequest(slot);
 
       try {
         const result = await this.streamOnce(slot, { ...request, messages }, signal, {
@@ -635,9 +797,13 @@ export class Router {
           handlers.onNotice?.(`usando ${slot.key}`);
         }
         this.lastSlot = slot;
+        this.countTokens(slot, result.usage);
+        this.saveState();
         return { ...result, slot };
       } catch (err) {
+        this.noteLimits(slot, (err as { headers?: unknown })?.headers);
         if (isAbort(err, signal)) {
+          this.saveState();
           throw err;
         }
         const info = classify(err);
@@ -689,6 +855,7 @@ export class Router {
           action = "pruebo otro";
         }
 
+        this.saveState();
         let prefix = "";
         if (streamedText) {
           prefix = "\n";
@@ -746,7 +913,10 @@ export class Router {
     const byId = new Map<string, PartialCall>();
 
     try {
-      const stream = (await slot.client.chat.completions.create(params as any, { signal: combined })) as unknown as AsyncIterable<any>;
+      // withResponse para leer las cabeceras: algunos proveedores dicen ahí cuántas peticiones te quedan
+      const { data, response } = await slot.client.chat.completions.create(params as any, { signal: combined }).withResponse();
+      this.noteLimits(slot, response.headers);
+      const stream = data as unknown as AsyncIterable<any>;
 
       for await (const chunk of stream) {
         bump();

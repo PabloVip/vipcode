@@ -61,6 +61,11 @@ export interface ProviderConfig {
   contextCap?: number;
   // "provider" si el límite es de toda la cuenta y no de cada modelo
   limitScope?: "model" | "provider";
+  // Límites conocidos del plan gratis, para calcular en /limites cuánto te queda (por modelo o por proveedor, según
+  // limitScope). keyless: solo cuando se usa sin clave
+  freeLimits?: { perDay?: number; perHour?: number; keyless?: boolean };
+  // De qué periodo hablan las cabeceras x-ratelimit-*-requests y -tokens (Groq: peticiones al día, tokens por minuto)
+  rateHeaders?: { requests?: "day" | "minute"; tokens?: "day" | "minute" };
   // false si el proveedor no acepta stream_options (se aprende solo si falla)
   streamUsage?: boolean;
   // Lo pone vipcode: proveedor añadido por ti (no viene en el catálogo); va el primero en la rotación

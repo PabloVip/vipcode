@@ -2,13 +2,14 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import pc from "picocolors";
 import { Agent, type UserInput } from "./agent.js";
-import { type AgentDefinition, loadAgents, primaryAgents, subagents } from "./agents.js";
+import { type AgentDefinition, MAIN_AGENT, agentName, loadAgents, primaryAgents, subagents } from "./agents.js";
 import { envNames, maskKey, readAuth, removeAuth, resolveCredentials, saveAuth, urlVars } from "./auth.js";
 import { CATALOG } from "./catalog.js";
 import { type CommandDefinition, expandCommand, loadCommands } from "./commands.js";
 import { CONFIG_PATH, type Config, type ModelConfig, type ProviderConfig, configNotices, isAnonymous, loadConfig, setGlobalConfigValue } from "./config.js";
 import { type RefreshSummary, buildProviders, detectLocal, refreshModels } from "./discovery.js";
 import { isRemoteSession, loginOpenRouter, openBrowser } from "./login.js";
+import { limitsReport } from "./limits.js";
 import { LspManager } from "./lsp.js";
 import { McpManager } from "./mcp.js";
 import { AUTH_PATH, HOME_DIR, NOTICES_PATH, STATE_PATH, ensureHomeDir } from "./paths.js";
@@ -64,8 +65,9 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "providers", description: "proveedores gratuitos, si tienes clave y dónde conseguirla" },
   { name: "agents", description: "agentes disponibles (Tab cambia entre los principales)" },
   { name: "agent", args: "<nombre>", description: "cambiar de agente" },
-  { name: "plan", description: "agente de solo lectura" },
-  { name: "build", description: "agente que puede modificar ficheros" },
+  { name: "planear", description: "agente de solo lectura: investiga y propone un plan (antes /plan)" },
+  { name: "programar", description: "agente que puede modificar ficheros (antes /build)" },
+  { name: "limites", description: "cuánto te queda hoy de cada plan gratis" },
   { name: "undo", description: "deshacer el último mensaje (ficheros y conversación)" },
   { name: "redo", description: "rehacer lo deshecho" },
   { name: "diff", args: "[all]", description: "cambios del último mensaje (o de toda la sesión)" },
@@ -217,7 +219,7 @@ export class App {
         ask: (request, agent) => this.ask(request, agent),
       },
       options.session || newSession(root),
-      options.agentName || options.session?.agent || "build",
+      options.agentName || options.session?.agent || MAIN_AGENT,
     );
   }
 
@@ -405,12 +407,12 @@ export class App {
         this.router.pinned = options.model;
       }
       if (options.subtask) {
-        const report = await this.agent.runSubagent(options.agent || "general", input.text, "comando", this.agent.agent, signal);
+        const report = await this.agent.runSubagent(options.agent || "ayudante", input.text, "comando", this.agent.agent, signal);
         this.agent.events.onText?.(report, 0);
         this.agent.events.onTextEnd?.(0);
         return;
       }
-      if (options.agent && this.agents.some((agent) => agent.name === options.agent)) {
+      if (options.agent && this.agents.some((agent) => agent.name === agentName(options.agent!))) {
         this.agent.setAgent(options.agent);
       }
       await this.agent.run(input, signal);
@@ -781,7 +783,7 @@ export class App {
         return {};
       }
       case "/agent": {
-        const found = this.agents.find((agent) => agent.name === arg);
+        const found = this.agents.find((agent) => agent.name === agentName(arg));
         if (!found) {
           ui.error(`No existe el agente «${arg}». Mira /agents`);
         } else if (found.mode === "subagent") {
@@ -937,6 +939,10 @@ export class App {
         }
         return {};
       }
+      case "/limites":
+      case "/limits":
+        ui.block(limitsReport(this.router));
+        return {};
       case "/usage": {
         const usage = this.agent.session.usage;
         ui.info(
@@ -1025,7 +1031,8 @@ export class App {
       const task = arg ? `\n\nTarea: ${arg}` : "";
       return { run: { input: { text: `Usa la skill «${skill.name}» para esto.${task}\n\n${skillContent(skill)}`, display: text.trim() }, options: {} } };
     }
-    const agent = this.primaryAgents().find((item) => item.name === name);
+    // /programar, /planear y los tuyos (también /build y /plan, como antes)
+    const agent = this.primaryAgents().find((item) => item.name === agentName(name));
     if (agent) {
       this.agent.setAgent(agent.name);
       ui.info(`Agente ${agent.name}: ${agent.description}`);

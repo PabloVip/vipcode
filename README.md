@@ -106,7 +106,8 @@ vipcode                      # interfaz
 vipcode "arregla el test"    # interfaz y empieza con ese mensaje
 vipcode -c                   # continúa la última sesión de esta carpeta
 vipcode run "tarea" --yolo   # hace la tarea sin interfaz y termina
-vipcode --plan               # empieza en modo solo lectura
+vipcode --plan               # empieza con el agente planear (solo lectura)
+vipcode limites              # cuánto te queda hoy de cada plan gratis
 vipcode run "/review"        # también acepta comandos y skills: vipcode run "/mi-skill tarea"
 vipcode update               # actualiza vipcode
 vipcode trust                # confiar en la configuración que trae esta carpeta (vipcode untrust lo deshace)
@@ -125,13 +126,13 @@ Después cierra vipcode y vuelve a abrirlo. Además, una vez al día vipcode mir
 
 - **Enter** envía. **Alt+Enter** o `\` al final de la línea añade una línea nueva.
 - **@ruta** adjunta un fichero, una carpeta o una imagen (con autocompletado). **Ctrl+V** pega una imagen del portapapeles, y arrastrar una imagen a la terminal también la adjunta.
-- **Tab** cambia entre los agentes principales (`build` y `plan`, más los tuyos). **↑/↓** recorren el historial.
+- **Tab** cambia entre los agentes principales (`programar` y `planear`, más los tuyos). **↑/↓** recorren el historial.
 - **Ctrl+P** abre la paleta con todos los comandos, tus comandos y tus skills; escribe para filtrar.
 - **!comando** lo ejecuta en la terminal sin salir de vipcode (por ejemplo `!git status` o `!npm test`). La salida se ve en pantalla y le llega al agente junto con tu siguiente mensaje.
 - **Esc** interrumpe al agente. Mientras trabaja puedes seguir escribiendo: el mensaje se le entrega al acabar el paso actual.
 - **Ctrl+C** interrumpe, cierra el diálogo o borra lo escrito; dos veces seguidas sale.
 
-Mientras trabaja ves qué modelo está pensando, cada herramienta con su acción en español («Lee», «Edita», «Ejecuta»…), las líneas añadidas y quitadas y lo que tarda. Debajo de cada respuesta aparece el modelo que ha contestado, su nota, el tiempo y los tokens. La barra de abajo muestra el agente, el modelo, cuánto contexto llevas gastado (▰▰▱▱), los modelos disponibles y los mensajes en cola.
+Mientras trabaja ves qué modelo está pensando, cada herramienta con su acción en español («Lee», «Edita», «Ejecuta»…), las líneas añadidas y quitadas y lo que tarda. Debajo de cada respuesta aparece el modelo que ha contestado, su nota, el tiempo y los tokens. La barra de abajo muestra el agente, el modelo, cuánto te queda de su plan gratis (ver [Cuánto te queda](#cuánto-te-queda)), cuánto contexto llevas gastado (▰▰▱▱), los modelos disponibles y los mensajes en cola.
 
 Antes de editar un fichero, ejecutar un comando o salir a internet, vipcode pregunta enseñando el diff o el comando. Puedes contestar que sí una vez, que sí a todo lo de ese tipo durante la sesión, que sí siempre a un comando concreto (por ejemplo `npm test*`), que no, o que no y explicarle qué hacer.
 
@@ -151,12 +152,13 @@ Para volver a una conversación: `vipcode -c` (la última de esta carpeta), `/se
 | `/models` | Lista de modelos y su estado; elige uno preferido. `/models refresh` busca modelos gratis nuevos |
 | `/model <p/m>` | Fija un modelo (`/model auto` vuelve a la rotación) |
 | `/connect`, `/disconnect`, `/providers` | Añadir, quitar y ver las claves de los proveedores |
-| `/agents`, `/agent <nombre>`, `/plan`, `/build` | Cambiar de agente |
+| `/agents`, `/agent <nombre>`, `/planear`, `/programar` | Cambiar de agente (también valen `/plan` y `/build`) |
 | `/undo`, `/redo`, `/diff [all]` | Deshacer y rehacer el último mensaje (ficheros y conversación); ver los cambios |
 | `/todos` | Lista de tareas del agente |
 | `/skills` | Skills instaladas; elige una para usarla (o escribe `/nombre-de-la-skill tarea`) |
 | `/compact` | Resumir la conversación |
 | `/new`, `/sessions`, `/load <n>`, `/delete <n>`, `/export` | Sesiones |
+| `/limites` | Cuánto te queda hoy de cada plan gratis (ver [Cuánto te queda](#cuánto-te-queda)) |
 | `/usage` | Tokens usados |
 | `/mcp`, `/lsp` | Estado de los servidores MCP y de lenguaje |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión |
@@ -168,9 +170,11 @@ Para volver a una conversación: `vipcode -c` (la última de esta carpeta), `/se
 
 ### Agentes
 
-- **build**: el principal; puede editar y ejecutar.
-- **plan**: solo lectura; investiga y propone un plan. Los subagentes que lance tampoco pueden editar.
-- **general** y **explore**: subagentes que el agente principal lanza con la herramienta `task` para investigar o hacer subtareas con su propio contexto. Si pide varios a la vez, trabajan en paralelo.
+- **programar**: el principal; puede editar y ejecutar.
+- **planear**: solo lectura; investiga y propone un plan. Los subagentes que lance tampoco pueden editar.
+- **ayudante** y **explorar**: subagentes que el agente principal lanza con la herramienta `task` para hacer subtareas con su propio contexto (ayudante puede editar; explorar solo busca y lee). Si pide varios a la vez, trabajan en paralelo.
+
+Antes se llamaban `build`, `plan`, `general` y `explore`, y esos nombres siguen valiendo en `/agent`, `--agent`, la configuración y los ficheros de agentes.
 
 ## Cómo funciona la rotación
 
@@ -204,6 +208,15 @@ vipcode salta al siguiente de la lista. Lo que pasa con el que ha fallado depend
 - **Error del servidor o sin respuesta durante 2 minutos**: se pausa 30 s.
 
 Las pausas se guardan en `~/.vipcode/state.json`, así que se recuerdan entre ejecuciones. Si todos están en pausa menos de 90 s, vipcode espera; si no, te dice cuándo vuelve el primero.
+
+### Cuánto te queda
+
+`/limites` (o `vipcode limites` en la terminal) enseña lo que llevas hoy en cada proveedor y en cada modelo (peticiones y tokens), cuánto te queda y qué está en pausa y hasta cuándo. La barra de abajo dice lo que queda del modelo que estás usando, en amarillo si queda poco y en rojo si se ha acabado.
+
+- **«quedan»** es lo que dice el propio proveedor en cada respuesta (Groq y Cerebras, por ejemplo, dicen cuántas peticiones te quedan hoy y cuántos tokens por minuto).
+- **«≈ quedan»** es la cuenta de vipcode cuando el proveedor no lo dice: los límites conocidos de su plan gratis (OpenRouter, ModelScope, Kilo, LLM7…) menos lo que ha pedido vipcode. Solo cuenta lo de este ordenador: si usas la misma clave en otros programas, te quedará menos.
+
+El día cuenta en hora UTC, como en la mayoría de proveedores.
 
 Una vez al día (o con `/models refresh`, o `vipcode models refresh` desde la terminal) vipcode pregunta a cada proveedor qué modelos tiene, también a los que no piden clave (Kilo, OVHcloud y LLM7), añade los gratis nuevos y quita los que ya no existen.
 
@@ -241,7 +254,7 @@ Una vez al día (o con `/models refresh`, o `vipcode models refresh` desde la te
     "pyright": false,
     "mi-lsp": { "command": ["mi-lsp", "--stdio"], "extensions": [".foo"] }
   },
-  "agents": { "plan": { "model": "gemini/*" } },
+  "agents": { "planear": { "model": "gemini/*" } },
   "commands": { "tests": { "template": "Ejecuta los tests y arregla lo que falle. $ARGUMENTS", "description": "Arregla los tests" } },
   "instructions": ["docs/estilo.md", ".cursor/rules/*.md"],
   "maxSteps": 50,
@@ -289,7 +302,7 @@ Comandos en `~/.vipcode/commands/` o `.vipcode/commands/`. Se lanzan con `/nombr
 ```markdown
 ---
 description: Arregla los tests que fallan
-agent: build
+agent: programar
 ---
 Estos son los tests que fallan ahora mismo:
 !`npm test 2>&1 | tail -40`
@@ -372,7 +385,7 @@ Los planes gratuitos tienen letra pequeña: los proveedores anónimos (Kilo, OVH
 
 Todo está en `~/.vipcode` (o en `VIPCODE_HOME` si la defines):
 
-- `config.json`: tu configuración. `auth.json`: claves (permisos 600). `state.json`: pausas de los proveedores. `notices.json`: avisos que ya has visto. `update.json`: última comprobación de versiones nuevas. `trusted.json`: carpetas en las que confías.
+- `config.json`: tu configuración. `auth.json`: claves (permisos 600). `state.json`: pausas de los proveedores y lo que llevas usado hoy. `notices.json`: avisos que ya has visto. `update.json`: última comprobación de versiones nuevas. `trusted.json`: carpetas en las que confías.
 - `models.json`: modelos descubiertos. `ranking.json`: puntuaciones de LLM Stats descargadas con tu clave. `sessions/`: conversaciones (un `.json` para seguirlas y un `.md` para leerlas). `history.jsonl`: lo que has escrito.
 - `snapshots/`: instantáneas para `/undo` (un repositorio git aparte por proyecto; no toca tu `.git`).
 - `exports/`: conversaciones exportadas. `agents/`, `commands/` y `skills/`: tus agentes, comandos y skills globales.

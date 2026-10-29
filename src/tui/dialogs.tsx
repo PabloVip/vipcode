@@ -101,7 +101,7 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
       <Text bold color="yellow">
         ? {showControl(request.title)}
-        {props.agent !== "build" ? <Text dimColor> ({props.agent})</Text> : null}
+        {props.agent !== "programar" ? <Text dimColor> ({props.agent})</Text> : null}
       </Text>
       <Box marginY={1} flexDirection="column">
         <Text>{colorPreview(shown)}</Text>

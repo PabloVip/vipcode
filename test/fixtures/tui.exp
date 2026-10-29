@@ -31,6 +31,11 @@ expect {
   "Escribe tu mensaje" {}
   timeout { falla "no vuelve a quedar libre" }
 }
+# Y en la barra de abajo, cuánto queda del plan gratis
+expect {
+  "quedan 99 de 100 hoy" {}
+  timeout { falla "la barra de abajo no dice cuánto queda" }
+}
 
 # 2. Edición con diálogo de permiso: se ve el diff y se acepta con «s»
 send "cambia el fichero\r"
@@ -70,18 +75,18 @@ expect {
   timeout { falla "no vuelve a quedar libre" }
 }
 
-# 4. Tab cambia al agente plan
+# 4. Tab cambia al agente planear
 send "\t"
 # Entre el nombre del agente y el resto de la barra hay códigos de color
 expect {
-  -re {plan(\x1b\[[0-9;]*m)*\s*·} {}
+  -re {planear(\x1b\[[0-9;]*m)*\s*·} {}
   timeout { falla "Tab no cambia de agente" }
 }
 sleep 0.3
 send "\t"
 expect {
-  -re {build(\x1b\[[0-9;]*m)*\s*·} {}
-  timeout { falla "Tab no vuelve al agente build" }
+  -re {programar(\x1b\[[0-9;]*m)*\s*·} {}
+  timeout { falla "Tab no vuelve al agente programar" }
 }
 sleep 0.3
 

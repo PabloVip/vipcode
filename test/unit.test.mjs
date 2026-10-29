@@ -107,10 +107,11 @@ test("frontmatter y agentes en .md", () => {
   assert.equal(agents.toolEnabled(revisor, "edit_file"), false);
   assert.equal(agents.toolEnabled(revisor, "read_file"), true);
   assert.ok(list.find((a) => a.name === "docs" && a.mode === "primary"));
-  assert.equal(list.find((a) => a.name === "plan").model, "groq/*");
+  // "plan" en el config es el agente planear (se llamaba así antes)
+  assert.equal(list.find((a) => a.name === "planear").model, "groq/*");
   assert.deepEqual(
     agents.primaryAgents(list).map((a) => a.name),
-    ["build", "plan", "docs"],
+    ["programar", "planear", "docs"],
   );
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -656,12 +657,12 @@ test("seguridad: la configuración de un proyecto solo se usa si confías en la 
   let cfg = config.loadConfig(root);
   assert.deepEqual(cfg.mcp, {});
   assert.ok(!cfg.providers.some((p) => p.name === "groq"));
-  assert.equal(agents.loadAgents(root, cfg).find((a) => a.name === "build").permission, undefined);
+  assert.equal(agents.loadAgents(root, cfg).find((a) => a.name === "programar").permission, undefined);
   // Confías: se usa todo
   trust.trustProject(root);
   cfg = config.loadConfig(root);
   assert.ok(cfg.mcp.malo);
-  assert.deepEqual(agents.loadAgents(root, cfg).find((a) => a.name === "build").permission, { bash: "allow" });
+  assert.deepEqual(agents.loadAgents(root, cfg).find((a) => a.name === "programar").permission, { bash: "allow" });
   // Si cambia (por ejemplo tras un git pull), se vuelve a preguntar
   writeFile(path.join(root, "vipcode.json"), JSON.stringify({ mcp: { otro: { type: "local", command: ["sh"] } } }));
   assert.equal(trust.projectTrust(root).trusted, false);
@@ -827,4 +828,25 @@ test("Windows: la shell de los comandos, rutas con / y ficheros con CRLF", async
     assert.equal(glob.output, "src/sub/a.ts");
   }
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("límites: lo que dicen las cabeceras x-ratelimit de cada proveedor", () => {
+  const now = Date.parse("2026-10-29T12:00:00Z");
+  // Groq: «requests» son las del día y «tokens», los del minuto
+  const groq = { name: "groq", rateHeaders: { requests: "day", tokens: "minute" } };
+  let snapshot = router.readLimitHeaders(new Headers({ "x-ratelimit-limit-requests": "1000", "x-ratelimit-remaining-requests": "999", "x-ratelimit-reset-requests": "1m26.4s" }), groq, now);
+  assert.deepEqual(snapshot.requests, { limit: 1000, remaining: 999, resetAt: now + 86400, period: "day" });
+  // Cerebras pone el periodo en el nombre y el tiempo en segundos
+  snapshot = router.readLimitHeaders(
+    new Headers({ "x-ratelimit-limit-requests-day": "14400", "x-ratelimit-remaining-requests-day": "14370", "x-ratelimit-reset-requests-day": "33011.5", "x-ratelimit-limit-tokens-minute": "60000", "x-ratelimit-remaining-tokens-minute": "59000" }),
+    { name: "cerebras" },
+    now,
+  );
+  assert.deepEqual(snapshot.requests, { limit: 14400, remaining: 14370, resetAt: now + 33011500, period: "day" });
+  assert.equal(snapshot.tokens.period, "minute");
+  // OpenRouter al llegar al límite: la hora de vuelta en milisegundos
+  snapshot = router.readLimitHeaders(new Headers({ "X-RateLimit-Limit": "50", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1761782400000" }), { name: "openrouter" }, now);
+  assert.deepEqual(snapshot.requests, { limit: 50, remaining: 0, resetAt: 1761782400000, period: null });
+  assert.equal(router.readLimitHeaders(new Headers({ "content-type": "text/event-stream" }), groq, now), null);
+  assert.equal(router.readLimitHeaders(undefined, groq, now), null);
 });

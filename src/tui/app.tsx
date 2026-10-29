@@ -10,6 +10,7 @@ import { configNotices } from "../config.js";
 import { discoveryIsStale } from "../discovery.js";
 import { isImagePath, readClipboardImage, toDataUrl } from "../images.js";
 import { toolLabel } from "../labels.js";
+import { quotaFor } from "../limits.js";
 import { renderMarkdown } from "../markdown.js";
 import { VERSION } from "../meta.js";
 import type { PermissionReply, PermissionRequest } from "../permissions.js";
@@ -503,6 +504,14 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   const usage = app.agent.session.usage;
   const spent = usage.prompt + usage.completion;
   const queued = app.agent.queue.length;
+  // Cuánto queda del plan gratis del modelo en uso (/limites lo enseña todo)
+  const quota = slot ? quotaFor(app.router, slot) : null;
+  let quotaColor: string | undefined;
+  if (quota && quota.remaining <= 0) {
+    quotaColor = "red";
+  } else if (quota && quota.limit && quota.remaining / quota.limit <= 0.1) {
+    quotaColor = "yellow";
+  }
   let hint = <Text dimColor>ctrl+p comandos · /help</Text>;
   if (props.busy) {
     hint = <Text dimColor>esc interrumpe · escribe para añadir instrucciones</Text>;
@@ -527,6 +536,12 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
           {slot && slot.score !== null ? ` ★${slot.score}` : ""}
           {app.router.pinned ? " (fijado)" : ""}
         </Text>
+        {quota ? (
+          <Text color={quotaColor} dimColor={!quotaColor}>
+            {" "}
+            · {quota.text}
+          </Text>
+        ) : null}
         <ContextGauge used={app.agent.lastTokens} total={context} />
         <Text dimColor>
           {" "}

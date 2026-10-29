@@ -102,6 +102,7 @@ export const CATALOG: ProviderConfig[] = [
     discover: "openai",
     pruneMissing: true,
     limitScope: "model",
+    freeLimits: { perDay: 14400 },
     defaultContext: 60000,
     contextCap: 60000,
     models: [m("gpt-oss-120b", 60000), m("qwen-3.8-27b", 60000, V)],
@@ -120,6 +121,7 @@ export const CATALOG: ProviderConfig[] = [
     freeOnly: true,
     pruneMissing: true,
     limitScope: "provider",
+    freeLimits: { perDay: 50 },
     defaultContext: 128000,
     models: [
       m("nvidia/nemotron-3-ultra-550b-a55b:free", 1000000),
@@ -149,6 +151,8 @@ export const CATALOG: ProviderConfig[] = [
     discover: "openai",
     pruneMissing: true,
     limitScope: "model",
+    freeLimits: { perDay: 1000 },
+    rateHeaders: { requests: "day", tokens: "minute" },
     defaultContext: 7000,
     // El plan gratis de Groq limita los tokens por minuto, así que solo vale para conversaciones cortas
     contextCap: 11000,
@@ -314,6 +318,7 @@ export const CATALOG: ProviderConfig[] = [
     signup: "https://modelscope.cn/my/myaccesstoken",
     freeInfo: "2.000 llamadas gratis al día (hay que vincular una cuenta de Alibaba Cloud).",
     limitScope: "provider",
+    freeLimits: { perDay: 2000 },
     models: [
       m("Qwen/Qwen3-Coder-30B-A3B-Instruct", 262144),
       m("Qwen/Qwen3-235B-A22B-Instruct-2507", 262144),
@@ -376,6 +381,7 @@ export const CATALOG: ProviderConfig[] = [
     freeOnly: true,
     pruneMissing: true,
     limitScope: "provider",
+    freeLimits: { perHour: 200, keyless: true },
     defaultContext: 128000,
     // Primero modelos concretos y buenos con herramientas; kilo-auto/free elige uno al azar (a veces flojo)
     models: [
@@ -427,6 +433,7 @@ export const CATALOG: ProviderConfig[] = [
     freeOnly: true,
     pruneMissing: true,
     limitScope: "provider",
+    freeLimits: { perHour: 60, keyless: true },
     defaultContext: 128000,
     models: [
       m("minimax-m2.7", 180000),

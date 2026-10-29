@@ -43,7 +43,7 @@ $ARGUMENTS`;
 
 const BUILTIN: CommandDefinition[] = [
   { name: "init", description: "Crea o mejora AGENTS.md con las instrucciones del proyecto", template: INIT_TEMPLATE, subtask: false, builtIn: true },
-  { name: "review", description: "Revisa los cambios sin confirmar (no modifica nada)", template: REVIEW_TEMPLATE, agent: "plan", subtask: false, builtIn: true },
+  { name: "review", description: "Revisa los cambios sin confirmar (no modifica nada)", template: REVIEW_TEMPLATE, agent: "planear", subtask: false, builtIn: true },
 ];
 
 // Comandos integrados + ~/.vipcode/commands + .vipcode/commands y .opencode/command(s) del proyecto + "commands" del config

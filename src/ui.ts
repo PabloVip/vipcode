@@ -31,10 +31,10 @@ export const ui = {
     console.log(pc.bold(pc.magenta("vipcode")) + pc.dim(` · agente ${agent} · ${slots} modelos · /help para ayuda`));
   },
   prompt(agent: string): string {
-    if (agent === "plan") {
-      return pc.blue("plan ❯ ");
+    if (agent === "planear") {
+      return pc.blue("planear ❯ ");
     }
-    if (agent !== "build") {
+    if (agent !== "programar") {
       return pc.yellow(`${agent} ❯ `);
     }
     return pc.magenta("❯ ");

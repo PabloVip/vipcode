@@ -1204,7 +1204,7 @@ export function taskTool(subagents: { name: string; description: string }[]): To
       if (!ctx.subagent) {
         return "Error: los subagentes no están disponibles aquí.";
       }
-      return await ctx.subagent(String(args.subagent_type || "general"), String(args.prompt || ""), String(args.description || ""));
+      return await ctx.subagent(String(args.subagent_type || "ayudante"), String(args.prompt || ""), String(args.description || ""));
     },
   };
 }
@@ -1275,7 +1275,7 @@ export function describeCall(name: string, rawArgs: string): string {
   try {
     const args = JSON.parse(rawArgs);
     if (name === "task") {
-      return `${args.subagent_type || "general"}: ${args.description || ""}`.trim();
+      return `${args.subagent_type || "ayudante"}: ${args.description || ""}`.trim();
     }
     if (name === "todowrite" && Array.isArray(args.todos)) {
       return `${args.todos.length} tareas`;
