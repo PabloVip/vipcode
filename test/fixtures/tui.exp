@@ -1,0 +1,133 @@
+# Teclea en la interfaz de vipcode dentro de una pseudo-terminal (lo lanza test/tui.test.mjs)
+set timeout 20
+log_user 1
+set cli [lindex $argv 0]
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+spawn -noecho node $cli
+stty rows 40 columns 120 < $spawn_out(slave,name)
+
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no aparece el cuadro de texto" }
+}
+
+# 1. Un mensaje normal
+send "hola\r"
+expect {
+  "RESPUESTA-UNO" {}
+  timeout { falla "no llega la respuesta al primer mensaje" }
+}
+# Debajo, el pie con el modelo que ha contestado y lo que ha tardado
+expect {
+  -re {p/m \S+ (<1|[0-9]+(,[0-9])?) s} {}
+  timeout { falla "no aparece el pie con el modelo que ha contestado" }
+}
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre" }
+}
+
+# 2. Edición con diálogo de permiso: se ve el diff y se acepta con «s»
+send "cambia el fichero\r"
+expect {
+  "Editar hola.txt" {}
+  timeout { falla "no aparece el diálogo de permiso" }
+}
+expect {
+  "+ adios" {}
+  timeout { falla "el diálogo no enseña el diff" }
+}
+send "s"
+expect {
+  "RESPUESTA-DOS" {}
+  timeout { falla "no termina tras aceptar el permiso" }
+}
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre" }
+}
+
+# 3. Autocompletado de @fichero con Tab
+send "mira @hol"
+expect {
+  "@hola.txt" {}
+  timeout { falla "no sugiere @hola.txt" }
+}
+send "\t"
+sleep 0.3
+send "\r"
+expect {
+  "ADJUNTO-OK" {}
+  timeout { falla "no se adjuntó el fichero" }
+}
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre" }
+}
+
+# 4. Tab cambia al agente plan
+send "\t"
+# Entre el nombre del agente y el resto de la barra hay códigos de color
+expect {
+  -re {plan(\x1b\[[0-9;]*m)*\s*·} {}
+  timeout { falla "Tab no cambia de agente" }
+}
+sleep 0.3
+send "\t"
+expect {
+  -re {build(\x1b\[[0-9;]*m)*\s*·} {}
+  timeout { falla "Tab no vuelve al agente build" }
+}
+sleep 0.3
+
+# 5. Ctrl+P abre la paleta de comandos y Esc la cierra
+send "\x10"
+expect {
+  "Comandos y skills" {}
+  timeout { falla "Ctrl+P no abre la paleta" }
+}
+# Con expect (y no sleep) se sigue leyendo la pantalla: si no, la terminal se llena y vipcode espera
+send "\033"
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "Esc no cierra la paleta" }
+}
+
+# 6. !comando: se ejecuta en la terminal y se ve su salida (lo escrito no contiene la salida)
+send {!printf 'SAL%s' IDA-SHELL}
+send "\r"
+expect {
+  "SALIDA-SHELL" {}
+  timeout { falla "no se ve la salida del !comando" }
+}
+expect {
+  "digo 0" {}
+  timeout { falla "el !comando no termina" }
+}
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre tras el !comando" }
+}
+
+# 7. /models abre la lista y Esc la cierra
+send "/models\r"
+expect {
+  "Elige el modelo" {}
+  timeout { falla "/models no abre la lista" }
+}
+send "\033"
+sleep 0.5
+
+# 8. /exit sale
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-OK"
+exit 0
