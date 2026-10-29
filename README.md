@@ -120,8 +120,6 @@ La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan grat
 - **planear**: solo lee; investiga y propone un plan.
 - **ayudante** y **explorar**: subagentes que el principal lanza para subtareas (ayudante puede editar; explorar solo busca y lee). Si lanza varios, trabajan a la vez.
 
-Antes se llamaban `build`, `plan`, `general` y `explore`, y esos nombres siguen valiendo.
-
 ### Conversaciones
 
 Cada conversación se guarda sola en `~/.vipcode/sessions/`, también en Markdown (`.md`) para leerla o compartirla. Para volver a una: `vipcode -c` (la última de esta carpeta), `/sessions` (eliges de la lista) o `vipcode -s <id>`. Ves toda la conversación anterior y el modelo sigue donde lo dejasteis.
