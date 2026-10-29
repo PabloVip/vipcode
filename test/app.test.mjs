@@ -8,7 +8,9 @@ import { ROOT, contentText, lastMessage, lastUserText, provider, startMock, temp
 const shared = tempWorkspace();
 process.env.VIPCODE_HOME = shared.home;
 process.env.HOME = shared.home;
-// Sin colores aunque se ejecute en GitHub Actions (allí picocolors los activa por la variable CI)
+// Sin colores aunque se ejecute en GitHub Actions (allí picocolors los activa por la variable CI);
+// node --test pone FORCE_COLOR en una terminal y Node avisaría de que choca con NO_COLOR
+delete process.env.FORCE_COLOR;
 process.env.NO_COLOR = "1";
 for (const name of Object.keys(process.env)) {
   if (/_API_KEY$|_TOKEN$/.test(name)) {

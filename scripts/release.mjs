@@ -124,11 +124,17 @@ if (next !== current) {
   act(`Subiendo la versión a ${next}`, "npm", ["version", next, "--no-git-tag-version"]);
 }
 
-// 3. Pruebas (también compila dist/)
+// 3. Pruebas (también compila dist/). Si fallan, se deshace el cambio de versión para poder repetir sin más
 if (dryRun) {
   step("Pruebas: en la simulación no se pasan (npm test)");
 } else {
-  act("Pasando las pruebas", "npm", ["test"]);
+  step("Pasando las pruebas");
+  if (!run("npm", ["test"], { show: true }).ok) {
+    if (next !== current) {
+      run("git", ["checkout", "--", "package.json", "package-lock.json"]);
+    }
+    fail(`Las pruebas han fallado: no se ha publicado nada${next !== current ? ` y la versión vuelve a ser ${current}` : ""}. Arréglalo y vuelve a ejecutar el mismo comando.`);
+  }
 }
 
 // 4. Commit y etiqueta

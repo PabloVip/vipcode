@@ -579,11 +579,13 @@ test("vipcode update instalado con npm: instala el paquete de la última versió
   assert.match(result.output, /no está instalado con «npm install -g»/, result.output);
   assert.match(result.output, /npm install -g http:\/\/127\.0\.0\.1:\d+\/descargas\/vipcode\.tgz/);
   result = await update(installed);
-  assert.match(result.output, /vipcode 9\.9\.9 instalado \(tenías la 0\.2\.0\)/, result.output);
+  // La versión de este vipcode sale de package.json (al publicar ya va subida)
+  const current = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
+  assert.ok(result.output.includes(`vipcode 9.9.9 instalado (tenías la ${current})`), result.output);
   assert.equal(JSON.parse(fs.readFileSync(path.join(installed, "package.json"), "utf8")).version, "9.9.9");
-  latest = "v0.2.0";
+  latest = `v${current}`;
   result = await update(installed);
-  assert.match(result.output, /Ya tienes la última versión \(0\.2\.0\)/);
+  assert.ok(result.output.includes(`Ya tienes la última versión (${current})`), result.output);
   await mock.close();
   ws.cleanup();
 });
