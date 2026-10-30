@@ -1,54 +1,29 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { Box, type DOMElement, Static, Text, render, renderToString, useAnimation, useApp, useBoxMetrics, useInput, usePaste, useWindowSize } from "ink";
+import { Box, Static, Text, render, useAnimation, useApp, useInput, usePaste, useWindowSize } from "ink";
 import pc from "picocolors";
-import sliceAnsi from "slice-ansi";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { ToolEndEvent, ToolEvent, UserInput } from "../agent.js";
+import type { ToolEvent, UserInput } from "../agent.js";
 import type { App, Progress, RunOptions, SelectItem, UiAdapter } from "../app.js";
 import { configNotices } from "../config.js";
 import { discoveryIsStale } from "../discovery.js";
 import { isImagePath, readClipboardImage, toDataUrl } from "../images.js";
-import { toolLabel } from "../labels.js";
 import { providerName, quotaFor } from "../limits.js";
 import { renderMarkdown } from "../markdown.js";
-import { VERSION } from "../meta.js";
 import type { PermissionReply, PermissionRequest } from "../permissions.js";
 import { NoSlotError } from "../router.js";
-import { showControl, stripControl, stripUnsafe } from "../sanitize.js";
+import { showControl, stripControl } from "../sanitize.js";
 import { type Session, appendHistory, loadHistory, sessionMarkdownPath } from "../session.js";
 import { type Todo, suggestFiles } from "../tools.js";
 import { type TutorialCard, tutorialCard } from "../tutorial.js";
-import { copyToClipboard } from "../clipboard.js";
 import { colorPreview } from "../ui.js";
 import { CHECK_MS, checkForUpdate, stepProgress } from "../update.js";
+import { INTERFACES, interfaceFor } from "../interfaces.js";
+import { useConversation } from "./conversation.js";
 import { type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
 import * as E from "./editor.js";
-import { MOUSE_OFF, MOUSE_ON, type TextPos, lineColumns, mouseEvents, selectedColumns, selectedText, wordAt } from "./mouse.js";
-import { type Match, findMatches, scrollThumb } from "./view.js";
-
-
-type Item =
-  | { id: number; kind: "banner" }
-  | { id: number; kind: "user"; text: string; images: number; queued?: boolean; color: string }
-  | { id: number; kind: "assistant"; text: string; color: string }
-  | { id: number; kind: "tool"; event: ToolEndEvent; ms: number }
-  // Pie de cada respuesta: qué modelo contestó, cuánto tardó y cuántos tokens gastó
-  | { id: number; kind: "answer"; slot: string; score: number | null; ms: number; tokens: number }
-  | { id: number; kind: "shell"; command: string; output: string; code: number | null }
-  // Recuadro de versión nueva de vipcode
-  | { id: number; kind: "update"; version: string; security: boolean }
-  // Lo que trae esta versión, la primera vez que la abres
-  | { id: number; kind: "news"; version: string; markdown: string; security: boolean }
-  // /update ha instalado una versión nueva: hay que reiniciar vipcode para usarla
-  | { id: number; kind: "updated"; version: string }
-  // El paso del tutorial en el que vas
-  | { id: number; kind: "tutorial"; step: number; total: number; title: string; text: string }
-  | { id: number; kind: "info" | "notice" | "error" | "block"; text: string };
-
-type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never;
-type NewItem = WithoutId<Item>;
+import { Bullet, type Item, ItemView, type NewItem, ToolHeader, formatDuration, oneLine, shortTokens, tildify } from "./items.js";
+import { look, setLook } from "./theme.js";
 
 type Dialog =
   | { kind: "permission"; request: PermissionRequest; agent: string; resolve: (choice: PermissionChoice) => void }
@@ -86,55 +61,13 @@ function Spinner(props: { color?: string }) {
   return <Text color={props.color || "cyan"}>{SPINNER[frame % SPINNER.length]}</Text>;
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) {
-    return "<1 s";
-  }
-  const seconds = ms / 1000;
-  if (seconds < 10) {
-    return `${seconds.toFixed(1).replace(".", ",")} s`;
-  }
-  if (seconds < 60) {
-    return `${Math.round(seconds)} s`;
-  }
-  return `${Math.floor(seconds / 60)} min ${Math.round(seconds % 60)} s`;
-}
-
 function Elapsed(props: { since: number; hideUnderMs?: number }) {
   useAnimation({ interval: 1000 });
   const ms = Date.now() - props.since;
   if (props.hideUnderMs && ms < props.hideUnderMs) {
     return null;
   }
-  return <Text dimColor>{formatDuration(ms)}</Text>;
-}
-
-// Ancho al que se pinta la conversación en pantalla completa: la última columna es para la barra de desplazamiento
-function paintWidth(columns: number): number {
-  return Math.max(20, columns - 1);
-}
-
-// Ctrl+F: lo que buscas y cuántas veces sale
-function SearchBar(props: { query: string; index: number; total: number }) {
-  let count = "";
-  if (props.query !== "") {
-    count = props.total === 0 ? "no sale" : `${props.index + 1} de ${props.total}`;
-  }
-  return (
-    <Box flexDirection="column">
-      <Box borderStyle="round" borderColor="yellow" paddingX={1} justifyContent="space-between">
-        <Text wrap="truncate-end">
-          <Text color="yellow">Buscar: </Text>
-          {stripControl(props.query)}
-          <Text color="yellow">▍</Text>
-        </Text>
-        <Text dimColor>{count}</Text>
-      </Box>
-      <Text dimColor wrap="truncate-end">
-        {"  "}Enter o ↑ la anterior · ↓ la siguiente · Esc cierra
-      </Text>
-    </Box>
-  );
+  return <Text dimColor={look.dim}>{formatDuration(ms)}</Text>;
 }
 
 // Barra de carga (/update): el paso en el que va, cuánto lleva hecho y el tiempo
@@ -144,384 +77,24 @@ function ProgressBar(props: { progress: Progress & { since: number; stepSince: n
   const cells = Math.max(10, Math.min(30, props.width - 60));
   const filled = Math.round(value * cells);
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={look.gap}>
       <Text>
-        <Spinner color="green" /> <Text bold>{props.progress.title}</Text>
+        <Spinner color={look.tone("green")} /> <Text bold>{props.progress.title}</Text>
       </Text>
       <Text wrap="truncate-end">
         {"  "}
-        <Text color="green">{"█".repeat(filled)}</Text>
-        <Text dimColor>{"░".repeat(cells - filled)}</Text> {Math.floor(value * 100)} %
-        <Text dimColor> · {stripControl(props.progress.text)}… · </Text>
+        <Text color={look.tone("green")}>{"█".repeat(filled)}</Text>
+        <Text dimColor={look.dim}>{"░".repeat(cells - filled)}</Text> {Math.floor(value * 100)} %
+        <Text dimColor={look.dim}> · {stripControl(props.progress.text)}… · </Text>
         <Elapsed since={props.progress.since} />
       </Text>
     </Box>
   );
 }
 
-function shortTokens(tokens: number): string {
-  if (tokens >= 1000000) {
-    return `${(tokens / 1000000).toFixed(1)}M`;
-  }
-  if (tokens >= 1000) {
-    return `${Math.round(tokens / 1000)}k`;
-  }
-  return String(tokens);
-}
-
 function lastLines(text: string, count: number): string {
   const lines = text.replace(/\s+$/, "").split("\n");
   return lines.slice(-count).join("\n");
-}
-
-function firstLine(text: string, max = 200): string {
-  return (text.split("\n")[0] || "").slice(0, max);
-}
-
-function tildify(file: string): string {
-  const home = os.homedir();
-  if (file === home || file.startsWith(home + path.sep)) {
-    return `~${file.slice(home.length)}`;
-  }
-  return file;
-}
-
-// Líneas añadidas y quitadas de un diff
-function diffStats(display: string | undefined): { added: number; removed: number } | null {
-  if (!display) {
-    return null;
-  }
-  let added = 0;
-  let removed = 0;
-  for (const line of display.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) {
-      added++;
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      removed++;
-    }
-  }
-  if (added === 0 && removed === 0) {
-    return null;
-  }
-  return { added, removed };
-}
-
-// Debajo de cada herramienta, un resumen corto de lo que pasó
-function toolDetail(event: ToolEndEvent): string[] {
-  // La salida viene de ficheros y comandos: sin secuencias de la terminal
-  const output = stripControl(event.output || "");
-  if (event.isError) {
-    return [pc.red(firstLine(output))];
-  }
-  if (event.display) {
-    const lines = colorPreview(event.display).split("\n");
-    if (lines.length > 14) {
-      return [...lines.slice(0, 14), pc.dim(`… ${lines.length - 14} líneas más del diff`)];
-    }
-    return lines;
-  }
-  const count = output.split("\n").filter((line) => line.trim() !== "").length;
-  switch (event.name) {
-    case "read_file":
-      if (output.startsWith("Imagen")) {
-        return [pc.dim(firstLine(output))];
-      }
-      return [pc.dim(`Leídas ${output.split("\n").length} líneas`)];
-    case "glob":
-    case "grep":
-      if (/^Sin (resultados|coincidencias)/.test(output)) {
-        return [pc.dim(firstLine(output))];
-      }
-      return [pc.dim(`${count} resultados`)];
-    case "list_dir":
-      return [pc.dim(`${count} entradas`)];
-    case "bash": {
-      const lines = output.split("\n");
-      const header = lines[0] || "";
-      const body = lines.slice(1).filter((line) => line.trim() !== "");
-      const tail = body.slice(-4).map((line) => pc.dim(line.slice(0, 200)));
-      const ok = header === "Código de salida: 0";
-      return [ok ? pc.dim(header) : pc.yellow(header), ...tail];
-    }
-    case "webfetch":
-      return [pc.dim(`${output.length} caracteres`)];
-    case "websearch":
-      return [pc.dim(`${(output.match(/^\d+\. /gm) || []).length} resultados`)];
-    case "todowrite":
-      return output
-        .split("\n")
-        .slice(1)
-        .map((line) => pc.dim(line));
-    case "task":
-      return output
-        .split("\n")
-        .filter((line) => line.trim() !== "")
-        .slice(0, 3)
-        .map((line) => pc.dim(line.slice(0, 200)));
-    case "skill":
-      return [pc.dim(event.summary.includes("·") ? "fichero leído" : "instrucciones cargadas")];
-    default:
-      return [pc.dim(firstLine(output))];
-  }
-}
-
-// El resumen sale de lo que pidió el modelo (comandos, rutas): los caracteres de control se ven, no actúan
-// Lo que está haciendo una herramienta, en una línea: un comando de varias líneas ocuparía media pantalla (y no dejaría
-// sitio al diálogo de permiso, donde va entero)
-function oneLine(text: string): string {
-  const [first, ...rest] = text.split("\n");
-  return rest.length > 0 ? `${first} …` : text;
-}
-
-function ToolHeader(props: { name: string; summary: string }) {
-  return (
-    <>
-      <Text bold>{showControl(toolLabel(props.name))}</Text>
-      {props.summary ? <Text> {showControl(props.summary)}</Text> : null}
-    </>
-  );
-}
-
-// Toda la salida de una herramienta, para verla desplegada (hasta 400 líneas)
-function fullOutput(event: ToolEndEvent): string[] {
-  const lines = event.display ? colorPreview(event.display).split("\n") : stripControl(event.output || "").replace(/\s+$/, "").split("\n");
-  if (lines.length === 1 && lines[0] === "") {
-    return [];
-  }
-  return lines.length > 400 ? [...lines.slice(0, 400), pc.dim(`… ${lines.length - 400} líneas más`)] : lines;
-}
-
-// En pantalla completa la salida de una herramienta sale resumida y con un clic se despliega entera («fold»); sin él,
-// siempre resumida
-function ToolView(props: { event: ToolEndEvent; ms: number; fold?: "folded" | "open" }) {
-  const { event } = props;
-  const summary = toolDetail(event);
-  const full = props.fold ? fullOutput(event) : [];
-  // Solo si desplegada enseña algo más que el resumen
-  const plain = (lines: string[]) => stripControl(lines.join("\n")).split("\n").map((line) => line.trim()).filter(Boolean).join("\n");
-  const foldable = full.length > 0 && plain(full) !== plain(summary);
-  const open = foldable && props.fold === "open";
-  const detail = open ? full : summary;
-  const stats = event.isError ? null : diffStats(event.display);
-  return (
-    <Box flexDirection="column" marginLeft={event.depth > 0 ? 4 : 0}>
-      <Text wrap="truncate-end">
-        <Text color={event.isError ? "red" : "green"}>● </Text>
-        <ToolHeader name={event.name} summary={event.summary} />
-        {stats ? (
-          <Text>
-            {"  "}
-            <Text color="green">+{stats.added}</Text> <Text color="red">−{stats.removed}</Text>
-          </Text>
-        ) : null}
-        {props.ms >= 1000 ? <Text dimColor> ({formatDuration(props.ms)})</Text> : null}
-        {foldable ? <Text dimColor>{open ? "  ▾ plegar" : "  ▸ ver"}</Text> : null}
-      </Text>
-      {detail.map((line, index) => (
-        <Text key={index}>
-          {"  "}
-          {index === 0 ? pc.dim("⎿ ") : "  "}
-          {line}
-        </Text>
-      ))}
-    </Box>
-  );
-}
-
-// Pantalla de bienvenida
-function Banner(props: { app: App }) {
-  const { app } = props;
-  const slots = app.router.slots;
-  const providers = new Set(slots.map((slot) => slot.provider.name)).size;
-  const first = slots[0];
-  const extras: string[] = [];
-  if (app.skills.length > 0) {
-    extras.push(`${app.skills.length} skill${app.skills.length > 1 ? "s" : ""}`);
-  }
-  const mcp = Object.keys(app.config.mcp || {}).length;
-  if (mcp > 0) {
-    extras.push(`${mcp} MCP`);
-  }
-  return (
-    <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="magenta" paddingX={2}>
-      <Text>
-        <Text bold color="magenta">
-          ◆ vipcode
-        </Text>
-        <Text dimColor> v{VERSION} · programa con IAs gratuitas</Text>
-      </Text>
-      <Text dimColor>{tildify(app.root)}</Text>
-      <Text> </Text>
-      <Text>
-        <Text color={slots.length > 0 ? "green" : "red"}>●</Text> {slots.length} modelo{slots.length === 1 ? "" : "s"} de {providers} proveedor
-        {providers === 1 ? "" : "es"}
-        {extras.length > 0 ? <Text dimColor> · {extras.join(" · ")}</Text> : null}
-      </Text>
-      {first ? (
-        <Text wrap="truncate-end">
-          <Text color="yellow">★</Text> Empieza con <Text bold>{first.key}</Text>
-          {first.score !== null ? <Text dimColor> (nota {first.score} en LLM Stats)</Text> : null}
-        </Text>
-      ) : null}
-      <Text> </Text>
-      <Text dimColor wrap="truncate-end">
-        Ctrl+P comandos · @ adjunta · ! terminal · Tab cambia de agente · /help ayuda
-      </Text>
-    </Box>
-  );
-}
-
-// El «●» delante de cada respuesta, en un hueco fijo de dos columnas: escrito como <Text>● </Text>, Ink no cuenta el
-// espacio al repartir el ancho y el texto de al lado se pasa una columna (y la terminal lo corta)
-function Bullet(props: { color: string }) {
-  return (
-    <Box width={2} flexShrink={0}>
-      <Text color={props.color}>●</Text>
-    </Box>
-  );
-}
-
-function ItemView(props: { item: Item; app: App; width: number; fold?: "folded" | "open" }) {
-  const { item, width } = props;
-  switch (item.kind) {
-    case "banner":
-      return <Banner app={props.app} />;
-    case "user": {
-      const lines = stripControl(item.text).split("\n");
-      let text = lines.join("\n");
-      if (lines.length > 20) {
-        text = `${lines.slice(0, 20).join("\n")}\n… (${lines.length - 20} líneas más)`;
-      }
-      return (
-        <Box marginTop={1} borderStyle="bold" borderTop={false} borderRight={false} borderBottom={false} borderColor={item.color} paddingLeft={1}>
-          <Text>
-            {text}
-            {item.images > 0 ? pc.dim(` [${item.images} imagen${item.images > 1 ? "es" : ""}]`) : ""}
-            {item.queued ? pc.dim(" (en cola: se le entrega al acabar el paso)") : ""}
-          </Text>
-        </Box>
-      );
-    }
-    case "assistant":
-      return (
-        <Box marginTop={1}>
-          <Bullet color={item.color} />
-          <Box flexDirection="column" flexGrow={1}>
-            <Text>{renderMarkdown(item.text, Math.max(20, width - 4))}</Text>
-          </Box>
-        </Box>
-      );
-    case "tool":
-      return <ToolView event={item.event} ms={item.ms} fold={props.fold} />;
-    case "answer":
-      return (
-        <Box marginLeft={2}>
-          <Text dimColor wrap="truncate-end">
-            ◆ {item.slot}
-            {item.score !== null ? ` · nota ${item.score}` : ""} · {formatDuration(item.ms)}
-            {item.tokens > 0 ? ` · ${shortTokens(item.tokens)} tokens` : ""}
-          </Text>
-        </Box>
-      );
-    case "shell": {
-      const lines = item.output ? stripControl(item.output).split("\n") : [];
-      const shown = lines.slice(-30);
-      return (
-        <Box flexDirection="column" marginTop={1}>
-          <Text>
-            <Text color="yellow" bold>
-              ${" "}
-            </Text>
-            <Text bold>{showControl(item.command)}</Text>
-          </Text>
-          {lines.length > shown.length ? <Text dimColor>  … {lines.length - shown.length} líneas antes</Text> : null}
-          {shown.length > 0 ? <Text>{shown.map((line) => `  ${line}`).join("\n")}</Text> : null}
-          <Text dimColor>
-            {"  "}
-            {item.code === 0 ? "✓" : "✗"} código {item.code ?? "?"} · el agente verá la salida con tu siguiente mensaje
-          </Text>
-        </Box>
-      );
-    }
-    case "update": {
-      // Si trae arreglos de seguridad, en rojo y diciéndolo: que no se deje para luego
-      const tone = item.security ? "red" : "green";
-      return (
-        <Box marginY={1} alignSelf="flex-start" flexDirection="column" borderStyle="round" borderColor={tone} paddingX={2}>
-          <Text bold color={tone}>
-            {item.security ? "↑ ¡Hay una versión nueva de vipcode con arreglos de seguridad!" : "↑ ¡Hay una versión nueva de vipcode!"}
-          </Text>
-          <Text>
-            {VERSION} → <Text bold color={tone}>{stripControl(item.version)}</Text> · escribe{" "}
-            <Text bold color="cyan">
-              /update
-            </Text>{" "}
-            para instalarla{item.security ? " cuanto antes" : ""}
-          </Text>
-        </Box>
-      );
-    }
-    case "updated":
-      // Hasta que no se reinicia sigue funcionando la versión de antes: que no pase desapercibido
-      return (
-        <Box marginY={1} alignSelf="flex-start" flexDirection="column" borderStyle="round" borderColor="green" paddingX={2}>
-          <Text bold color="green">
-            ✓ vipcode {stripControl(item.version)} instalado
-          </Text>
-          <Text>
-            Para usar la versión nueva, reinicia vipcode: escribe{" "}
-            <Text bold color="cyan">
-              /exit
-            </Text>{" "}
-            y vuelve a abrirlo con{" "}
-            <Text bold color="cyan">
-              vipcode -c
-            </Text>{" "}
-            para seguir en esta conversación.
-          </Text>
-        </Box>
-      );
-    case "tutorial": {
-      const finished = item.step > item.total;
-      return (
-        <Box marginY={1} flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={2}>
-          <Text bold color="magenta">
-            {finished ? `✓ ${item.title}` : `Tutorial · paso ${item.step} de ${item.total}: ${item.title}`}
-          </Text>
-          <Text>{item.text}</Text>
-          {finished ? null : <Text dimColor>Cuando lo hagas, pasas solo al siguiente paso (/tutorial lo repite).</Text>}
-        </Box>
-      );
-    }
-    case "news": {
-      const lines = renderMarkdown(item.markdown, Math.max(20, width - 8)).split("\n");
-      const shown = lines.slice(0, 18);
-      const tone = item.security ? "yellow" : "cyan";
-      return (
-        <Box marginY={1} flexDirection="column" borderStyle="round" borderColor={tone} paddingX={2}>
-          <Text bold color={tone}>
-            ◆ Novedades de vipcode {item.version}
-            {item.security ? " · trae arreglos de seguridad" : ""}
-          </Text>
-          <Text>{shown.join("\n")}</Text>
-          {lines.length > shown.length ? <Text dimColor>… y más en CHANGELOG.md</Text> : null}
-        </Box>
-      );
-    }
-    // Avisos y bloques pueden llevar mensajes de los proveedores o datos de fuera: solo se dejan los colores
-    case "info":
-      return <Text dimColor>{stripUnsafe(item.text)}</Text>;
-    case "notice":
-      return <Text color="yellow">⚠ {stripUnsafe(item.text)}</Text>;
-    case "error":
-      return <Text color="red">✖ {stripUnsafe(item.text)}</Text>;
-    case "block":
-      return (
-        <Box marginY={1}>
-          <Text>{stripUnsafe(item.text)}</Text>
-        </Box>
-      );
-  }
 }
 
 function TodoPanel(props: { todos: Todo[] }) {
@@ -531,35 +104,35 @@ function TodoPanel(props: { todos: Todo[] }) {
   }
   const done = props.todos.filter((todo) => todo.status === "completed").length;
   return (
-    <Box flexDirection="column" marginTop={1} paddingX={1}>
-      <Text dimColor>
+    <Box flexDirection="column" marginTop={look.gap} paddingX={1}>
+      <Text dimColor={look.dim}>
         Tareas ({done}/{props.todos.length})
       </Text>
       {props.todos.slice(0, 10).map((todo, index) => {
         if (todo.status === "completed") {
           return (
-            <Text key={index} color="green" strikethrough>
+            <Text key={index} color={look.tone("green")} strikethrough>
               ☑ {stripControl(todo.content)}
             </Text>
           );
         }
         if (todo.status === "in_progress") {
           return (
-            <Text key={index} color="yellow">
+            <Text key={index} color={look.tone("yellow")}>
               ◐ {stripControl(todo.content)}
             </Text>
           );
         }
         if (todo.status === "cancelled") {
           return (
-            <Text key={index} dimColor strikethrough>
+            <Text key={index} dimColor={look.dim} strikethrough>
               ☒ {stripControl(todo.content)}
             </Text>
           );
         }
         return <Text key={index}>☐ {stripControl(todo.content)}</Text>;
       })}
-      {props.todos.length > 10 ? <Text dimColor>… y {props.todos.length - 10} más</Text> : null}
+      {props.todos.length > 10 ? <Text dimColor={look.dim}>… y {props.todos.length - 10} más</Text> : null}
     </Box>
   );
 }
@@ -577,25 +150,36 @@ function InputBox(props: { editor: E.EditorState; color: string; placeholder: st
   const maxChars = Math.max(200, props.width * 3);
   const clip = (text: string, from: number) => text.slice(from, from + maxChars);
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={color} paddingX={1} marginTop={1}>
+    <Box
+      flexDirection="column"
+      // Compacta y zen: solo una raya encima, para que quepa más conversación
+      borderStyle={look.bare ? "single" : "round"}
+      borderLeft={!look.bare}
+      borderRight={!look.bare}
+      borderBottom={!look.bare}
+      borderColor={look.tone(color)}
+      borderDimColor={look.bare && look.dim}
+      paddingX={look.bare ? 0 : 1}
+      marginTop={look.gap}
+    >
       {props.attachments > 0 ? (
-        <Text color="cyan">
+        <Text color={look.tone("cyan")}>
           {Array.from({ length: props.attachments }, (_, i) => `[Imagen ${i + 1}]`).join(" ")}
-          <Text dimColor> (se envían con el próximo mensaje)</Text>
+          <Text dimColor={look.dim}> (se envían con el próximo mensaje)</Text>
         </Text>
       ) : null}
-      {start > 0 ? <Text dimColor>  ↑ {start} líneas más</Text> : null}
+      {start > 0 ? <Text dimColor={look.dim}>  ↑ {start} líneas más</Text> : null}
       {lines.slice(start, end).map((text, offset) => {
         const index = start + offset;
         // En líneas larguísimas se enseña el trozo donde está el cursor
         const from = index === line ? Math.max(0, column - Math.floor(maxChars / 2)) : 0;
         return (
           <Text key={index}>
-            <Text color={color}>{index === 0 ? (shell ? "$ " : "❯ ") : "  "}</Text>
+            <Text color={look.tone(color)}>{index === 0 ? (shell ? "$ " : "❯ ") : "  "}</Text>
             {editor.value === "" ? (
               <>
                 <Text inverse> </Text>
-                <Text dimColor>{props.placeholder}</Text>
+                <Text dimColor={look.dim}>{props.placeholder}</Text>
               </>
             ) : index === line ? (
               <>
@@ -610,8 +194,8 @@ function InputBox(props: { editor: E.EditorState; color: string; placeholder: st
           </Text>
         );
       })}
-      {end < lines.length ? <Text dimColor>  ↓ {lines.length - end} líneas más</Text> : null}
-      {shell ? <Text dimColor>Enter lo ejecuta en {tildify(process.cwd())} · el agente verá la salida</Text> : null}
+      {end < lines.length ? <Text dimColor={look.dim}>  ↓ {lines.length - end} líneas más</Text> : null}
+      {shell ? <Text dimColor={look.dim}>Enter lo ejecuta en {tildify(process.cwd())} · el agente verá la salida</Text> : null}
     </Box>
   );
 }
@@ -637,9 +221,9 @@ function ContextGauge(props: { used: number; total: number; detail: boolean }) {
   }
   return (
     <Text>
-      <Text dimColor> · </Text>
-      <Text color={color}>{"▰".repeat(filled)}</Text>
-      <Text dimColor>
+      <Text dimColor={look.dim}> · </Text>
+      <Text color={look.tone(color)}>{"▰".repeat(filled)}</Text>
+      <Text dimColor={look.dim}>
         {"▱".repeat(8 - filled)} {gaugeLabel(props.used, props.total, props.detail)}
       </Text>
     </Text>
@@ -689,7 +273,9 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   // tokens, el detalle del contexto, los modelos disponibles, la nota del modelo, su nombre largo («kilo/nvidia/x» →
   // «nvidia/x» → «x»), la ayuda corta, el medidor de contexto si todavía no avisa de nada y, lo último, de quién es el
   // límite (es lo que dice a qué se refiere «quedan 46/50»)
-  const fit = { hint: 2, tokens: spent > 0, detail: true, models: true, score: true, name: 0, gauge: true, who: true };
+  // En la zen, lo justo: el agente, el modelo y lo que queda (y a la derecha solo los avisos que importan)
+  const lean = look.minimal;
+  const fit = { hint: lean && !hint.color && !props.busy ? 0 : 2, tokens: spent > 0 && !lean, detail: !lean, models: !lean, score: !lean, name: 0, gauge: !lean, who: true };
   const names = [current || "rotación automática", slot?.model.id, slot?.model.id.split("/").pop()];
   const model = () => ` · ${names[fit.name] || names[0]}${slot && slot.score !== null && fit.score ? ` ★${slot.score}` : ""}${app.router.pinned ? " (fijado)" : ""}`;
   const gauge = () => fit.gauge && app.agent.lastTokens > 0 && context > 0;
@@ -730,26 +316,26 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   return (
     <Box justifyContent="space-between" paddingX={1}>
       <Text wrap="truncate-end">
-        <Text bold color={(agent?.color as any) || "magenta"}>
+        <Text bold color={look.tone(agent?.color || "magenta")}>
           {props.agentName}
         </Text>
-        <Text dimColor>{model()}</Text>
+        <Text dimColor={look.dim}>{model()}</Text>
         {quota ? (
-          <Text color={quotaColor} dimColor={!quotaColor}>
+          <Text color={look.tone(quotaColor)} dimColor={look.dim && !quotaColor}>
             {" "}
             · {stripControl(quotaText())}
           </Text>
         ) : null}
         {gauge() ? <ContextGauge used={app.agent.lastTokens} total={context} detail={fit.detail} /> : null}
-        <Text dimColor>
+        <Text dimColor={look.dim}>
           {fit.models ? ` · ${available}/${app.router.slots.length} modelos` : ""}
           {fit.tokens ? ` · ${shortTokens(spent)} tokens` : ""}
           {queued > 0 ? ` · ${queued} en cola` : ""}
         </Text>
-        {app.yolo ? <Text color="red"> · yolo</Text> : null}
+        {app.yolo ? <Text color={look.tone("red")}> · yolo</Text> : null}
       </Text>
       {hintText() ? (
-        <Text wrap="truncate-start" color={hint.color} dimColor={!hint.color} bold={hint.bold}>
+        <Text wrap="truncate-start" color={look.tone(hint.color)} dimColor={look.dim && !hint.color} bold={hint.bold}>
           {hintText()}
         </Text>
       ) : null}
@@ -757,7 +343,9 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   );
 }
 
-function Main(props: { app: App; initial: string; fullscreen: boolean }) {
+// «switched»: la interfaz que se acaba de elegir con /interfaz, si se ha rehecho la pantalla para pasar a la clásica o
+// volver de ella (entonces sigue la misma conversación y no se repite lo del arranque)
+function Main(props: { app: App; initial: string; fullscreen: boolean; switched: string | null }) {
   const { app } = props;
   const { exit } = useApp();
   const { columns, rows } = useWindowSize();
@@ -768,47 +356,10 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [todos, setTodos] = useState<Todo[]>(app.agent.session.todos);
   const [progress, setProgress] = useState<(Progress & { since: number; stepSince: number }) | null>(null);
-  // Pantalla completa: la conversación ya pintada, línea a línea (cada mensaje se pinta una vez para cada ancho), y
-  // hasta dónde se ha subido (null: abajo del todo, siguiendo lo que llega)
-  const painted = useRef(new Map<number, { width: number; open: boolean; lines: string[] }>());
-  const [scrollTop, setScrollTop] = useState<number | null>(null);
-  const historyRef = useRef<DOMElement>(null);
-  const historyBox = useBoxMetrics(historyRef);
-  const scrollState = useRef({ lines: 0, height: 1 });
-  // Lo seleccionado arrastrando con el ratón sobre la conversación (se copia al soltar), dónde empezó el arrastre y lo
-  // que se ve ahora (para saber qué línea hay bajo el ratón)
-  const [selection, setSelection] = useState<{ from: TextPos; to: TextPos } | null>(null);
-  const dragStart = useRef<TextPos | null>(null);
-  const view = useRef({ lines: [] as string[], owners: [] as { id: number; first: boolean }[], top: 0, height: 1, bar: false });
-  // Herramientas desplegadas con un clic, Ctrl+F (lo que se busca y cuál de las coincidencias es la actual; -1, la última)
-  // y los clics seguidos (doble clic: palabra; triple: línea)
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const expandedRef = useRef(expanded);
-  expandedRef.current = expanded;
-  const [search, setSearch] = useState<{ query: string; current: number } | null>(null);
-  // Al momento (sin esperar a que se pinte): qué teclado manda, el de la búsqueda o el de la caja de escribir
-  const searchOpen = useRef(false);
-  const lastClick = useRef({ time: 0, line: -1, col: -1, count: 0 });
-  const pendingToggle = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const draggingBar = useRef(false);
-  // Un aviso corto en la barra de abajo («✓ copiado»)
-  const [flash, setFlash] = useState<string | null>(null);
-  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showFlash = (text: string) => {
-    clearTimeout(flashTimer.current ?? undefined);
-    setFlash(text);
-    flashTimer.current = setTimeout(() => setFlash(null), 2500);
-  };
-  const copies = useRef<Promise<unknown>>(Promise.resolve());
-  const copySelection = (lines: string[], from: TextPos, to: TextPos) => {
-    const text = selectedText(lines, from, to);
-    if (text.trim() !== "") {
-      // En fila: en un triple clic, la línea se copia después de la palabra del doble clic
-      copies.current = copies.current
-        .then(() => copyToClipboard(text))
-        .then((how) => showFlash(how ? "✓ copiado" : "No he podido copiarlo: prueba con /copiar"));
-    }
-  };
+  // La interfaz (/interfaz) y la conversación en pantalla completa: scroll, selección, Ctrl+F y herramientas que se
+  // despliegan
+  const [interfaceId, setInterfaceId] = useState(look.interface.id);
+  const conversation = useConversation({ app, items, columns, rows, fullscreen: props.fullscreen, dialog, interfaceId });
   const [attachments, setAttachments] = useState<string[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
   const [suggestionsClosed, setSuggestionsClosed] = useState(false);
@@ -883,6 +434,18 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
       progress: (state) => setProgress((previous) => (state ? { ...state, since: previous?.since ?? Date.now(), stepSince: Date.now() } : null)),
       updated: (version) => push({ kind: "updated", version }),
       tutorial: (card) => push({ kind: "tutorial", ...card }),
+      setInterface: (id: string) => {
+        const next = INTERFACES.find((item) => item.id === id) || INTERFACES[0];
+        if (next.fullscreen !== props.fullscreen) {
+          // Entre la clásica y la pantalla completa hay que rehacer la pantalla (startTui la vuelve a abrir)
+          app.switchInterface = next.id;
+          exit();
+          return;
+        }
+        setLook(next);
+        setInterfaceId(next.id);
+        push({ kind: "info", text: `Interfaz «${next.label}».` });
+      },
     }),
     [],
   );
@@ -1020,8 +583,7 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
     setEditor(E.EMPTY);
     historyIndex.current = null;
     // Al escribir se vuelve abajo del todo (y se quita lo seleccionado)
-    setScrollTop(null);
-    setSelection(null);
+    conversation.toBottom();
     if (text !== "") {
       appendHistory(text);
       history.current.push(text);
@@ -1113,14 +675,17 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
   };
 
   // La conversación de una sesión a la que vuelves, tal como la viste
-  const replay = (session: Session) => {
+  const replay = (session: Session, same = false) => {
     const entries = session.log;
     if (entries.length === 0) {
       push({ kind: "info", text: `Sesión «${session.title}» cargada.` });
       return;
     }
     const shown = entries.slice(-REPLAY_MAX);
-    push({ kind: "info", text: `── Conversación anterior: «${session.title}» · ${new Date(session.updated).toLocaleString()} ──` });
+    push({
+      kind: "info",
+      text: same ? "── Sigue la misma conversación ──" : `── Conversación anterior: «${session.title}» · ${new Date(session.updated).toLocaleString()} ──`,
+    });
     if (entries.length > shown.length) {
       push({ kind: "info", text: `… ${entries.length - shown.length} pasos antes; la conversación entera está en ${sessionMarkdownPath(session)}` });
     }
@@ -1233,7 +798,7 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
         // Un comando que no cabe en el diálogo se escribe entero en el historial antes de preguntar: lo que apruebas
         // tienes que poder leerlo todo, y 30 líneas inofensivas podrían esconder una maliciosa al final
         if (request.kind === "bash" && request.preview.split("\n").length > permissionRoom(process.stdout.rows || 24)) {
-          push({ kind: "block", text: `${pc.yellow("Comando entero que pide ejecutar:")}\n${colorPreview(request.preview)}` });
+          push({ kind: "block", text: `${pc.yellow("Comando entero que pide ejecutar:")}\n${colorPreview(request.preview, look.faint)}` });
         }
         setDialog({
           kind: "permission",
@@ -1260,13 +825,23 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
 
     // Tareas de arranque en segundo plano
     let starting: Promise<void> = Promise.resolve();
-    for (const notice of configNotices) {
+    const switched = INTERFACES.find((item) => item.id === props.switched);
+    if (switched) {
+      // Se ha rehecho la pantalla para cambiar de interfaz: sigue la misma conversación, sin repetir lo del arranque
+      push({ kind: "info", text: `Interfaz «${switched.label}».` });
+      if (app.agent.session.log.length > 0) {
+        replay(app.agent.session, true);
+      }
+    }
+    for (const notice of switched ? [] : configNotices) {
       push({ kind: "notice", text: notice });
     }
-    if (app.agent.session.log.length > 0) {
+    if (!switched && app.agent.session.log.length > 0) {
       replay(app.agent.session);
     }
-    if (app.router.slots.length === 0) {
+    if (switched) {
+      // nada más: lo demás ya se hizo al abrir vipcode
+    } else if (app.router.slots.length === 0) {
       push({
         kind: "notice",
         text: "Para empezar, conecta una IA gratuita: elige una de la lista y sigue los pasos (puedes repetirlo cuando quieras con /connect).",
@@ -1277,7 +852,7 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
     } else if (app.onlyAnonymous()) {
       push({ kind: "info", text: app.anonymousNotice() });
     }
-    void app.startMcp(refresh).then(() => {
+    void (switched ? Promise.resolve() : app.startMcp(refresh)).then(() => {
       for (const server of app.mcp?.status() || []) {
         if (server.state === "error") {
           push({ kind: "notice", text: `MCP ${server.name}: ${server.error}` });
@@ -1286,7 +861,7 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
       refresh();
     });
     // En Windows sin Git para Windows, el consejo de instalarlo (una vez al día)
-    const gitNotice = app.gitNotice();
+    const gitNotice = switched ? null : app.gitNotice();
     if (gitNotice) {
       push({ kind: "notice", text: gitNotice });
     }
@@ -1307,7 +882,9 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
         if (update) {
           app.newVersion = update.version;
           app.newVersionSecurity = update.security;
-          push({ kind: "update", version: update.version, security: update.security });
+          if (!switched) {
+            push({ kind: "update", version: update.version, security: update.security });
+          }
         }
       });
       updates = setInterval(() => {
@@ -1406,270 +983,17 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
     push({ kind: "info", text: `Imagen adjuntada: ${label}` });
   };
 
-  // La conversación, línea a línea, para la pantalla completa. Cada mensaje se pinta con renderToString en un
-  // temporizador, fuera de React: mientras Ink pinta (o en sus efectos) no se puede, y rompe su cálculo de tamaños
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
-  const columnsRef = useRef(columns);
-  columnsRef.current = columns;
-  const [paintedCount, setPaintedCount] = useState(0);
-  const paintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!props.fullscreen || paintTimer.current) {
-      return;
-    }
-    paintTimer.current = setTimeout(() => {
-      paintTimer.current = null;
-      const width = paintWidth(columnsRef.current);
-      let changed = false;
-      for (const item of itemsRef.current) {
-        const open = expandedRef.current.has(item.id);
-        const done = painted.current.get(item.id);
-        if (done && done.width === width && done.open === open) {
-          continue;
-        }
-        const text = renderToString(
-          <Box width={width} flexDirection="column">
-            <ItemView item={item} app={app} width={width} fold={item.kind === "tool" ? (open ? "open" : "folded") : undefined} />
-          </Box>,
-          { columns: width },
-        );
-        painted.current.set(item.id, { width, open, lines: text.split("\n") });
-        changed = true;
-      }
-      if (changed) {
-        setPaintedCount((count) => count + 1);
-      }
-    }, 0);
-  }, [items, columns, expanded]);
-  useEffect(
-    () => () => {
-      clearTimeout(paintTimer.current ?? undefined);
-      clearTimeout(flashTimer.current ?? undefined);
-      clearTimeout(pendingToggle.current ?? undefined);
-    },
-    [],
-  );
-  // Las líneas y de qué mensaje es cada una (la primera de una herramienta se pincha para desplegarla)
-  const conversation = useMemo(() => {
-    const lines: string[] = [];
-    const owners: { id: number; first: boolean }[] = [];
-    for (const item of props.fullscreen ? items : []) {
-      const done = painted.current.get(item.id);
-      if (done && done.width === paintWidth(columns)) {
-        done.lines.forEach((line, index) => {
-          lines.push(line);
-          owners.push({ id: item.id, first: index === 0 });
-        });
-      }
-    }
-    return { lines, owners };
-  }, [items, columns, paintedCount]);
-  const historyLines = conversation.lines;
-  const viewHeight = historyBox.hasMeasured ? Math.max(1, historyBox.height) : Math.max(3, rows - 8);
-  scrollState.current = { lines: historyLines.length, height: viewHeight };
-  // La primera línea que se ve: abajo del todo si no has subido
-  const maxTop = Math.max(0, historyLines.length - viewHeight);
-  const top = scrollTop === null ? maxTop : Math.min(scrollTop, maxTop);
-  const thumb = scrollThumb(historyLines.length, viewHeight, top);
-  view.current = { lines: historyLines, owners: conversation.owners, top, height: viewHeight, bar: thumb !== null };
-
-  // Ctrl+F: las coincidencias y la actual (al cambiar lo buscado, la de más abajo)
-  const matches = useMemo(() => (search ? findMatches(historyLines, search.query) : []), [historyLines, search?.query]);
-  const current = search && matches.length > 0 ? (search.current < 0 ? matches.length - 1 : Math.min(search.current, matches.length - 1)) : -1;
-  useEffect(() => {
-    if (current < 0) {
-      return;
-    }
-    // Que se vea, más o menos en el centro
-    const { lines, height } = scrollState.current;
-    const max = Math.max(0, lines - height);
-    const target = Math.max(0, Math.min(matches[current].line - Math.floor(height / 2), max));
-    setScrollTop(target >= max ? null : target);
-  }, [search?.query, current, matches.length]);
-
-  // Sube o baja la conversación; al llegar abajo del todo vuelve a seguir lo que llega
-  const scrollBy = (delta: number) => {
-    const { lines, height } = scrollState.current;
-    const max = Math.max(0, lines - height);
-    setScrollTop((current) => {
-      const next = (current ?? max) + delta;
-      return next >= max ? null : Math.max(0, next);
-    });
-  };
-
-  // AvPág/RePág, también con un diálogo abierto (para leer lo de arriba antes de contestar), salvo en las listas, que
-  // los usan para moverse por ellas
-  useInput(
-    (_input, key) => {
-      if (dialog?.kind !== "select" && (key.pageUp || key.pageDown)) {
-        scrollBy((key.pageUp ? -1 : 1) * Math.max(1, scrollState.current.height - 2));
-      } else if (key.ctrl && (key.home || key.end)) {
-        // Ctrl+Inicio y Ctrl+Fin: al principio o al final de la conversación
-        const { lines, height } = scrollState.current;
-        setScrollTop(key.home && lines > height ? 0 : null);
-      }
-    },
-    { isActive: props.fullscreen },
-  );
-
-  // Con la pantalla completa, la terminal le manda el ratón a vipcode (la rueda mueve la conversación); al salir, también
-  // si sale de golpe, deja de hacerlo
-  useEffect(() => {
-    if (!props.fullscreen || !process.stdout.isTTY) {
-      return;
-    }
-    process.stdout.write(MOUSE_ON);
-    // Lo que lee Ink de la terminal pasa también por aquí (envolviendo stdin.read), sin quitárselo. No vale escuchar
-    // «data»: cuando Ink cambia su oyente de «readable», Node puede ponerse a dar las teclas solo a ese oyente
-    const onData = (chunk: Buffer | string) => {
-      for (const event of mouseEvents(String(chunk))) {
-        if (event.kind === "wheel") {
-          scrollBy(event.delta * 3);
-          continue;
-        }
-        const { lines, owners, top, height, bar } = view.current;
-        // La barra de desplazamiento (la última columna): pinchar o arrastrar lleva a esa altura
-        if (event.kind === "press" && bar && event.y < height && event.x >= columnsRef.current - 1) {
-          draggingBar.current = true;
-        }
-        if (draggingBar.current) {
-          if (event.kind === "release") {
-            draggingBar.current = false;
-          } else {
-            const max = Math.max(0, lines.length - height);
-            const target = Math.round((Math.max(0, Math.min(event.y, height - 1)) / Math.max(1, height - 1)) * max);
-            setScrollTop(target >= max ? null : target);
-          }
-          continue;
-        }
-        // La línea de la conversación que hay bajo el ratón (si está más abajo, la última que se ve)
-        const pos = { line: Math.max(0, Math.min(top + Math.min(event.y, height - 1), lines.length - 1)), col: event.x };
-        if (event.kind === "press") {
-          // Fuera de la conversación (en la caja o la barra de abajo) no se selecciona; un clic quita lo seleccionado
-          if (event.y >= height) {
-            dragStart.current = null;
-            setSelection(null);
-            continue;
-          }
-          const now = Date.now();
-          const last = lastClick.current;
-          const count = now - last.time < 450 && last.line === pos.line && Math.abs(last.col - pos.col) <= 1 ? last.count + 1 : 1;
-          lastClick.current = { time: now, line: pos.line, col: pos.col, count };
-          if (count >= 2) {
-            // Doble clic: la palabra; triple: la línea entera. Se copia enseguida (y no despliega nada)
-            clearTimeout(pendingToggle.current ?? undefined);
-            dragStart.current = null;
-            const range = count === 2 ? wordAt(lines[pos.line] || "", pos.col) : lineColumns(lines[pos.line] || "");
-            if (range && range[1] > range[0]) {
-              const from = { line: pos.line, col: range[0] };
-              const to = { line: pos.line, col: range[1] - 1 };
-              setSelection({ from, to });
-              copySelection(lines, from, to);
-            }
-            continue;
-          }
-          dragStart.current = pos;
-          setSelection({ from: pos, to: pos });
-        } else if (event.kind === "drag" && dragStart.current) {
-          // Contra el borde de arriba o por debajo de la conversación, se va moviendo para seguir seleccionando
-          if (event.y <= 0) {
-            scrollBy(-1);
-          } else if (event.y >= height) {
-            scrollBy(1);
-          }
-          setSelection({ from: dragStart.current, to: pos });
-        } else if (event.kind === "release" && dragStart.current) {
-          const start = dragStart.current;
-          dragStart.current = null;
-          if (start.line === pos.line && start.col === pos.col) {
-            setSelection(null);
-            // Un clic en la primera línea de una herramienta despliega (o pliega) su salida; se espera un momento por si
-            // es un doble clic
-            const owner = owners[pos.line];
-            if (owner?.first && itemsRef.current.find((item) => item.id === owner.id)?.kind === "tool") {
-              clearTimeout(pendingToggle.current ?? undefined);
-              pendingToggle.current = setTimeout(() => {
-                pendingToggle.current = null;
-                setExpanded((previous) => {
-                  const next = new Set(previous);
-                  if (!next.delete(owner.id)) {
-                    next.add(owner.id);
-                  }
-                  return next;
-                });
-              }, 300);
-            }
-            continue;
-          }
-          setSelection({ from: start, to: pos });
-          copySelection(lines, start, pos);
-        }
-      }
-    };
-    const stdin = process.stdin;
-    const read = stdin.read;
-    stdin.read = ((size?: number) => {
-      const chunk = read.call(stdin, size);
-      if (chunk !== null && chunk !== undefined) {
-        onData(chunk);
-      }
-      return chunk;
-    }) as typeof stdin.read;
-    const off = () => {
-      try {
-        fs.writeSync(process.stdout.fd, MOUSE_OFF);
-      } catch {
-        // la terminal ya no está
-      }
-    };
-    process.on("exit", off);
-    return () => {
-      stdin.read = read;
-      off();
-      process.off("exit", off);
-    };
-  }, []);
-
-  // Ctrl+F abierta: lo que escribes es lo que se busca
-  useInput(
-    (input, key) => {
-      if (!searchOpen.current || dialogRef.current) {
-        return;
-      }
-      if (key.escape || (key.ctrl && (input === "f" || input === "c"))) {
-        searchOpen.current = false;
-        setSearch(null);
-      } else if (key.return || key.upArrow || key.downArrow) {
-        if (matches.length > 0) {
-          const step = key.downArrow ? 1 : -1;
-          setSearch((previous) => previous && { ...previous, current: (current + step + matches.length) % matches.length });
-        }
-      } else if (key.backspace || key.delete) {
-        setSearch((previous) => previous && { query: [...previous.query].slice(0, -1).join(""), current: -1 });
-      } else if (input && !key.ctrl && !key.meta) {
-        const text = stripControl(input).replace(/[\r\n\t]/g, "");
-        if (text) {
-          setSearch((previous) => previous && { query: previous.query + text, current: -1 });
-        }
-      }
-    },
-    { isActive: props.fullscreen },
-  );
-
   useInput((input, key) => {
     // AvPág/RePág y Ctrl+Inicio/Ctrl+Fin mueven la conversación (lo hace el useInput de arriba)
     if (props.fullscreen && (key.pageUp || key.pageDown || (key.ctrl && (key.home || key.end)))) {
       return;
     }
     // Ctrl+F: buscar en la conversación (mientras, el teclado es de la búsqueda)
-    if (searchOpen.current) {
+    if (conversation.searching.current) {
       return;
     }
     if (props.fullscreen && key.ctrl && input === "f" && !dialogRef.current) {
-      searchOpen.current = true;
-      setSelection(null);
-      setSearch({ query: "", current: -1 });
+      conversation.openSearch();
       return;
     }
     // Ctrl+C funciona siempre: interrumpe, cierra el diálogo, borra lo escrito o sale
@@ -1872,14 +1196,14 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
       }
       update(E.insert(editor, text.replace(/\r\n?/g, "\n")));
     },
-    { isActive: !dialog && search === null },
+    { isActive: !dialog && conversation.searchBar === null },
   );
 
   const agent = app.agents.find((item) => item.name === agentName);
   const color = agent?.color || "magenta";
   // La zona en directo no puede pasar del alto de la pantalla (Ink no sabe borrar lo que se ha ido hacia arriba)
   const liveRoom = Math.max(4, rows - 14);
-  const liveText = live.current.text ? lastLines(renderMarkdown(live.current.text, Math.max(20, columns - 4)), liveRoom) : "";
+  const liveText = live.current.text ? lastLines(renderMarkdown(live.current.text, Math.max(20, columns - 4), { faint: look.faint }), liveRoom) : "";
   const running = [...live.current.running.values()];
   const shell = live.current.shell;
 
@@ -1908,17 +1232,17 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
   const bottom = (
     <Box flexDirection="column" flexShrink={0}>
       {live.current.reasoning ? (
-        <Text dimColor italic wrap="truncate-end">
+        <Text dimColor={look.dim} italic wrap="truncate-end">
           💭 {lastLines(stripControl(live.current.reasoning).replace(/\s+/g, " "), 1).slice(-Math.max(20, columns - 6))}
         </Text>
       ) : null}
       {liveText ? (
-        <Box marginTop={1}>
+        <Box marginTop={look.gap}>
           <Bullet color={color} />
           <Box flexDirection="column" flexGrow={1}>
             <Text>
               {liveText}
-              <Text color={color}>▍</Text>
+              <Text color={look.tone(color)}>▍</Text>
             </Text>
           </Box>
         </Box>
@@ -1929,7 +1253,7 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
             <Spinner /> <ToolHeader name={event.name} summary={oneLine(event.summary)} /> <Elapsed since={since} hideUnderMs={2000} />
           </Text>
           {progress ? (
-            <Text dimColor wrap="truncate-end">
+            <Text dimColor={look.dim} wrap="truncate-end">
               {"    "}
               {lastLines(stripControl(progress), 1).slice(0, Math.max(20, columns - 8))}
             </Text>
@@ -1937,25 +1261,25 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
         </Box>
       ))}
       {shell ? (
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column" marginTop={look.gap}>
           <Text>
-            <Spinner color="yellow" /> <Text bold>{showControl(shell.command)}</Text> <Elapsed since={startedAt.current} hideUnderMs={1000} />
+            <Spinner color={look.tone("yellow")} /> <Text bold>{showControl(shell.command)}</Text> <Elapsed since={startedAt.current} hideUnderMs={1000} />
           </Text>
-          {shell.output ? <Text dimColor>{lastLines(stripControl(shell.output), Math.min(8, liveRoom)).replace(/^/gm, "  ")}</Text> : null}
+          {shell.output ? <Text dimColor={look.dim}>{lastLines(stripControl(shell.output), Math.min(8, liveRoom)).replace(/^/gm, "  ")}</Text> : null}
         </Box>
       ) : null}
       <TodoPanel todos={todos} />
       {progress ? <ProgressBar progress={progress} width={columns} /> : null}
       {busy && !shell && running.length === 0 && !liveText && !answered.current ? (
-        <Box marginTop={1}>
+        <Box marginTop={look.gap}>
           <Text wrap="truncate-end">
-            <Spinner /> <Text dimColor>Pensando{live.current.model ? ` con ${live.current.model}` : ""}… </Text>
+            <Spinner /> <Text dimColor={look.dim}>Pensando{live.current.model ? ` con ${live.current.model}` : ""}… </Text>
             <Elapsed since={startedAt.current} hideUnderMs={1000} />
           </Text>
         </Box>
       ) : null}
       {dialogView ||
-        (search ? <SearchBar query={search.query} index={current} total={matches.length} /> : null) || (
+        conversation.searchBar || (
         <InputBox
           editor={editor}
           color={color}
@@ -1971,58 +1295,19 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
             <Text key={`${index}-${suggestion.label}`} color={index === selected ? "cyan" : undefined} wrap="truncate-end">
               {index === selected ? "❯ " : "  "}
               {suggestion.label}
-              {suggestion.description ? <Text dimColor> {suggestion.description}</Text> : null}
+              {suggestion.description ? <Text dimColor={look.dim}> {suggestion.description}</Text> : null}
             </Text>
           ))}
         </Box>
       ) : null}
-      <StatusBar app={app} agentName={agentName} busy={busy} model={busy ? live.current.model : ""} width={columns} flash={flash} />
+      <StatusBar app={app} agentName={agentName} busy={busy} model={busy ? live.current.model : ""} width={columns} flash={conversation.flash} />
     </Box>
   );
 
   if (props.fullscreen) {
-    // Lo que se ve de la conversación: lo buscado resaltado (lo actual en amarillo) y lo seleccionado en vídeo inverso; si
-    // has subido, la última línea dice cuánto queda por debajo
-    const mark = (line: string, from: number, to: number, paint: (text: string) => string) =>
-      `${sliceAnsi(line, 0, from)}${paint(stripControl(sliceAnsi(line, from, to)))}${sliceAnsi(line, to)}`;
-    const found = new Map<number, Match[]>();
-    for (const match of matches) {
-      found.set(match.line, [...(found.get(match.line) || []), match]);
-    }
-    let visible = historyLines.slice(top, top + viewHeight).map((line, index) => {
-      let out = line;
-      for (const match of found.get(top + index) || []) {
-        out = mark(out, match.col, match.col + match.width, match === matches[current] ? (text) => pc.black(pc.bgYellow(text)) : pc.inverse);
-      }
-      const range = selection ? selectedColumns(top + index, selection.from, selection.to) : null;
-      if (range && !(selection!.from.line === selection!.to.line && selection!.from.col === selection!.to.col)) {
-        out = mark(out, range[0], range[1], pc.inverse);
-      }
-      return out;
-    });
-    const below = historyLines.length - (top + viewHeight);
-    if (scrollTop !== null && below > 0) {
-      visible = [...visible.slice(0, -1), pc.dim(`↓ ${below} líneas más · rueda del ratón o AvPág para bajar`)];
-    }
     return (
       <Box flexDirection="column" width={columns} height={rows}>
-        <Box ref={historyRef} flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
-          <Box flexDirection="column" width={paintWidth(columns)}>
-            {visible.map((line, index) => (
-              <Text key={index} wrap="truncate-end">
-                {line || " "}
-              </Text>
-            ))}
-          </Box>
-          {thumb ? (
-            // La barra de desplazamiento: dónde estás en la conversación (se puede pinchar y arrastrar)
-            <Box flexDirection="column" width={1}>
-              {Array.from({ length: viewHeight }, (_, row) => (
-                <Text key={row}>{row >= thumb.start && row < thumb.start + thumb.size ? "┃" : pc.dim("│")}</Text>
-              ))}
-            </Box>
-          ) : null}
-        </Box>
+        {conversation.viewport}
         {bottom}
       </Box>
     );
@@ -2045,17 +1330,31 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
 }
 
 export async function startTui(app: App, options: { initial?: string } = {}) {
-  // Pantalla completa (salvo con "fullscreen": false): la conversación tiene su propio scroll
-  const fullscreen = app.config.fullscreen !== false;
-  const instance = render(<Main app={app} initial={options.initial || ""} fullscreen={fullscreen} />, {
-    exitOnCtrlC: false,
-    kittyKeyboard: { mode: "auto" },
-    alternateScreen: fullscreen,
-  });
-  await instance.waitUntilExit();
+  let initial = options.initial || "";
+  let switched: string | null = null;
+  let fullscreen = true;
+  for (;;) {
+    // La interfaz elegida con /interfaz (o en tu configuración): pantalla completa, con su propio scroll, o clásica
+    const chosen = interfaceFor(app.config);
+    setLook(chosen);
+    fullscreen = chosen.fullscreen;
+    const instance = render(<Main app={app} initial={initial} fullscreen={fullscreen} switched={switched} />, {
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "auto" },
+      alternateScreen: fullscreen,
+    });
+    await instance.waitUntilExit();
+    // /interfaz entre la clásica y la pantalla completa: se vuelve a abrir en el otro modo, con la misma conversación
+    if (!app.switchInterface) {
+      break;
+    }
+    switched = app.switchInterface;
+    app.switchInterface = null;
+    initial = "";
+  }
   // La pantalla completa no deja la conversación en la terminal: se recuerda cómo seguir con ella
   if (fullscreen && !app.relaunch && !app.installedVersion && app.agent.session.messages.length > 0) {
-    console.log(pc.dim("Conversación guardada: «vipcode -c» sigue con ella."));
+    console.log(look.faint("Conversación guardada: «vipcode -c» sigue con ella."));
   }
   // Tras /update sigue abierta la versión de antes: se recuerda cómo abrir la nueva (salvo si ya se va a reiniciar)
   if (app.installedVersion && !app.relaunch) {

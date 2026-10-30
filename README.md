@@ -100,7 +100,15 @@ Antes de editar un fichero, ejecutar un comando o salir a internet, vipcode te e
 
 La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan gratis y cuánto contexto llevas gastado.
 
-vipcode ocupa la pantalla completa mientras lo usas; al salir, la terminal vuelve a estar como antes y la conversación queda guardada (`vipcode -c` sigue con ella). Si prefieres que la conversación se quede en la terminal, pon `"fullscreen": false` en tu configuración.
+vipcode ocupa la pantalla completa mientras lo usas; al salir, la terminal vuelve a estar como antes y la conversación queda guardada (`vipcode -c` sigue con ella).
+
+Con **`/interfaz`** eliges cómo se ve, y se guarda para la próxima vez:
+
+- **Pantalla completa** (la de serie): la conversación con su propio scroll, ratón y Ctrl+F.
+- **Clásica**: la conversación se queda en la terminal y seleccionas como siempre.
+- **Compacta**: sin espacios ni bordes de más, para que quepa más conversación.
+- **Alto contraste**: sin texto atenuado y con colores vivos; se lee mejor, también con fondo claro.
+- **Zen**: lo justo, sin bienvenida ni bordes y con la barra de abajo mínima.
 
 Con `"fullscreen": false`, lo que seleccionas se copia solo si lo activas en tu terminal:
 
@@ -128,6 +136,7 @@ Con `"fullscreen": false`, lo que seleccionas se copia solo si lo activas en tu 
 | `/doctor` | Comprueba que todo funciona y dice cómo arreglar lo que falte |
 | `/bug [qué ha pasado]` | Avisa de un fallo: abre un issue en GitHub con el informe de `/doctor` ya puesto (sin tus claves) |
 | `/tutorial` | Aprende lo básico en 5 pasos, en una carpeta de prácticas |
+| `/interfaz` | Elige cómo se ve vipcode: pantalla completa, clásica, compacta, alto contraste o zen |
 | `/usage` | Tokens usados |
 | `/mcp`, `/lsp` | Estado de los servidores MCP y de lenguaje |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión |
@@ -188,7 +197,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 - **permission**: `allow`, `ask` o `deny` para `edit`, `bash`, `webfetch` y `mcp`; en `bash` y `mcp` gana el patrón más concreto. Las reglas `deny` se respetan incluso con `--yolo`. Piénsatelo antes de poner `webfetch` en `allow`: un texto malicioso podría hacer que el modelo mande tus datos a una web sin preguntarte.
 - **mcp**: servidores MCP locales (`command`) o remotos (`url`); los que piden iniciar sesión con OAuth todavía no funcionan. Un servidor local no recibe tus variables de entorno (ni tus claves), solo lo imprescindible para arrancar: lo que necesite, ponlo en `environment`. Ahí y en `headers`, `{env:NOMBRE}` se cambia por esa variable tuya.
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
-- **fullscreen**: `false` para que la conversación se escriba en la terminal normal en vez de en pantalla completa (la rueda mueve entonces la terminal entera y se selecciona sin teclas).
+- **interfaz**: la que eliges con `/interfaz` (`completa`, `clasica`, `compacta`, `contraste` o `zen`). El `"fullscreen": false` de antes sigue valiendo y es la clásica.
 - **firstResponseMs**: cuánto se espera a que una IA empiece a contestar antes de probar otra (40000, unos 40 s; algo más con conversaciones largas). No cuenta para los modelos de tu ordenador.
 
 Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash), `VIPCODE_BROWSER` (otro navegador) y `VIPCODE_CLIPBOARD` (otro programa para copiar, que reciba el texto por su entrada).

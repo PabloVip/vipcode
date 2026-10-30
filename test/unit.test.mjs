@@ -1221,3 +1221,36 @@ test("pantalla completa: la palabra del doble clic, lo que encuentra Ctrl+F y la
   assert.deepEqual(view.scrollThumb(100, 20, 40), { start: 8, size: 4 });
 });
 
+test("interfaces: cuál sale de la configuración y cómo pinta cada una", async () => {
+  const { INTERFACES, interfaceFor } = await import("../dist/interfaces.js");
+  const { look, setLook } = await import("../dist/tui/theme.js");
+  assert.deepEqual(INTERFACES.map((item) => item.id), ["completa", "clasica", "compacta", "contraste", "zen"]);
+  // La de serie es la pantalla completa; con el «"fullscreen": false» de antes, la clásica; lo que elijas manda
+  assert.equal(interfaceFor({}).id, "completa");
+  assert.equal(interfaceFor({ interfaz: "", fullscreen: false }).id, "clasica");
+  assert.equal(interfaceFor({ interfaz: "zen", fullscreen: false }).id, "zen");
+  assert.equal(interfaceFor({ interfaz: "no-existe" }).id, "completa");
+  const byId = (id) => INTERFACES.find((item) => item.id === id);
+  try {
+    setLook(byId("completa"));
+    assert.equal(look.dim, true);
+    assert.equal(look.gap, 1);
+    assert.equal(look.tone("magenta"), "magenta");
+    setLook(byId("compacta"));
+    assert.equal(look.gap, 0);
+    assert.equal(look.bare, true);
+    // Alto contraste: nada atenuado y colores vivos
+    setLook(byId("contraste"));
+    assert.equal(look.dim, false);
+    assert.equal(look.faint("hola"), "hola");
+    assert.equal(look.tone("magenta"), "magentaBright");
+    assert.equal(look.tone("#ff0000"), "#ff0000");
+    setLook(byId("zen"));
+    assert.equal(look.minimal, true);
+    assert.equal(look.bare, true);
+    assert.equal(look.gap, 1);
+  } finally {
+    setLook(byId("completa"));
+  }
+});
+

@@ -44,7 +44,7 @@ export const ui = {
 
 // Líneas quitadas en rojo, añadidas en verde, cabeceras @@ en cian y el contexto atenuado.
 // Es lo que apruebas: los caracteres de control se ven (␛) en vez de actuar
-export function colorPreview(preview: string): string {
+export function colorPreview(preview: string, faint: (text: string) => string = pc.dim): string {
   return showControl(preview)
     .split("\n")
     .map((line) => {
@@ -58,7 +58,7 @@ export function colorPreview(preview: string): string {
         return pc.cyan(line);
       }
       if (line.startsWith("  ")) {
-        return pc.dim(line);
+        return faint(line);
       }
       return line;
     })

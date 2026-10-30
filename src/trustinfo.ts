@@ -33,6 +33,7 @@ const SETTINGS: Record<string, string> = {
   ranking: "el orden por puntuación",
   showReasoning: "si se ve lo que piensa el modelo",
   fullscreen: "la pantalla completa",
+  interfaz: "la interfaz",
 };
 
 function isObject(value: unknown): value is Json {

@@ -4,6 +4,10 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- `/interfaz` para elegir cómo se ve vipcode, y se guarda para la próxima vez: pantalla completa (la de serie), clásica (la conversación en la terminal normal), compacta (sin espacios ni bordes de más), alto contraste (sin texto atenuado y con colores vivos, también para fondos claros) y zen (lo justo). Al pasar a la clásica o volver de ella se rehace la pantalla y sigue la misma conversación.
+
 ## [0.2.14] - 2026-10-30
 
 ### Añadido

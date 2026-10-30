@@ -187,8 +187,10 @@ export interface Config {
   // Mostrar el razonamiento de los modelos que lo envían
   showReasoning: boolean;
   // Pantalla completa: la conversación tiene su propio scroll (rueda del ratón, AvPág y RePág) y la caja de escribir
-  // queda fija abajo. Con false, la conversación se escribe en la terminal normal
+  // queda fija abajo. Con false, la conversación se escribe en la terminal normal (es la interfaz «clasica»)
   fullscreen: boolean;
+  // La interfaz elegida con /interfaz: completa, clasica, compacta, contraste o zen ("" según fullscreen)
+  interfaz: string;
 }
 
 export const DEFAULT_PERMISSION: PermissionConfig = {
@@ -237,6 +239,7 @@ export const DEFAULT_CONFIG: Config = {
   skills: { enabled: true, paths: [], disabled: [], external: true },
   showReasoning: true,
   fullscreen: true,
+  interfaz: "",
 };
 
 // Proveedor de internet que se puede usar sin clave (los locales no cuentan)

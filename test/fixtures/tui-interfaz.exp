@@ -1,0 +1,105 @@
+# /interfaz: compacta al momento, y a la clásica y de vuelta rehaciendo la pantalla con la misma conversación (lo lanza
+# test/tui.test.mjs)
+set timeout 30
+log_user 1
+set cli [lindex $argv 0]
+# Con la pantalla completa cada repintado ocupa varios KB: con el búfer de serie (2.000 bytes), expect tiraría lo de
+# arriba de la pantalla antes de buscar en ello
+match_max -d 200000
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+# Espera sin dejar de leer la pantalla: con sleep, la salida de la pseudo-terminal se llena (en macOS enseguida, con la
+# pantalla completa repintándose) y vipcode se queda parado escribiendo, sin atender al teclado
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
+proc libre {} {
+  expect {
+    "Escribe tu mensaje" {}
+    timeout { falla "no vuelve a quedar libre" }
+  }
+}
+
+# Elige una interfaz escribiendo un trozo de su descripción
+proc interfaz {filtro} {
+  send "/interfaz\r"
+  expect {
+    "quieres ver vipcode" {}
+    timeout { falla "/interfaz no abre la lista" }
+  }
+  pausa 0.3
+  send $filtro
+  pausa 0.3
+  send "\r"
+}
+
+spawn -noecho node $cli
+stty rows 30 columns 100 < $spawn_out(slave,name)
+libre
+send "hola\r"
+expect {
+  "HOLA" {}
+  timeout { falla "no contesta" }
+}
+libre
+
+# 1. Compacta, al momento: la bienvenida pasa a una línea (arriba en la pantalla, antes que el aviso del cambio)
+interfaz "cabe m"
+expect {
+  "1 modelo de 1 proveedor · /help ayuda" {}
+  timeout { falla "la compacta no pone la bienvenida en una línea" }
+}
+expect {
+  -re {Interfaz .Compacta} {}
+  timeout { falla "no avisa del cambio a la compacta" }
+}
+libre
+
+# 2. Clásica: se rehace la pantalla y sigue la misma conversación
+interfaz "se queda"
+expect {
+  -re {Interfaz .Cl} {}
+  timeout { falla "no cambia a la clásica" }
+}
+expect {
+  "Sigue la misma conversaci" {}
+  timeout { falla "al pasar a la clásica no sigue la conversación" }
+}
+expect {
+  "HOLA" {}
+  timeout { falla "al pasar a la clásica no se ve lo de antes" }
+}
+libre
+
+# 3. Y de vuelta a la pantalla completa
+interfaz "de serie"
+expect {
+  -re {Interfaz .Pantalla completa} {}
+  timeout { falla "no vuelve a la pantalla completa" }
+}
+expect {
+  "HOLA" {}
+  timeout { falla "al volver a la pantalla completa no se ve lo de antes" }
+}
+libre
+
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-INTERFAZ-OK"
+exit 0

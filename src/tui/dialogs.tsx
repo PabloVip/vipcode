@@ -5,6 +5,7 @@ import { type PermissionReply, type PermissionRequest, suggestPattern } from "..
 import { showControl, stripControl } from "../sanitize.js";
 import { colorPreview } from "../ui.js";
 import { type EditorState, EMPTY, backspace, deleteWordBack, insert, moveLeft, moveRight, splitEnter } from "./editor.js";
+import { look } from "./theme.js";
 
 const KIND_LABEL: Record<string, string> = {
   write: "ediciones de ficheros",
@@ -101,20 +102,20 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
   const hidden = lines.length - limit;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
-      <Text bold color="yellow">
+    <Box flexDirection="column" borderStyle="round" borderColor={look.tone("yellow")} paddingX={1}>
+      <Text bold color={look.tone("yellow")}>
         ? {showControl(request.title)}
-        {props.agent !== "programar" ? <Text dimColor> ({props.agent})</Text> : null}
+        {props.agent !== "programar" ? <Text dimColor={look.dim}> ({props.agent})</Text> : null}
       </Text>
-      <Box marginY={1} flexDirection="column">
-        <Text>{colorPreview(shown)}</Text>
-        {hidden > 0 ? <Text dimColor>… {hidden} líneas más</Text> : null}
+      <Box marginY={look.gap} flexDirection="column">
+        <Text>{colorPreview(shown, look.faint)}</Text>
+        {hidden > 0 ? <Text dimColor={look.dim}>… {hidden} líneas más</Text> : null}
       </Box>
       {explaining ? (
         <Box flexDirection="column">
           <Text>¿Qué debería hacer en su lugar? (Enter envía, Esc vuelve)</Text>
           <Text>
-            <Text color="yellow">❯ </Text>
+            <Text color={look.tone("yellow")}>❯ </Text>
             {feedback.value.slice(0, feedback.cursor)}
             <Text inverse>{feedback.value[feedback.cursor] || " "}</Text>
             {feedback.value.slice(feedback.cursor + 1)}
@@ -125,10 +126,10 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
           {options.map((option, index) => (
             <Text key={option.key} color={index === selected ? "cyan" : undefined}>
               {index === selected ? "❯ " : "  "}
-              <Text dimColor>[{option.key}]</Text> {option.label}
+              <Text dimColor={look.dim}>[{option.key}]</Text> {option.label}
             </Text>
           ))}
-          <Text dimColor>↑↓ elige · Enter acepta · la letra es un atajo · Esc = no</Text>
+          <Text dimColor={look.dim}>↑↓ elige · Enter acepta · la letra es un atajo · Esc = no</Text>
         </>
       )}
     </Box>
@@ -190,8 +191,8 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
   const [heading, ...body] = props.title.split("\n");
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      <Text bold color="cyan">
+    <Box flexDirection="column" borderStyle="round" borderColor={look.tone("cyan")} paddingX={1}>
+      <Text bold color={look.tone("cyan")}>
         {heading}
       </Text>
       {body.length > 0 ? (
@@ -199,22 +200,22 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
           <Text>{body.join("\n")}</Text>
         </Box>
       ) : null}
-      <Text dimColor>
+      <Text dimColor={look.dim}>
         {filter ? `Filtro: ${filter}` : "Escribe para filtrar · ↑↓ elegir · Enter aceptar · Esc salir"}
       </Text>
-      {visible.length === 0 ? <Text dimColor>(nada coincide)</Text> : null}
+      {visible.length === 0 ? <Text dimColor={look.dim}>(nada coincide)</Text> : null}
       {visible.map((item, index) => {
         const active = start + index === selected;
         return (
           <Text key={`${start + index}-${item.label}`} color={active ? "cyan" : undefined} wrap="truncate-end">
             {active ? "❯ " : "  "}
             {stripControl(item.label)}
-            {item.description ? <Text dimColor> {stripControl(item.description)}</Text> : null}
+            {item.description ? <Text dimColor={look.dim}> {stripControl(item.description)}</Text> : null}
           </Text>
         );
       })}
       {filtered.length > windowSize ? (
-        <Text dimColor>
+        <Text dimColor={look.dim}>
           {selected + 1}/{filtered.length}
         </Text>
       ) : null}
@@ -255,18 +256,18 @@ export function PromptDialog(props: { title: string; mask?: boolean; placeholder
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
-      <Text bold color="magenta">
+    <Box flexDirection="column" borderStyle="round" borderColor={look.tone("magenta")} paddingX={1}>
+      <Text bold color={look.tone("magenta")}>
         {props.title}
       </Text>
       <Text>
-        <Text color="magenta">❯ </Text>
-        {shown.length === 0 && props.placeholder ? <Text dimColor>{props.placeholder}</Text> : null}
+        <Text color={look.tone("magenta")}>❯ </Text>
+        {shown.length === 0 && props.placeholder ? <Text dimColor={look.dim}>{props.placeholder}</Text> : null}
         {shown.slice(0, state.cursor)}
         <Text inverse>{shown[state.cursor] || " "}</Text>
         {shown.slice(state.cursor + 1)}
       </Text>
-      <Text dimColor>Enter acepta · Esc cancela{props.mask ? " · pega la clave con Cmd+V" : ""}</Text>
+      <Text dimColor={look.dim}>Enter acepta · Esc cancela{props.mask ? " · pega la clave con Cmd+V" : ""}</Text>
     </Box>
   );
 }

@@ -42,6 +42,9 @@ const CODE_COLORS: Record<string, (text: string) => string> = {
   subst: (text) => text,
 };
 
+// Cómo se atenúa lo secundario (enlaces, rayas, bordes de tablas y citas): la interfaz de alto contraste no atenúa nada
+let faint: (text: string) => string = pc.dim;
+
 function decodeHtml(text: string): string {
   return text
     .replace(/&lt;/g, "<")
@@ -116,12 +119,12 @@ function inline(tokens: Token[] | undefined): string {
         if (text === link.href || link.href.startsWith("mailto:")) {
           out += pc.underline(pc.blue(text));
         } else {
-          out += `${pc.underline(pc.blue(text))} ${pc.dim(`(${link.href})`)}`;
+          out += `${pc.underline(pc.blue(text))} ${faint(`(${link.href})`)}`;
         }
         break;
       }
       case "image":
-        out += pc.dim(`[imagen: ${(token as Tokens.Image).text || (token as Tokens.Image).href}]`);
+        out += faint(`[imagen: ${(token as Tokens.Image).text || (token as Tokens.Image).href}]`);
         break;
       case "br":
         out += "\n";
@@ -184,8 +187,8 @@ function renderTable(table: Tokens.Table): string {
   const visible = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "").length;
   const widths = header.map((cell, i) => Math.max(visible(cell), ...rows.map((row) => visible(row[i] || ""))));
   const pad = (text: string, width: number) => text + " ".repeat(Math.max(0, width - visible(text)));
-  const line = (cells: string[]) => cells.map((cell, i) => pad(cell, widths[i])).join(pc.dim(" │ "));
-  const out = [pc.bold(line(header)), pc.dim(widths.map((w) => "─".repeat(w)).join("─┼─"))];
+  const line = (cells: string[]) => cells.map((cell, i) => pad(cell, widths[i])).join(faint(" │ "));
+  const out = [pc.bold(line(header)), faint(widths.map((w) => "─".repeat(w)).join("─┼─"))];
   for (const row of rows) {
     out.push(line(row));
   }
@@ -218,14 +221,14 @@ function blocks(tokens: Token[], width: number, depth = 0): string {
       }
       case "code": {
         const code = token as Tokens.Code;
-        const label = code.lang ? pc.dim(`─ ${code.lang} `) : pc.dim("─");
-        out.push(`${label}${pc.dim("─".repeat(Math.max(0, Math.min(width, 60) - (code.lang || "").length - 3)))}`);
+        const label = code.lang ? faint(`─ ${code.lang} `) : faint("─");
+        out.push(`${label}${faint("─".repeat(Math.max(0, Math.min(width, 60) - (code.lang || "").length - 3)))}`);
         out.push(indent(highlightCode(code.text, code.lang), "  "));
-        out.push(pc.dim("─".repeat(Math.min(width, 60))));
+        out.push(faint("─".repeat(Math.min(width, 60))));
         break;
       }
       case "blockquote":
-        out.push(indent(blocks((token as Tokens.Blockquote).tokens, width - 2, depth), pc.dim("│ ")));
+        out.push(indent(blocks((token as Tokens.Blockquote).tokens, width - 2, depth), faint("│ ")));
         break;
       case "list":
         out.push(renderList(token as Tokens.List, width, depth));
@@ -234,7 +237,7 @@ function blocks(tokens: Token[], width: number, depth = 0): string {
         out.push(renderTable(token as Tokens.Table));
         break;
       case "hr":
-        out.push(pc.dim("─".repeat(Math.min(width, 60))));
+        out.push(faint("─".repeat(Math.min(width, 60))));
         break;
       case "html":
         out.push((token as Tokens.HTML).text.trim());
@@ -252,9 +255,10 @@ function blocks(tokens: Token[], width: number, depth = 0): string {
 }
 
 // Markdown → texto con colores para la terminal
-export function renderMarkdown(text: string, width = 80): string {
+export function renderMarkdown(text: string, width = 80, options: { faint?: (text: string) => string } = {}): string {
   // El texto del modelo no puede llevar secuencias de la terminal: los colores los ponemos nosotros
   const clean = stripControl(text);
+  faint = options.faint || pc.dim;
   try {
     const tokens = marked.lexer(clean, { gfm: true });
     return blocks(tokens, width).replace(/\n{3,}/g, "\n\n");

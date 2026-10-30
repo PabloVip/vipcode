@@ -224,3 +224,19 @@ test("interfaz: Ctrl+F, doble clic, barra de desplazamiento, herramientas que se
   }
 });
 
+test("interfaz: /interfaz cambia a la compacta al momento, y a la clásica y de vuelta con la misma conversación", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const mock = await startMock(() => ({ text: "HOLA" }));
+  const ws = tempWorkspace();
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  try {
+    const result = await runExpect("tui-interfaz.exp", ws);
+    assert.equal(result.code, 0, result.plain.slice(-3000));
+    assert.match(result.plain, /TUI-INTERFAZ-OK/);
+    // Se guarda para la próxima vez
+    assert.equal(JSON.parse(fs.readFileSync(path.join(ws.home, "config.json"), "utf8")).interfaz, "completa");
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
+});
+

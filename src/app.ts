@@ -26,6 +26,7 @@ import { Snapshots } from "./snapshot.js";
 import { commandShell, findProgram, killTree } from "./shell.js";
 import { type UpdateStep, compareVersions, updateVipcode } from "./update.js";
 import { type TutorialCard, type TutorialEvent, isTutorialDir, tutorialCard, tutorialDone } from "./tutorial.js";
+import { INTERFACES, interfaceFor } from "./interfaces.js";
 import { formatTodos, truncate } from "./tools.js";
 import { showLine } from "./sanitize.js";
 import { type ProjectTrust, projectTrust } from "./trust.js";
@@ -54,6 +55,8 @@ export interface UiAdapter {
   updated?(version: string): void;
   // El paso del tutorial en el que vas
   tutorial?(card: TutorialCard): void;
+  // /interfaz: la interfaz completa se pinta con la que has elegido
+  setInterface?(id: string): void;
 }
 
 export interface Progress extends UpdateStep {
@@ -93,6 +96,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "doctor", description: "comprueba que todo funciona (programas, claves, proveedores) y dice cómo arreglar lo que falte" },
   { name: "bug", args: "[qué ha pasado]", description: "avisa de un fallo: abre un issue en GitHub con el informe de /doctor ya puesto (sin tus claves)" },
   { name: "tutorial", description: "aprende lo básico en 5 pasos, en una carpeta de prácticas" },
+  { name: "interfaz", description: "elige cómo se ve vipcode: pantalla completa, clásica, compacta, alto contraste o zen" },
   { name: "undo", description: "deshacer el último mensaje (ficheros y conversación)" },
   { name: "redo", description: "rehacer lo deshecho" },
   { name: "diff", args: "[all]", description: "cambios del último mensaje (o de toda la sesión)" },
@@ -202,6 +206,8 @@ export class App {
   relaunch: string[] | null = null;
   // El paso del tutorial en el que vas (null si no lo estás haciendo)
   tutorialStep: number | null = null;
+  // /interfaz entre la clásica y la pantalla completa: la interfaz a la que se pasa (la pantalla se rehace)
+  switchInterface: string | null = null;
   // Proveedores a los que ya se les ha sugerido otra cuenta porque se les acaban las peticiones (una vez cada uno)
   private quotaTips = new Set<string>();
   // La interfaz pone aquí cómo preguntar los permisos
@@ -625,7 +631,7 @@ export class App {
       row("Ctrl+C", "interrumpe o borra lo escrito; dos veces seguidas sale"),
     );
     // Con la pantalla completa, el ratón lo maneja vipcode: la rueda mueve la conversación y arrastrar copia
-    if (this.config.fullscreen !== false) {
+    if (interfaceFor(this.config).fullscreen) {
       lines.push(
         row("Rueda · AvPág · RePág", "sube y baja por la conversación (al escribir vuelves abajo); también la barra de la derecha"),
         row("Ctrl+Inicio · Ctrl+Fin", "al principio o al final de la conversación"),
@@ -1149,6 +1155,24 @@ export class App {
       case "/bug":
         await this.reportBug(ui, arg);
         return {};
+      case "/interfaz": {
+        if (!ui.setInterface || !ui.select) {
+          ui.info('La interfaz se elige en la interfaz completa (sin --plain), o con "interfaz" en tu configuración.');
+          return {};
+        }
+        const now = interfaceFor(this.config).id;
+        const choice = await ui.select(
+          "¿Cómo quieres ver vipcode? (se guarda para la próxima vez)",
+          INTERFACES.map((item) => ({ label: item.id === now ? `${item.label} (la de ahora)` : item.label, description: item.description, value: item.id })),
+        );
+        if (!choice || choice === now) {
+          return {};
+        }
+        setGlobalConfigValue("interfaz", choice);
+        this.config.interfaz = choice;
+        ui.setInterface(choice);
+        return {};
+      }
       case "/tutorial": {
         // Ya en la carpeta de prácticas: se empieza (o se repite el paso en el que vas)
         if (ui.tutorial && (this.tutorialStep !== null || isTutorialDir(this.root))) {
