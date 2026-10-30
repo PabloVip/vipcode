@@ -8,6 +8,20 @@ proc falla {motivo} {
   exit 1
 }
 
+# Espera sin dejar de leer la pantalla: con sleep, la salida de la pseudo-terminal se llena (en macOS enseguida, con la
+# pantalla completa repintándose) y vipcode se queda parado escribiendo, sin atender al teclado
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
 proc libre {} {
   expect {
     "Escribe tu mensaje" {}
@@ -39,7 +53,7 @@ expect {
   timeout { falla "no sugiere @saludo.js en la carpeta de prácticas" }
 }
 send "\t"
-sleep 0.3
+pausa 0.3
 send "\r"
 
 # 3. Un comando con !
@@ -67,17 +81,17 @@ expect {
   "paso 5 de 5" {}
   timeout { falla "/undo no completa el paso 4" }
 }
-sleep 0.3
+pausa 0.3
 send "\025"
 libre
 send "\t"
-sleep 0.3
+pausa 0.3
 send "\t"
 expect {
   -re {profe(\x1b\[[0-9;]*m)*\s*·} {}
   timeout { falla "Tab no llega al profe" }
 }
-sleep 0.3
+pausa 0.3
 send "como lo arreglo yo\r"
 expect {
   "Tutorial terminado" {}

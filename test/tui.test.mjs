@@ -65,11 +65,15 @@ test("interfaz completa en una pseudo-terminal", { skip: !hasExpect && "falta el
     checkUpdates: false,
   });
 
-  const result = await runExpect("tui.exp", ws);
+  let result;
+  try {
+    result = await runExpect("tui.exp", ws);
+  } finally {
+    await mock.close();
+  }
   assert.equal(result.code, 0, result.plain.slice(-3000));
   assert.match(result.plain, /TUI-OK/);
   assert.equal(ws.read("hola.txt"), "adios\n");
-  await mock.close();
   ws.cleanup();
 });
 

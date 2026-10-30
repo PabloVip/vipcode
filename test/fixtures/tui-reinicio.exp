@@ -8,6 +8,20 @@ proc falla {motivo} {
   exit 1
 }
 
+# Espera sin dejar de leer la pantalla: con sleep, la salida de la pseudo-terminal se llena (en macOS enseguida, con la
+# pantalla completa repintándose) y vipcode se queda parado escribiendo, sin atender al teclado
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
 spawn -noecho node $cli
 stty rows 40 columns 120 < $spawn_out(slave,name)
 
@@ -37,7 +51,7 @@ expect {
   "Lo reinicias ahora para usarlo" {}
   timeout { falla "no pregunta si reiniciar" }
 }
-sleep 0.3
+pausa 0.3
 send "\r"
 
 # 3. Se abre la versión nueva (la de mentira dice con qué la han abierto) con esta misma conversación

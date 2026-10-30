@@ -9,6 +9,20 @@ proc falla {motivo} {
   exit 1
 }
 
+# Espera sin dejar de leer la pantalla: con sleep, la salida de la pseudo-terminal se llena (en macOS enseguida, con la
+# pantalla completa repintándose) y vipcode se queda parado escribiendo, sin atender al teclado
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
 spawn -noecho node $cli
 stty rows 30 columns 100 < $spawn_out(slave,name)
 
@@ -25,15 +39,15 @@ expect {
   "Escribe tu mensaje" {}
   timeout { falla "no vuelve a quedar libre" }
 }
-sleep 0.5
+pausa 0.5
 
 # De la columna 3 de la primera fila a la 12 de la tercera, y soltar
 send "\033\[<0;3;1M"
-sleep 0.1
+pausa 0.1
 send "\033\[<32;8;2M"
-sleep 0.1
+pausa 0.1
 send "\033\[<32;12;3M"
-sleep 0.1
+pausa 0.1
 send "\033\[<0;12;3m"
 expect {
   "copiado" {}

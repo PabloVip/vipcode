@@ -8,6 +8,20 @@ proc falla {motivo} {
   exit 1
 }
 
+# Espera sin dejar de leer la pantalla: con sleep, la salida de la pseudo-terminal se llena (en macOS enseguida, con la
+# pantalla completa repintándose) y vipcode se queda parado escribiendo, sin atender al teclado
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
 spawn -noecho node $cli
 stty rows 40 columns 120 < $spawn_out(slave,name)
 
@@ -39,9 +53,9 @@ expect {
 
 # 3. «Más tarde»: sigue abierta la de antes, y al salir se recuerda abrir la nueva (el diálogo se ve un instante antes
 # de escuchar el teclado)
-sleep 0.3
+pausa 0.3
 send "\033\[B"
-sleep 0.3
+pausa 0.3
 send "\r"
 expect {
   "Escribe tu mensaje" {}

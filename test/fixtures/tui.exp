@@ -8,6 +8,20 @@ proc falla {motivo} {
   exit 1
 }
 
+# Espera sin dejar de leer la pantalla: con sleep, la salida de la pseudo-terminal se llena (en macOS enseguida, con la
+# pantalla completa repintándose) y vipcode se queda parado escribiendo, sin atender al teclado
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
 spawn -noecho node $cli
 stty rows 40 columns 120 < $spawn_out(slave,name)
 
@@ -61,7 +75,7 @@ expect {
   timeout { falla "el diálogo no avisa de que el comando entero está encima" }
 }
 # El diálogo se ve un instante antes de escuchar el teclado
-sleep 0.3
+pausa 0.3
 send "n"
 expect {
   "Escribe tu mensaje" {}
@@ -78,7 +92,7 @@ expect {
   "+ adios" {}
   timeout { falla "el diálogo no enseña el diff" }
 }
-sleep 0.3
+pausa 0.3
 send "s"
 expect {
   "RESPUESTA-DOS" {}
@@ -96,7 +110,7 @@ expect {
   timeout { falla "no sugiere @hola.txt" }
 }
 send "\t"
-sleep 0.3
+pausa 0.3
 send "\r"
 expect {
   "ADJUNTO-OK" {}
@@ -114,19 +128,19 @@ expect {
   -re {planear(\x1b\[[0-9;]*m)*\s*·} {}
   timeout { falla "Tab no cambia de agente" }
 }
-sleep 0.3
+pausa 0.3
 send "\t"
 expect {
   -re {profe(\x1b\[[0-9;]*m)*\s*·} {}
   timeout { falla "Tab no pasa al agente profe" }
 }
-sleep 0.3
+pausa 0.3
 send "\t"
 expect {
   -re {programar(\x1b\[[0-9;]*m)*\s*·} {}
   timeout { falla "Tab no vuelve al agente programar" }
 }
-sleep 0.3
+pausa 0.3
 
 # 5. Ctrl+P abre la paleta de comandos y Esc la cierra
 send "\x10"
@@ -199,7 +213,7 @@ expect {
   timeout { falla "/models no abre la lista" }
 }
 send "\033"
-sleep 0.5
+pausa 0.5
 
 # 9. /exit sale
 send "/exit\r"
