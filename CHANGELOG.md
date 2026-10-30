@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.2.13] - 2026-10-30
+
 ### Añadido
 
 - Pantalla completa: la conversación tiene su propio scroll. La rueda del ratón, AvPág y RePág la mueven y la caja de escribir se queda abajo; al escribir vuelves al final. Al salir, la terminal queda como estaba y la conversación, guardada (`vipcode -c`). Con `"fullscreen": false` vuelve el modo de antes.
@@ -175,7 +177,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.12...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.13...HEAD
+[0.2.13]: https://github.com/PabloVip/vipcode/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/PabloVip/vipcode/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/PabloVip/vipcode/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/PabloVip/vipcode/compare/v0.2.9...v0.2.10
