@@ -14,13 +14,14 @@ function runExpect(script, ws, env = {}) {
       cwd: ws.proj,
       env: { ...systemEnv(ws.home), VIPCODE_HOME: ws.home, TERM: "xterm-256color", ...env },
     });
-    let output = "";
-    child.stdout.on("data", (d) => (output += d));
-    child.stderr.on("data", (d) => (output += d));
+    // Se junta todo antes de pasarlo a texto: una letra de varios bytes puede llegar partida entre dos trozos
+    const chunks = [];
+    child.stdout.on("data", (d) => chunks.push(d));
+    child.stderr.on("data", (d) => chunks.push(d));
     const timer = setTimeout(() => child.kill("SIGKILL"), 90000);
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ code, plain: output.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "") });
+      resolve({ code, plain: Buffer.concat(chunks).toString("utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "") });
     });
   });
 }
@@ -240,3 +241,21 @@ test("interfaz: /interfaz cambia a la compacta al momento, y a la clásica y de 
   }
 });
 
+test("interfaz: la de criaturas pone un monstruito a la derecha que cambia con cada respuesta y al pincharlo", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const mock = await startMock(() => ({ text: "HOLA" }));
+  const ws = tempWorkspace();
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  try {
+    const result = await runExpect("tui-criaturas.exp", ws);
+    assert.equal(result.code, 0, result.plain.slice(-3000));
+    assert.match(result.plain, /TUI-CRIATURAS-OK/);
+    // Al elegirla, la que había; otra al terminar la respuesta y otra al pincharla: sus nombres, entre los bordes del panel
+    const names = new Set([...result.plain.matchAll(/│ +(?:★ )?([A-Z][a-zñáéíóú]+) +│/g)].map((match) => match[1]));
+    assert.ok(names.size >= 3, `criaturas vistas: ${[...names].join(", ")}`);
+    // Se guarda para la próxima vez
+    assert.equal(JSON.parse(fs.readFileSync(path.join(ws.home, "config.json"), "utf8")).interfaz, "criaturas");
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
+});

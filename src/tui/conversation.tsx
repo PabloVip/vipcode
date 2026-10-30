@@ -66,10 +66,17 @@ export function useConversation(props: {
   dialog: { kind: string } | null;
   // La interfaz con la que se pinta: si cambia (/interfaz), se vuelve a pintar todo
   interfaceId: string;
+  // Un panel a la derecha de la conversación (el de la interfaz Criaturas), que le quita ese ancho, y qué hacer si lo
+  // pinchas
+  side?: { width: number; view: ReactNode; onClick: () => void } | null;
 }): Conversation {
-  const { app, items, columns, rows, fullscreen, dialog, interfaceId } = props;
+  const { app, items, rows, fullscreen, dialog, interfaceId, side } = props;
+  // El ancho de la conversación, con su barra de desplazamiento
+  const columns = props.columns - (side?.width ?? 0);
   const dialogRef = useRef(dialog);
   dialogRef.current = dialog;
+  const sideRef = useRef(side);
+  sideRef.current = side;
   // Pantalla completa: la conversación ya pintada, línea a línea (cada mensaje se pinta una vez para cada ancho), y
   // hasta dónde se ha subido (null: abajo del todo, siguiendo lo que llega)
   const painted = useRef(new Map<number, { width: number; open: boolean; look: string; lines: string[] }>());
@@ -235,6 +242,13 @@ export function useConversation(props: {
           continue;
         }
         const { lines, owners, top, height, bar } = view.current;
+        // El panel de la derecha: un clic es para él (salvo si vienes arrastrando desde la conversación)
+        if (sideRef.current && !dragStart.current && !draggingBar.current && event.x >= columnsRef.current && event.y < height) {
+          if (event.kind === "press") {
+            sideRef.current.onClick();
+          }
+          continue;
+        }
         // La barra de desplazamiento (la última columna): pinchar o arrastrar lleva a esa altura
         if (event.kind === "press" && bar && event.y < height && event.x >= columnsRef.current - 1) {
           draggingBar.current = true;
@@ -402,7 +416,10 @@ export function useConversation(props: {
             <Text key={row}>{row >= thumb.start && row < thumb.start + thumb.size ? "┃" : look.faint("│")}</Text>
           ))}
         </Box>
+      ) : side ? (
+        <Box width={1} />
       ) : null}
+      {side?.view}
     </Box>
   );
 

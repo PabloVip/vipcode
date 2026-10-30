@@ -189,7 +189,7 @@ export interface Config {
   // Pantalla completa: la conversación tiene su propio scroll (rueda del ratón, AvPág y RePág) y la caja de escribir
   // queda fija abajo. Con false, la conversación se escribe en la terminal normal (es la interfaz «clasica»)
   fullscreen: boolean;
-  // La interfaz elegida con /interfaz: completa, clasica, compacta, contraste o zen ("" según fullscreen)
+  // La interfaz elegida con /interfaz: completa, clasica, compacta, contraste, zen o criaturas ("" según fullscreen)
   interfaz: string;
 }
 

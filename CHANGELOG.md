@@ -4,6 +4,10 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- Interfaz «Criaturas» en `/interfaz`: como la pantalla completa, con un monstruito de píxeles a la derecha. Cada uno se inventa al azar (forma, colores, ojos, boca, orejas, patas y nombre), sale otro al terminar cada respuesta o al pincharlo, y da saltitos mientras vipcode trabaja. De vez en cuando sale uno dorado. En terminales de menos de 70 columnas no se enseña.
+
 ## [0.2.15] - 2026-10-30
 
 ### Añadido

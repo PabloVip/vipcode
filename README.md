@@ -109,6 +109,7 @@ Con **`/interfaz`** eliges cómo se ve, y se guarda para la próxima vez:
 - **Compacta**: sin espacios ni bordes de más, para que quepa más conversación.
 - **Alto contraste**: sin texto atenuado y con colores vivos; se lee mejor, también con fondo claro.
 - **Zen**: lo justo, sin bienvenida ni bordes y con la barra de abajo mínima.
+- **Criaturas**: como la pantalla completa, con un monstruito de píxeles a la derecha que se inventa al azar. Sale otro con cada respuesta o si lo pinchas, y da saltitos mientras vipcode trabaja (a veces sale uno dorado).
 
 Con `"fullscreen": false`, lo que seleccionas se copia solo si lo activas en tu terminal:
 
@@ -136,7 +137,7 @@ Con `"fullscreen": false`, lo que seleccionas se copia solo si lo activas en tu 
 | `/doctor` | Comprueba que todo funciona y dice cómo arreglar lo que falte |
 | `/bug [qué ha pasado]` | Avisa de un fallo: abre un issue en GitHub con el informe de `/doctor` ya puesto (sin tus claves) |
 | `/tutorial` | Aprende lo básico en 5 pasos, en una carpeta de prácticas |
-| `/interfaz` | Elige cómo se ve vipcode: pantalla completa, clásica, compacta, alto contraste o zen |
+| `/interfaz` | Elige cómo se ve vipcode: pantalla completa, clásica, compacta, alto contraste, zen o criaturas |
 | `/usage` | Tokens usados |
 | `/mcp`, `/lsp` | Estado de los servidores MCP y de lenguaje |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión |
@@ -197,7 +198,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 - **permission**: `allow`, `ask` o `deny` para `edit`, `bash`, `webfetch` y `mcp`; en `bash` y `mcp` gana el patrón más concreto. Las reglas `deny` se respetan incluso con `--yolo`. Piénsatelo antes de poner `webfetch` en `allow`: un texto malicioso podría hacer que el modelo mande tus datos a una web sin preguntarte.
 - **mcp**: servidores MCP locales (`command`) o remotos (`url`); los que piden iniciar sesión con OAuth todavía no funcionan. Un servidor local no recibe tus variables de entorno (ni tus claves), solo lo imprescindible para arrancar: lo que necesite, ponlo en `environment`. Ahí y en `headers`, `{env:NOMBRE}` se cambia por esa variable tuya.
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
-- **interfaz**: la que eliges con `/interfaz` (`completa`, `clasica`, `compacta`, `contraste` o `zen`). El `"fullscreen": false` de antes sigue valiendo y es la clásica.
+- **interfaz**: la que eliges con `/interfaz` (`completa`, `clasica`, `compacta`, `contraste`, `zen` o `criaturas`). El `"fullscreen": false` de antes sigue valiendo y es la clásica.
 - **firstResponseMs**: cuánto se espera a que una IA empiece a contestar antes de probar otra (40000, unos 40 s; algo más con conversaciones largas). No cuenta para los modelos de tu ordenador.
 
 Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash), `VIPCODE_BROWSER` (otro navegador) y `VIPCODE_CLIPBOARD` (otro programa para copiar, que reciba el texto por su entrada).

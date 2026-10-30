@@ -12,6 +12,8 @@ export interface Interface {
   contrast: boolean;
   // Lo justo: sin bienvenida, la caja sin borde y la barra de abajo con lo mínimo
   minimal: boolean;
+  // Un monstruito de píxeles a la derecha que cambia con cada respuesta (solo en pantalla completa)
+  pets: boolean;
 }
 
 export const INTERFACES: Interface[] = [
@@ -23,6 +25,7 @@ export const INTERFACES: Interface[] = [
     compact: false,
     contrast: false,
     minimal: false,
+    pets: false,
   },
   {
     id: "clasica",
@@ -32,6 +35,7 @@ export const INTERFACES: Interface[] = [
     compact: false,
     contrast: false,
     minimal: false,
+    pets: false,
   },
   {
     id: "compacta",
@@ -41,6 +45,7 @@ export const INTERFACES: Interface[] = [
     compact: true,
     contrast: false,
     minimal: false,
+    pets: false,
   },
   {
     id: "contraste",
@@ -50,6 +55,7 @@ export const INTERFACES: Interface[] = [
     compact: false,
     contrast: true,
     minimal: false,
+    pets: false,
   },
   {
     id: "zen",
@@ -59,6 +65,17 @@ export const INTERFACES: Interface[] = [
     compact: false,
     contrast: false,
     minimal: true,
+    pets: false,
+  },
+  {
+    id: "criaturas",
+    label: "Criaturas",
+    description: "como la completa, con un monstruito de píxeles a la derecha: sale otro con cada respuesta",
+    fullscreen: true,
+    compact: false,
+    contrast: false,
+    minimal: false,
+    pets: true,
   },
 ];
 

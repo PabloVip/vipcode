@@ -1,0 +1,81 @@
+# La interfaz de criaturas: se elige con /interfaz, sale un monstruito a la derecha, cambia con cada respuesta y, al
+# pincharlo, sale otro que se presenta (lo lanza test/tui.test.mjs)
+set timeout 30
+log_user 1
+set cli [lindex $argv 0]
+# Con la pantalla completa cada repintado ocupa varios KB: con el búfer de serie (2.000 bytes), expect tiraría lo de
+# arriba de la pantalla antes de buscar en ello
+match_max -d 200000
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+# Espera sin dejar de leer la pantalla: con sleep, la salida de la pseudo-terminal se llena (en macOS enseguida, con la
+# pantalla completa repintándose) y vipcode se queda parado escribiendo, sin atender al teclado
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
+proc libre {} {
+  expect {
+    "Escribe tu mensaje" {}
+    timeout { falla "no vuelve a quedar libre" }
+  }
+}
+
+spawn -noecho node $cli
+stty rows 30 columns 100 < $spawn_out(slave,name)
+libre
+
+# 1. Se elige con /interfaz (escribiendo un trozo de su descripción): sale el panel de la criatura
+send "/interfaz\r"
+expect {
+  "quieres ver vipcode" {}
+  timeout { falla "/interfaz no abre la lista" }
+}
+pausa 0.3
+send "monstruito"
+pausa 0.3
+send "\r"
+expect {
+  "clic: otra" {}
+  timeout { falla "no sale el panel de la criatura" }
+}
+libre
+
+# 2. Al terminar una respuesta sale otra criatura
+send "hola\r"
+expect {
+  "HOLA" {}
+  timeout { falla "no contesta" }
+}
+libre
+pausa 0.5
+
+# 3. Un clic en el panel (columnas 81 a 100): sale otra, que se presenta (o avisa de que es dorada)
+send "\033\[<0;90;5M"
+pausa 0.1
+send "\033\[<0;90;5m"
+expect {
+  -re {Soy|dorado} {}
+  timeout { falla "al pinchar la criatura no sale otra" }
+}
+libre
+
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-CRIATURAS-OK"
+exit 0

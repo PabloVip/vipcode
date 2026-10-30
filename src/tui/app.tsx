@@ -20,6 +20,7 @@ import { colorPreview } from "../ui.js";
 import { CHECK_MS, checkForUpdate, stepProgress } from "../update.js";
 import { INTERFACES, interfaceFor } from "../interfaces.js";
 import { useConversation } from "./conversation.js";
+import { CreaturePanel, makeCreature, panelWidth } from "./creatures.js";
 import { type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
 import * as E from "./editor.js";
 import { Bullet, type Item, ItemView, type NewItem, ToolHeader, formatDuration, oneLine, shortTokens, tildify } from "./items.js";
@@ -357,9 +358,17 @@ function Main(props: { app: App; initial: string; fullscreen: boolean; switched:
   const [todos, setTodos] = useState<Todo[]>(app.agent.session.todos);
   const [progress, setProgress] = useState<(Progress & { since: number; stepSince: number }) | null>(null);
   // La interfaz (/interfaz) y la conversación en pantalla completa: scroll, selección, Ctrl+F y herramientas que se
-  // despliegan
+  // despliegan; en la de criaturas, con el panel de la criatura a la derecha (un clic saca otra)
   const [interfaceId, setInterfaceId] = useState(look.interface.id);
-  const conversation = useConversation({ app, items, columns, rows, fullscreen: props.fullscreen, dialog, interfaceId });
+  const [creature, setCreature] = useState(() => makeCreature());
+  const sideWidth = props.fullscreen ? panelWidth(columns) : 0;
+  // Al pincharla sale otra, que se presenta (salvo si es dorada: entonces lo dice)
+  const pokeCreature = () => {
+    const next = makeCreature();
+    setCreature(next.rare ? next : { ...next, message: `¡Hola! Soy ${next.name}` });
+  };
+  const side = sideWidth > 0 ? { width: sideWidth, view: <CreaturePanel creature={creature} busy={busy} />, onClick: pokeCreature } : null;
+  const conversation = useConversation({ app, items, columns, rows, fullscreen: props.fullscreen, dialog, interfaceId, side });
   const [attachments, setAttachments] = useState<string[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
   const [suggestionsClosed, setSuggestionsClosed] = useState(false);
@@ -520,6 +529,10 @@ function Main(props: { app: App; initial: string; fullscreen: boolean; switched:
           ms: Date.now() - startedAt.current,
           tokens: sessionTokens() - tokensAtStart.current,
         });
+        // Interfaz de criaturas: con cada respuesta, otra
+        if (look.interface.pets) {
+          setCreature(makeCreature());
+        }
       }
       // Si se acaban las peticiones gratis de hoy, la cuenta gratis que más da (una vez por proveedor)
       const tip = app.lowQuotaTip();

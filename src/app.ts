@@ -96,7 +96,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "doctor", description: "comprueba que todo funciona (programas, claves, proveedores) y dice cómo arreglar lo que falte" },
   { name: "bug", args: "[qué ha pasado]", description: "avisa de un fallo: abre un issue en GitHub con el informe de /doctor ya puesto (sin tus claves)" },
   { name: "tutorial", description: "aprende lo básico en 5 pasos, en una carpeta de prácticas" },
-  { name: "interfaz", description: "elige cómo se ve vipcode: pantalla completa, clásica, compacta, alto contraste o zen" },
+  { name: "interfaz", description: "elige cómo se ve vipcode: pantalla completa, clásica, compacta, alto contraste, zen o criaturas" },
   { name: "undo", description: "deshacer el último mensaje (ficheros y conversación)" },
   { name: "redo", description: "rehacer lo deshecho" },
   { name: "diff", args: "[all]", description: "cambios del último mensaje (o de toda la sesión)" },
