@@ -33,6 +33,9 @@ proc libre {} {
   }
 }
 
+# Las comillas «» pueden llegar como uno o dos caracteres según la codificación de la terminal (en Linux, sin UTF-8, dos):
+# por eso los patrones usan \S* y no un punto
+#
 # Elige una interfaz escribiendo un trozo de su descripción
 proc interfaz {filtro} {
   send "/interfaz\r"
@@ -63,7 +66,7 @@ expect {
   timeout { falla "la compacta no pone la bienvenida en una línea" }
 }
 expect {
-  -re {Interfaz .Compacta} {}
+  -re {Interfaz \S*Compacta} {}
   timeout { falla "no avisa del cambio a la compacta" }
 }
 libre
@@ -71,7 +74,7 @@ libre
 # 2. Clásica: se rehace la pantalla y sigue la misma conversación
 interfaz "se queda"
 expect {
-  -re {Interfaz .Cl} {}
+  -re {Interfaz \S*Cl} {}
   timeout { falla "no cambia a la clásica" }
 }
 expect {
@@ -87,7 +90,7 @@ libre
 # 3. Y de vuelta a la pantalla completa
 interfaz "de serie"
 expect {
-  -re {Interfaz .Pantalla completa} {}
+  -re {Interfaz \S*Pantalla completa} {}
   timeout { falla "no vuelve a la pantalla completa" }
 }
 expect {
