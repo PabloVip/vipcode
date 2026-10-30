@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.2.14] - 2026-10-30
+
 ### Añadido
 
 - Ctrl+F busca en la conversación, sin distinguir mayúsculas ni tildes, resalta lo encontrado y dice cuántas veces sale («3 de 12»).
@@ -184,7 +186,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.13...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.14...HEAD
+[0.2.14]: https://github.com/PabloVip/vipcode/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/PabloVip/vipcode/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/PabloVip/vipcode/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/PabloVip/vipcode/compare/v0.2.10...v0.2.11
