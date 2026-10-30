@@ -13,13 +13,13 @@ import { limitsReport } from "./limits.js";
 import { LspManager } from "./lsp.js";
 import { McpManager } from "./mcp.js";
 import { AUTH_PATH, HOME_DIR, NOTICES_PATH, STATE_PATH, ensureHomeDir } from "./paths.js";
-import { type PermissionReply, type PermissionRequest, SessionGrants, createAsker, permissionsFor } from "./permissions.js";
+import { type PermissionReply, type PermissionRequest, SessionGrants, createAsker, permissionsFor, riskyGitConfig } from "./permissions.js";
 import { Ranking, loadRankingData, rankingKey, refreshRanking } from "./ranking.js";
 import { Router } from "./router.js";
 import { type SkillDefinition, loadSkills, skillContent } from "./skills.js";
 import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession, sessionMarkdownPath } from "./session.js";
 import { Snapshots } from "./snapshot.js";
-import { commandShell, killTree } from "./shell.js";
+import { commandShell, findProgram, killTree } from "./shell.js";
 import { updateVipcode } from "./update.js";
 import { formatTodos, truncate } from "./tools.js";
 import { type ProjectTrust, projectTrust } from "./trust.js";
@@ -225,6 +225,10 @@ export class App {
 
   ask(request: PermissionRequest, agent: AgentDefinition): Promise<PermissionReply> {
     const permission = permissionsFor(this.config.permission, agent.permission);
+    // En un repositorio cuya configuración de git ejecuta programas, ningún git se aprueba solo
+    if (request.kind === "bash" && /^\s*git\b/.test(request.subject) && riskyGitConfig(this.root)) {
+      request = { ...request, force: true, title: `${request.title} (la configuración de git de esta carpeta ejecuta programas)` };
+    }
     return createAsker(
       () => permission,
       this.grants,
@@ -1073,7 +1077,7 @@ export class App {
   runShell(command: string, onOutput?: (text: string) => void, signal?: AbortSignal): Promise<{ output: string; code: number | null }> {
     return new Promise((resolve) => {
       // Tu shell de siempre; en Windows, la misma que usa el agente (el bash de Git o PowerShell)
-      let shell = { file: process.env.SHELL || "bash", args: ["-lc", command], env: {} as Record<string, string> };
+      let shell = { file: process.env.SHELL || findProgram("bash") || "/bin/sh", args: ["-lc", command], env: {} as Record<string, string> };
       if (process.platform === "win32" || process.env.VIPCODE_SHELL) {
         const found = commandShell();
         shell = { file: found.file, args: found.args(command), env: found.env };

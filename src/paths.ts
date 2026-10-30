@@ -57,6 +57,16 @@ export function isInside(file: string, dir: string): boolean {
   return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep);
 }
 
+// true si el fichero, siguiendo los enlaces simbólicos, está de verdad dentro de la carpeta. Lo que trae un proyecto
+// (AGENTS.md, agentes, comandos, skills) puede ser un enlace a ~/.ssh/id_rsa o a /proc/self/environ: no se lee
+export function realInside(file: string, dir: string): boolean {
+  try {
+    return isInside(fs.realpathSync.native(file), fs.realpathSync.native(dir));
+  } catch {
+    return false;
+  }
+}
+
 export function protectedDirs(): { dir: string; read: boolean }[] {
   const dirs = [{ dir: HOME_DIR, read: true }];
   if (process.env.VIPCODE_ALLOW_SELF_EDIT !== "1") {

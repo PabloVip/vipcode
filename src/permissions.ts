@@ -1,8 +1,10 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type PermissionAction, type PermissionConfig, deepMerge } from "./config.js";
 import { wildcardMatch } from "./match.js";
 import { HOME_DIR, INSTALL_DIR } from "./paths.js";
+import { splitArgs } from "./shell.js";
 
 // Tipo de acción con riesgo; "web" y "none" no modifican nada, así que valen en modo plan
 export type Permission = "none" | "write" | "bash" | "web" | "mcp";
@@ -10,6 +12,8 @@ export type Permission = "none" | "write" | "bash" | "web" | "mcp";
 export interface PermissionRequest {
   kind: Permission;
   title: string;
+  // Preguntar siempre, aunque una regla allow o un «sí a todo» de la sesión lo permitan (solo deny lo para antes)
+  force?: boolean;
   preview: string;
   // Lo que se compara con las reglas: el comando, la URL, la ruta o el nombre de la herramienta MCP
   subject: string;
@@ -72,7 +76,52 @@ export function splitCommand(command: string): string[] {
 // pasaría por «ls*», o «echo x > fichero» por un «sí siempre» a echo
 export function alwaysAsk(command: string): boolean {
   const writes = /[<>]\(|>/.test(command.replace(HARMLESS_REDIRECTS, " ")) || /--output\b|\r/.test(command);
-  return writes || /\$\(|`/.test(command);
+  if (writes || /\$\(|`/.test(command) || RISKY_GIT.test(command)) {
+    return true;
+  }
+  // Los que se aprueban solos (git status/diff/log/show, ls) no pueden mirar fuera del proyecto: «git diff /dev/null
+  // ~/.ssh/id_rsa» enseña la clave (git compara ficheros sueltos si uno está fuera del repositorio)
+  return splitCommand(command).some((part) => {
+    const words = splitArgs(part);
+    return (words[0] === "git" || words[0] === "ls") && words.slice(1).some((word) => OUTSIDE_PATH.test(word));
+  });
+}
+
+// git que ejecuta programas o lee ficheros de fuera aunque parezca de solo lectura: «git difftool -x orden» ejecuta
+// la orden, y «git diff --no-index» lee cualquier fichero
+const RISKY_GIT = /\b(difftool|mergetool)\b|--(no-index|ext-diff|extcmd|textconv|exec|upload-pack|receive-pack)\b/;
+// Rutas que salen del proyecto: absolutas, ~, .., la carpeta personal
+const OUTSIDE_PATH = /^(\/|~|\.\.([/\\]|$)|[a-z]:[/\\]|\\\\|\$home\b|\$\{home\}|%userprofile%|\$env:)/i;
+
+// La configuración de git y sus hooks: lo que se escriba ahí se ejecuta después, cuando uses git
+export function touchesGitInternals(kind: Permission, subject: string): boolean {
+  const text = subject.replace(/\\/g, "/").toLowerCase();
+  if (kind === "write") {
+    return /^\.git(\/|$)/.test(text);
+  }
+  if (kind === "bash") {
+    return /\.git\/(hooks|config|info\/attributes)\b/.test(text) || /\bgit\s+(-c\s+\S+\s+)*config\b/.test(text) || /core\.(hookspath|fsmonitor|sshcommand|pager|editor)/.test(text);
+  }
+  return false;
+}
+
+// Un repositorio cuya configuración local hace que git ejecute programas (filtros clean/smudge, textconv, diff
+// externo, includes): ahí ni «git status» se aprueba solo. Git LFS se reconoce y no cuenta
+export function riskyGitConfig(root: string): boolean {
+  let gitDir = path.join(root, ".git");
+  try {
+    if (fs.statSync(gitDir).isFile()) {
+      const pointer = /gitdir:\s*(.+)/.exec(fs.readFileSync(gitDir, "utf8"));
+      if (!pointer) {
+        return false;
+      }
+      gitDir = path.resolve(root, pointer[1].trim());
+    }
+    const lines = fs.readFileSync(path.join(gitDir, "config"), "utf8").split(/\r?\n/);
+    return lines.some((line) => /^\s*\[\s*include(if)?\b/i.test(line) || (/^\s*(textconv|external|clean|smudge|process|fsmonitor)\s*=/i.test(line) && !/=\s*"?git-lfs\s/i.test(line)));
+  } catch {
+    return false;
+  }
 }
 
 export function evaluate(config: PermissionConfig, kind: Permission, subject: string): PermissionAction {
@@ -189,6 +238,12 @@ export function createAsker(
     }
     if (request.kind === "bash" && touchesVipcode(request.subject)) {
       return prompt({ ...request, title: `${request.title} (toca la carpeta de vipcode)` });
+    }
+    if (touchesGitInternals(request.kind, request.subject)) {
+      return prompt({ ...request, title: `${request.title} (toca la configuración de git: puede hacer que git ejecute programas)` });
+    }
+    if (request.force) {
+      return prompt(request);
     }
     if (action === "allow" || grants.allows(request.kind, request.subject)) {
       return { allow: true };

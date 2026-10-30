@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
 import type { AgentDefinition } from "./agents.js";
-import { GLOBAL_INSTRUCTIONS_PATH } from "./paths.js";
+import { GLOBAL_INSTRUCTIONS_PATH, realInside } from "./paths.js";
 import { commandShell } from "./shell.js";
 
 function readLimited(file: string, max = 15000): string {
@@ -23,7 +23,7 @@ function projectInstructions(root: string, extra: string[]): string {
   const names = ["AGENTS.md", "CLAUDE.md", ".vipcode.md"];
   for (const name of names) {
     const file = path.join(root, name);
-    if (fs.existsSync(file)) {
+    if (fs.existsSync(file) && realInside(file, root)) {
       parts.push(`# Instrucciones del proyecto (${name})\n${readLimited(file)}`);
       break;
     }

@@ -93,9 +93,12 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
     }
   });
 
+  // Un comando se enseña entero: si no, 30 líneas inofensivas podrían esconder una 31 maliciosa. Los diffs largos sí se
+  // recortan (lo que se aprueba es exactamente ese cambio, y /diff lo enseña entero)
   const lines = request.preview.split("\n");
-  const shown = lines.slice(0, 30).join("\n");
-  const hidden = lines.length - 30;
+  const limit = request.kind === "bash" ? lines.length : 30;
+  const shown = lines.slice(0, limit).join("\n");
+  const hidden = lines.length - limit;
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>

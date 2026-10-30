@@ -4,6 +4,7 @@ import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotoc
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServerConfig } from "./config.js";
 import { debugLog } from "./debug.js";
+import { findProgram } from "./shell.js";
 import { type Tool, truncate } from "./tools.js";
 
 // {env:NOMBRE} se cambia por esa variable de tu entorno (vacío si no existe): así se le pasa a un servidor solo lo que
@@ -183,7 +184,8 @@ export class McpManager {
         throw new Error("falta el comando del servidor local");
       }
       const transport = new StdioClientTransport({
-        command: command[0],
+        // Por su ruta completa: en Windows, «npx» buscaría primero un npx.cmd en la carpeta del proyecto
+        command: findProgram(command[0]) || command[0],
         args: command.slice(1),
         env: serverEnvironment(config.environment),
         cwd: config.cwd || this.root,

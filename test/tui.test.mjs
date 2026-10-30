@@ -36,6 +36,13 @@ test("interfaz completa en una pseudo-terminal", { skip: !hasExpect && "falta el
       return { text: "ADJUNTO-OK" };
     }
     // Una respuesta más larga que la terminal, para ver que se parte bien
+    // Un comando de 35 líneas: el diálogo de permiso tiene que enseñarlo entero (también la 35)
+    if (text.startsWith("comando-largo")) {
+      return { tools: [{ name: "bash", args: { command: Array.from({ length: 35 }, (_, i) => `echo LINEA-${i + 1}`).join("\n") } }] };
+    }
+    if (last.role === "tool" && contentText(last.content).includes("rechazado")) {
+      return { text: "VALE-NO-LO-EJECUTO" };
+    }
     if (text.startsWith("largo")) {
       return { text: "y".repeat(130) };
     }

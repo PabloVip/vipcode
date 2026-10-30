@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PACKAGE_NAME, REPO_URL, VERSION } from "./meta.js";
 import { INSTALL_DIR, UPDATE_PATH, ensureHomeDir, isInside } from "./paths.js";
+import { findProgram, spawnProgram } from "./shell.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -150,22 +150,21 @@ function cleanEnv(): NodeJS.ProcessEnv {
 
 function run(command: string, args: string[], cwd: string): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve) => {
-    // En Windows npm es un .cmd y necesita la shell
-    const child = spawn(command, args, {
+    // Por su ruta completa (no el que haya en la carpeta), y con cross-spawn, que en Windows sabe lanzar npm.cmd
+    const child = spawnProgram(findProgram(command) || command, args, {
       cwd,
-      shell: process.platform === "win32",
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...cleanEnv(), GIT_TERMINAL_PROMPT: "0" },
     });
     let output = "";
-    child.stdout.on("data", (data) => (output += data.toString()));
-    child.stderr.on("data", (data) => (output += data.toString()));
+    child.stdout?.on("data", (data) => (output += data.toString()));
+    child.stderr?.on("data", (data) => (output += data.toString()));
     child.on("error", (err) => resolve({ code: null, output: err.message }));
     child.on("close", (code) => resolve({ code, output }));
   });
 }
 
-const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
+const NPM = "npm";
 
 function lastLines(text: string, count = 6): string {
   return text.trim().split("\n").slice(-count).join("\n");
@@ -246,7 +245,7 @@ async function updateFromRelease(root: string, log: (text: string) => void): Pro
       message: `Hay una versión nueva (${release.version}, tienes la ${VERSION}), pero este vipcode no está instalado con «npm install -g». Instálala con:\n  npm install -g ${release.spec}`,
     };
   }
-  if (!/^[\w@.:/+~%-]+$/.test(release.spec) || release.spec.startsWith("-")) {
+  if (!/^[\w@.:/+~-]+$/.test(release.spec) || release.spec.startsWith("-")) {
     return { status: "error", message: `La última versión publicada tiene un nombre de paquete raro (${release.spec}): no la instalo.` };
   }
   log(`Instalando vipcode ${release.version} desde ${release.source}…`);

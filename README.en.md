@@ -21,7 +21,7 @@ npm install -g vipcode
 
 On Windows, also install [Git for Windows](https://git-scm.com/download/win): vipcode runs commands with its bash and uses git for `/undo`. Without it, it uses PowerShell.
 
-To update, type `/update` inside vipcode or run `vipcode update`. vipcode tells you when a new version is out.
+To update, type `/update` inside vipcode or run `vipcode update`. vipcode tells you when a new version is out; what each version brings is in [CHANGELOG.md](CHANGELOG.md) (in Spanish).
 
 ## Quick start
 
@@ -41,7 +41,7 @@ Inside vipcode: Enter sends, Tab switches between the `programar` and `planear` 
 
 - vipcode asks before editing files, running commands, going online or using MCP tools; only a few read-only commands (`git status`, `git diff`, `ls`…) are approved automatically.
 - A project's own vipcode configuration is ignored until you trust the folder: vipcode shows what it would change and asks (`vipcode trust` / `vipcode untrust`).
-- It only reads and writes inside the project folder and can't read or change your keys or its own configuration.
+- It only reads, searches and writes inside the project folder and can't read or change your keys or its own configuration. Nothing a project brings runs by itself: vipcode never starts programs from the project folder, ignores `AGENTS.md`, agents, commands or skills that are symlinks to files outside it, and always asks before writing into `.git`.
 - MCP and language servers started by vipcode don't get your keys (an MCP server only receives what you put in its `environment`, where `{env:NAME}` passes one of your variables).
 - Anonymous providers and several free tiers may store what you send or use it for training: don't send secrets or confidential code. For that, use a local model (Ollama, LM Studio) and set `"keyless": false`.
 - vipcode sends no usage data; besides your AI providers (and LLM Stats if you give it your key), it only checks npm and GitHub once a day for a new version.

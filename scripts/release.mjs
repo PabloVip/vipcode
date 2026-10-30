@@ -75,6 +75,11 @@ const next = nextVersion(current, wanted);
 const tag = `v${next}`;
 console.log(`vipcode ${current} → ${next}${dryRun ? " (simulación: no se cambia ni se publica nada)" : ""}`);
 
+// CHANGELOG.md: lo apuntado en «Sin publicar» pasa a ser esta versión y son las notas de la release de GitHub
+const changelogPath = path.join(root, "CHANGELOG.md");
+const changelog = fs.existsSync(changelogPath) ? fs.readFileSync(changelogPath, "utf8") : "";
+const notes = (/^## \[Sin publicar\]\n([\s\S]*?)(?=^## \[)/m.exec(changelog)?.[1] || "").trim();
+
 // 1. Comprobaciones antes de tocar nada
 step("Comprobando que todo está en orden");
 if (run("git", ["status", "--porcelain"]).out !== "") {
@@ -108,6 +113,9 @@ if (!run("npm", ["whoami"]).ok) {
 if (!run("gh", ["auth", "status"]).ok) {
   problems.push("No tienes la sesión iniciada en GitHub: ejecuta «gh auth login».");
 }
+if (!notes) {
+  console.log("  ⚠ CHANGELOG.md no tiene nada en «Sin publicar»: la release de GitHub llevará las notas automáticas (la lista de commits).");
+}
 if (problems.length > 0) {
   if (!dryRun) {
     fail(problems.join("\n  "));
@@ -124,6 +132,20 @@ if (next !== current) {
   act(`Subiendo la versión a ${next}`, "npm", ["version", next, "--no-git-tag-version"]);
 }
 
+// 2b. Novedades: «Sin publicar» pasa a ser esta versión (con su fecha y su enlace al final del fichero)
+if (notes) {
+  step(`Pasando las novedades de «Sin publicar» a la ${next} en CHANGELOG.md`);
+  if (dryRun) {
+    console.log(notes.split("\n").map((line) => `  ${line}`).join("\n"));
+  } else {
+    const today = new Date().toISOString().slice(0, 10);
+    const updated = changelog
+      .replace(/^## \[Sin publicar\]\n/m, `## [Sin publicar]\n\n## [${next}] - ${today}\n`)
+      .replace(/^\[Sin publicar\]: (.*)\/compare\/v[\d.]+\.\.\.HEAD$/m, `[Sin publicar]: $1/compare/${tag}...HEAD\n[${next}]: $1/compare/v${current}...${tag}`);
+    fs.writeFileSync(changelogPath, updated);
+  }
+}
+
 // 3. Pruebas (también compila dist/). Si fallan, se deshace el cambio de versión para poder repetir sin más
 if (dryRun) {
   step("Pruebas: en la simulación no se pasan (npm test)");
@@ -131,7 +153,7 @@ if (dryRun) {
   step("Pasando las pruebas");
   if (!run("npm", ["test"], { show: true }).ok) {
     if (next !== current) {
-      run("git", ["checkout", "--", "package.json", "package-lock.json"]);
+      run("git", ["checkout", "--", "package.json", "package-lock.json", ...(notes ? ["CHANGELOG.md"] : [])]);
     }
     fail(`Las pruebas han fallado: no se ha publicado nada${next !== current ? ` y la versión vuelve a ser ${current}` : ""}. Arréglalo y vuelve a ejecutar el mismo comando.`);
   }
@@ -158,6 +180,9 @@ if (dryRun) {
 } else {
   fs.copyFileSync(path.join(dir, `${pkg.name}-${next}.tgz`), path.join(dir, "vipcode.tgz"));
 }
+// Las notas de la release: las novedades de CHANGELOG.md (o, si no hay, las que genera GitHub con los commits)
+const notesFile = path.join(dir, "notas.md");
+fs.writeFileSync(notesFile, `${notes}\n\nTodas las novedades: [CHANGELOG.md](https://github.com/PabloVip/vipcode/blob/main/CHANGELOG.md)\n`);
 act(`Creando la release ${tag} en GitHub`, "gh", [
   "release",
   "create",
@@ -165,7 +190,7 @@ act(`Creando la release ${tag} en GitHub`, "gh", [
   "--verify-tag",
   "--title",
   `vipcode ${next}`,
-  "--generate-notes",
+  ...(notes ? ["--notes-file", notesFile] : ["--generate-notes"]),
   path.join(dir, "vipcode.tgz"),
   path.join(dir, `${pkg.name}-${next}.tgz`),
 ]);

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { debugLog } from "./debug.js";
 import { SNAPSHOTS_DIR } from "./paths.js";
+import { findProgram } from "./shell.js";
 
 // Carpetas que no se guardan en las instantáneas (además de lo que diga el .gitignore del proyecto)
 const DEFAULT_EXCLUDES = [
@@ -47,7 +48,7 @@ export class Snapshots {
   private git(args: string[], timeoutMs = 30000): Promise<GitResult> {
     return new Promise((resolve) => {
       execFile(
-        "git",
+        findProgram("git") || "git",
         ["--git-dir", this.gitDir, "--work-tree", this.root, "-c", "core.autocrlf=false", "-c", "core.quotepath=false", ...args],
         {
           cwd: this.root,
@@ -83,9 +84,8 @@ export class Snapshots {
       this.disabledReason = "la carpeta es demasiado grande (tu carpeta personal o la raíz)";
       return false;
     }
-    const version = await new Promise<boolean>((resolve) => {
-      execFile("git", ["--version"], (err) => resolve(!err));
-    });
+    const git = findProgram("git");
+    const version = git !== null && (await new Promise<boolean>((resolve) => execFile(git, ["--version"], (err) => resolve(!err))));
     if (!version) {
       this.disabledReason = "git no está instalado";
       return false;

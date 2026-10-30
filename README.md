@@ -22,7 +22,7 @@ npm install -g vipcode
 
 **En Windows** instala también [Git para Windows](https://git-scm.com/download/win): vipcode usa su bash para los comandos y git para `/undo`. Sin él usa PowerShell.
 
-Para actualizar, escribe `/update` dentro de vipcode o `vipcode update` en la terminal. Cuando sale una versión nueva, vipcode te avisa al abrirlo.
+Para actualizar, escribe `/update` dentro de vipcode o `vipcode update` en la terminal. Cuando sale una versión nueva, vipcode te avisa al abrirlo; lo que trae cada versión está en [CHANGELOG.md](CHANGELOG.md).
 
 Si algo falla, [abre un issue](https://github.com/PabloVip/vipcode/issues). Con `VIPCODE_DEBUG=1 vipcode` se guarda en `~/.vipcode/debug.log` un registro que ayuda a encontrar el problema.
 
@@ -149,8 +149,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
     { "name": "mi-servidor", "baseURL": "http://192.168.1.10:8000/v1", "apiKeyEnv": "MI_CLAVE", "models": [{ "id": "qwen3-coder", "context": 32000 }] }
   ],
   "permission": {
-    "bash": { "*": "ask", "git status*": "allow", "npm test*": "allow", "rm *": "deny" },
-    "webfetch": "allow"
+    "bash": { "*": "ask", "npm test*": "allow", "rm *": "deny" }
   },
   "mcp": {
     "github": { "type": "local", "command": ["npx", "-y", "@modelcontextprotocol/server-github"], "environment": { "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_TOKEN}" } }
@@ -162,7 +161,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 
 - **order**: modelos que van primero. **disabledProviders**: proveedores que no quieres usar.
 - **providers**: un servidor tuyo compatible con la API de OpenAI (o cambios en los modelos de uno del catálogo).
-- **permission**: `allow`, `ask` o `deny` para `edit`, `bash`, `webfetch` y `mcp`; en `bash` y `mcp` gana el patrón más concreto. Las reglas `deny` se respetan incluso con `--yolo`.
+- **permission**: `allow`, `ask` o `deny` para `edit`, `bash`, `webfetch` y `mcp`; en `bash` y `mcp` gana el patrón más concreto. Las reglas `deny` se respetan incluso con `--yolo`. Piénsatelo antes de poner `webfetch` en `allow`: un texto malicioso podría hacer que el modelo mande tus datos a una web sin preguntarte.
 - **mcp**: servidores MCP locales (`command`) o remotos (`url`); los que piden iniciar sesión con OAuth todavía no funcionan. Un servidor local no recibe tus variables de entorno (ni tus claves), solo lo imprescindible para arrancar: lo que necesite, ponlo en `environment`. Ahí y en `headers`, `{env:NOMBRE}` se cambia por esa variable tuya.
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
 
@@ -233,13 +232,14 @@ vipcode también lee las skills que ya tengas de otros programas (`~/.claude/ski
 
 vipcode lee `AGENTS.md` (o `CLAUDE.md`) de tu proyecto y tus instrucciones generales de `~/.vipcode/AGENTS.md`. `/init` crea un `AGENTS.md` analizando el proyecto.
 
-Después de cada edición, le pasa al modelo los errores que encuentre el servidor de lenguaje: con TypeScript y JavaScript sin instalar nada, y con otros lenguajes si tienes su servidor (pyright, gopls, rust-analyzer, clangd…).
+Después de cada edición, le pasa al modelo los errores que encuentre el servidor de lenguaje: con TypeScript y JavaScript sin instalar nada, y con otros lenguajes si tienes su servidor instalado en tu ordenador (pyright, gopls, rust-analyzer, clangd…). Los que traiga un proyecto en su `node_modules` no se usan.
 
 ## Seguridad y privacidad
 
-- **Permisos.** Antes de editar un fichero, ejecutar un comando, salir a internet o usar una herramienta MCP, vipcode pregunta. Solo se aprueban solos unos pocos comandos que no cambian nada (`git status`, `git diff`, `git log`, `ls`…). Con `--yolo` o `/yolo` se aprueba todo menos lo que tengas en `deny`: úsalo solo en carpetas sin nada que perder.
+- **Permisos.** Antes de editar un fichero, ejecutar un comando, salir a internet o usar una herramienta MCP, vipcode pregunta enseñando el comando entero. Solo se aprueban solos unos pocos comandos que no cambian nada (`git status`, `git diff`, `git log`, `ls`…), y nunca si miran fuera del proyecto o pueden ejecutar programas (como `git difftool`). Con `--yolo` o `/yolo` se aprueba todo menos lo que tengas en `deny`: úsalo solo en carpetas sin nada que perder.
+- **Lo que trae un proyecto no se ejecuta solo.** vipcode no arranca programas de la carpeta del proyecto (ni servidores de lenguaje de su `node_modules`, ni un `git` o un `rg` que traiga), no lee `AGENTS.md`, agentes, comandos ni skills que sean enlaces a ficheros de fuera, y pregunta siempre antes de escribir en `.git` (sus hooks y su configuración se ejecutan cuando usas git).
 - **Carpetas en las que confías.** Un proyecto puede traer su propia configuración de vipcode, y eso podría arrancar programas o mandar tus claves a otro sitio. Por eso vipcode no la usa hasta que confías en la carpeta: te enseña qué cambiaría y te pregunta (`vipcode trust` y `vipcode untrust` lo cambian a mano).
-- **Ficheros.** Solo lee y escribe dentro de la carpeta del proyecto, y no puede leer ni cambiar tus claves ni su configuración.
+- **Ficheros e internet.** Solo lee, busca y escribe dentro de la carpeta del proyecto, y no puede leer ni cambiar tus claves ni su configuración. Antes de entrar en una dirección de tu ordenador o de tu red (tu router, `localhost`…) pregunta siempre, aunque tengas `webfetch` en `allow`.
 - **Tus claves.** Los servidores MCP y de lenguaje que arranca vipcode no reciben tus claves: si el paquete de uno estuviera comprometido, no podría llevárselas. «Sí siempre a este comando» tampoco vale si el comando escribe en un fichero (`>`) o lleva `$(…)`: eso se pregunta siempre.
 - **Tus datos.** vipcode no envía datos de uso a nadie: solo habla con los proveedores de IA que uses, con las webs que consulte el agente, con tus servidores MCP, con LLM Stats si le das tu clave y, una vez al día, con npm y GitHub para ver si hay versión nueva.
 - **Planes gratuitos.** Los proveedores sin clave y varios planes gratis pueden guardar lo que les envías o usarlo para entrenar sus modelos. No mandes contraseñas ni código confidencial; para eso usa un modelo local (Ollama, LM Studio) y pon `"keyless": false` en la configuración.

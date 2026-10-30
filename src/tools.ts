@@ -1,4 +1,6 @@
+import dns from "node:dns/promises";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import fg from "fast-glob";
@@ -7,7 +9,7 @@ import { isImagePath, toDataUrl } from "./images.js";
 import type { Permission, PermissionReply, PermissionRequest } from "./permissions.js";
 import { stripControl } from "./sanitize.js";
 import { isInside, protectedDirs } from "./paths.js";
-import { commandShell, killTree } from "./shell.js";
+import { commandShell, findProgram, killTree } from "./shell.js";
 
 export type { Permission } from "./permissions.js";
 
@@ -143,6 +145,26 @@ export function rel(root: string, abs: string): string {
 function globPattern(pattern: string): string {
   return process.platform === "win32" ? pattern.replace(/\\/g, "/") : pattern;
 }
+
+// Un patrón glob no puede salir del proyecto: nada de rutas absolutas ni de «..» (si no, «../**» llegaría a tus claves)
+function outsidePattern(pattern: string): boolean {
+  const clean = globPattern(pattern);
+  return path.isAbsolute(clean) || /^[a-zA-Z]:/.test(clean) || clean.startsWith("~") || /(^|[/{,])\.\.([/},]|$)/.test(clean);
+}
+
+// Lo que encuentra fast-glob, comprobado como cualquier otra ruta (enlaces simbólicos y carpetas de vipcode incluidos)
+function insideProject(root: string, cwd: string, files: string[]): string[] {
+  return files.filter((file) => {
+    try {
+      resolvePath(root, path.relative(root, path.resolve(cwd, file)));
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+const OUTSIDE_PATTERN = "Error: el patrón tiene que ser relativo a la carpeta del proyecto (sin rutas absolutas ni «..»).";
 
 function rejected(reply: PermissionReply, what: string): string {
   if (reply.feedback) {
@@ -321,7 +343,13 @@ export function unifiedDiff(oldText: string, newText: string, context = 3, maxLi
 }
 
 // Contenido de un fichero con las líneas numeradas (lo usan read_file y los @ficheros del mensaje)
+// Más que esto no se lee entero (un fichero de varios GB agotaría la memoria)
+const MAX_READ_BYTES = 20 * 1024 * 1024;
+
 function readNumbered(file: string, label: string, offset?: number, maxLines?: number): string {
+  if (fs.statSync(file).size > MAX_READ_BYTES) {
+    return `${label} ocupa más de 20 MB: no se lee entero. Busca lo que necesitas con grep.`;
+  }
   const buffer = fs.readFileSync(file);
   if (buffer.includes(0)) {
     return `${label} parece un fichero binario; no se muestra.`;
@@ -644,7 +672,11 @@ const globTool: Tool = {
   readOnly: true,
   async run(args, ctx) {
     const cwd = resolvePath(ctx.root, args.path);
-    const files = await fg(globPattern(String(args.pattern)), { cwd, ignore: [...IGNORE, ...protectedIgnore(cwd)], dot: true, onlyFiles: true, followSymbolicLinks: false });
+    if (outsidePattern(String(args.pattern))) {
+      return OUTSIDE_PATTERN;
+    }
+    const found = await fg(globPattern(String(args.pattern)), { cwd, ignore: [...IGNORE, ...protectedIgnore(cwd)], dot: true, onlyFiles: true, followSymbolicLinks: false });
+    const files = insideProject(ctx.root, cwd, found);
     if (files.length === 0) {
       return "Sin resultados.";
     }
@@ -657,23 +689,25 @@ const globTool: Tool = {
   },
 };
 
-let ripgrepAvailable: boolean | null = null;
+let ripgrepPath: string | null | undefined;
 
-function hasRipgrep(): boolean {
-  if (ripgrepAvailable === null) {
+// Ruta completa de ripgrep, si está instalado (VIPCODE_RIPGREP=0 hace que no se use)
+function ripgrepProgram(): string | null {
+  if (ripgrepPath === undefined) {
+    const found = process.env.VIPCODE_RIPGREP === "0" ? null : findProgram("rg");
     try {
-      ripgrepAvailable = spawnSync("rg", ["--version"], { stdio: "ignore" }).status === 0;
+      ripgrepPath = found && spawnSync(found, ["--version"], { stdio: "ignore" }).status === 0 ? found : null;
     } catch {
-      ripgrepAvailable = false;
+      ripgrepPath = null;
     }
   }
-  return ripgrepAvailable;
+  return ripgrepPath;
 }
 
 // ripgrep es mucho más rápido en proyectos grandes; devuelve null si falla para usar la búsqueda propia
 function ripgrep(args: string[], cwd: string, signal?: AbortSignal): Promise<{ code: number; stdout: string } | null> {
   return new Promise((resolve) => {
-    const child = spawn("rg", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(ripgrepProgram() || "rg", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     const onAbort = () => child.kill("SIGTERM");
     signal?.addEventListener("abort", onAbort);
@@ -710,7 +744,10 @@ const grepTool: Tool = {
   readOnly: true,
   async run(args, ctx) {
     const pattern = String(args.pattern);
-    if (hasRipgrep()) {
+    if (args.include && outsidePattern(String(args.include))) {
+      return OUTSIDE_PATTERN;
+    }
+    if (ripgrepProgram()) {
       // --crlf: en los ficheros con saltos de línea de Windows, $ también encaja antes del \r\n
       const rgArgs = ["--line-number", "--no-heading", "--color", "never", "--with-filename", "--crlf", "--max-columns", "300", "--max-columns-preview", "-e", pattern];
       if (process.platform === "win32") {
@@ -756,7 +793,7 @@ const grepTool: Tool = {
     if (args.include) {
       include = globPattern(String(args.include));
     }
-    const files = await fg(include, { cwd: ctx.root, ignore: [...IGNORE, ...protectedIgnore(ctx.root)], dot: false, onlyFiles: true, followSymbolicLinks: false });
+    const files = insideProject(ctx.root, ctx.root, await fg(include, { cwd: ctx.root, ignore: [...IGNORE, ...protectedIgnore(ctx.root)], dot: false, onlyFiles: true, followSymbolicLinks: false }));
     const results: string[] = [];
     for (const file of files) {
       const abs = path.join(ctx.root, file);
@@ -984,15 +1021,42 @@ const webFetch: Tool = {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return "Error: solo se admiten URLs http o https.";
     }
-    const reply = await ctx.ask({ kind: "web", title: "Descargar página web", preview: `GET ${parsed.href}`, subject: parsed.href });
+    // Una dirección de tu ordenador o de tu red se pregunta siempre, aunque tengas webfetch en allow: un texto
+    // malicioso podría pedir al modelo que entre en tu router o en los datos de tu nube
+    const internal = await isInternalHost(parsed.hostname);
+    const title = internal ? "Descargar una dirección de tu ordenador o de tu red" : "Descargar página web";
+    const reply = await ctx.ask({ kind: "web", title, preview: `GET ${parsed.href}`, subject: parsed.href, force: internal });
     if (!reply.allow) {
       return rejected(reply, "descargar la página");
     }
-    const response = await fetch(parsed, {
-      signal: webSignal(ctx),
-      redirect: "follow",
-      headers: { "user-agent": "vipcode", accept: "text/html,text/plain,application/json;q=0.9,*/*;q=0.5" },
-    });
+    // Las redirecciones se siguen a mano: una página de internet no puede mandarte a tu red sin que lo apruebes
+    let current = parsed;
+    let response: Response;
+    for (let hop = 0; ; hop++) {
+      response = await fetch(current, {
+        signal: webSignal(ctx),
+        redirect: "manual",
+        headers: { "user-agent": "vipcode", accept: "text/html,text/plain,application/json;q=0.9,*/*;q=0.5" },
+      });
+      const location = response.status >= 300 && response.status < 400 ? response.headers.get("location") : null;
+      if (!location) {
+        break;
+      }
+      if (hop >= 5) {
+        return "Error: demasiadas redirecciones.";
+      }
+      const next = new URL(location, current);
+      if (next.protocol !== "http:" && next.protocol !== "https:") {
+        return "Error: la página redirige a una dirección que no es http ni https.";
+      }
+      if (!internal && (await isInternalHost(next.hostname))) {
+        const again = await ctx.ask({ kind: "web", title: "La página redirige a una dirección de tu ordenador o de tu red", preview: `GET ${next.href}`, subject: next.href, force: true });
+        if (!again.allow) {
+          return rejected(again, "seguir la redirección");
+        }
+      }
+      current = next;
+    }
     if (!response.ok) {
       return `Error: HTTP ${response.status} ${response.statusText}`;
     }
@@ -1000,16 +1064,77 @@ const webFetch: Tool = {
     if (type !== "" && !/text|json|xml|javascript/.test(type)) {
       return `Error: tipo de contenido no soportado (${type})`;
     }
-    let body = await response.text();
+    let body = await readBody(response);
     if (/html/.test(type)) {
       body = htmlToText(body);
     }
     if (body === "") {
       body = "(página vacía)";
     }
-    return `${response.url}\n\n${truncate(body)}`;
+    return `${current.href}\n\n${truncate(body)}`;
   },
 };
+
+// Direcciones de tu ordenador o de tu red: localhost, 10.x, 192.168.x, la de los datos de las nubes (169.254.169.254)…
+export function isInternalAddress(address: string): boolean {
+  const ip = address.replace(/^\[|\]$/g, "").toLowerCase();
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (net.isIPv6(ip)) {
+    if (ip === "::1" || ip === "::") {
+      return true;
+    }
+    if (ip.startsWith("::ffff:")) {
+      return isInternalAddress(ip.slice(7));
+    }
+    return /^(fc|fd|fe[89ab])/.test(ip);
+  }
+  return false;
+}
+
+// ¿Esta dirección lleva a tu ordenador o a tu red? (también si es un nombre que apunta a una IP interna)
+export async function isInternalHost(hostname: string): Promise<boolean> {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (net.isIP(host)) {
+    return isInternalAddress(host);
+  }
+  if (host === "localhost" || /\.(localhost|local|internal|lan|home)$/.test(host) || !host.includes(".")) {
+    return true;
+  }
+  try {
+    return (await dns.lookup(host, { all: true })).some((entry) => isInternalAddress(entry.address));
+  } catch {
+    // Si no se resuelve, la descarga fallará igualmente
+    return false;
+  }
+}
+
+// Más que esto no se descarga (una página enorme agotaría la memoria)
+const MAX_PAGE_BYTES = 5 * 1024 * 1024;
+
+async function readBody(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return "";
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    chunks.push(value);
+    size += value.length;
+    if (size >= MAX_PAGE_BYTES) {
+      await reader.cancel().catch(() => {});
+      break;
+    }
+  }
+  return Buffer.concat(chunks).subarray(0, MAX_PAGE_BYTES).toString("utf8");
+}
 
 // Resultados de DuckDuckGo (versión HTML, sin clave)
 export function parseSearchResults(html: string, max: number): { title: string; url: string; snippet: string }[] {

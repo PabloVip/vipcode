@@ -172,7 +172,7 @@ export function loadAgents(root: string, config: Config, trusted = projectTrust(
     agents.set(real, fromInput(real, input, agents.get(real), source));
   };
 
-  for (const entry of readMarkdownDir(dirs)) {
+  for (const entry of readMarkdownDir(dirs, root)) {
     const data = entry.data as Record<string, any>;
     // Un agente del proyecto en el que no confías no puede cambiar permisos ni dejar editar al modo plan
     const own = trusted || !isProjectFile(root, entry.file);

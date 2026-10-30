@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Config, LspServerConfig } from "./config.js";
 import { debugLog } from "./debug.js";
-import { killTree, spawnProgram, withoutSecrets } from "./shell.js";
+import { findProgram, killTree, spawnProgram, withoutSecrets } from "./shell.js";
 
 export interface Diagnostic {
   line: number;
@@ -87,26 +87,10 @@ const BUILTIN_SERVERS: ServerSpec[] = [
   { id: "svelte", command: ["svelteserver", "--stdio"], extensions: [".svelte"] },
 ];
 
-// Busca un ejecutable en node_modules/.bin del proyecto y en el PATH
-function which(command: string, root: string): string | null {
-  if (path.isAbsolute(command)) {
-    return fs.existsSync(command) ? command : null;
-  }
-  const dirs = [path.join(root, "node_modules", ".bin"), ...(process.env.PATH || "").split(path.delimiter)];
-  const names = process.platform === "win32" ? [`${command}.cmd`, `${command}.exe`, command] : [command];
-  for (const dir of dirs) {
-    for (const name of names) {
-      const candidate = path.join(dir, name);
-      try {
-        if (fs.statSync(candidate).isFile()) {
-          return candidate;
-        }
-      } catch {
-        // no está aquí
-      }
-    }
-  }
-  return null;
+// Un servidor de lenguaje instalado en tu ordenador (en el PATH). Nunca uno de node_modules/.bin del proyecto ni de la
+// carpeta actual: un proyecto podría traer un programa con ese nombre, y vipcode lo arrancaría sin preguntar
+function which(command: string): string | null {
+  return findProgram(command);
 }
 
 function uriKey(uri: string): string {
@@ -415,7 +399,7 @@ export class LspManager {
     if (spec.resolve) {
       return spec.resolve();
     }
-    const exe = which(spec.command[0], this.root);
+    const exe = which(spec.command[0]);
     if (!exe) {
       return null;
     }

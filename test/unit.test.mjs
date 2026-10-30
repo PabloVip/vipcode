@@ -394,7 +394,7 @@ test("config: migración del config antiguo y config del proyecto", () => {
   const loaded = config.loadConfig(root);
   assert.equal(loaded.maxSteps, 7);
   assert.equal(loaded.permission.bash["npm test*"], "allow");
-  assert.equal(loaded.permission.bash["git status*"], "allow");
+  assert.equal(loaded.permission.bash["git status"], "allow");
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -883,4 +883,122 @@ test("seguridad: «sí siempre» a un comando no deja escribir ficheros, y los p
   fs.writeFileSync(path.join(root, "vipcode.json"), JSON.stringify({ mcp: { raro: { command: ["npx", "raro"], environment: { K: "{env:AWS_SECRET_ACCESS_KEY}" } } } }));
   assert.ok(trust.projectTrust(root).changes.some((change) => change.includes("recibe tus variables AWS_SECRET_ACCESS_KEY")));
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("seguridad (auditoría): git que se aprueba solo no ejecuta programas ni lee fuera, y .git se pregunta siempre", () => {
+  const cfg = config.DEFAULT_PERMISSION;
+  // Lo de siempre sigue aprobándose solo
+  for (const command of ["git status", "git diff", "git diff --stat", "git log --oneline -5", "git show HEAD", "ls -la", "ls src", "pwd"]) {
+    assert.equal(evaluate(cfg, "bash", command), "allow", command);
+  }
+  // «git diff*» encajaba con «git difftool -x orden», y git diff lee cualquier fichero si uno está fuera del repositorio
+  const old = { ...cfg, bash: { "*": "ask", "git diff*": "allow", "git log*": "allow", "ls*": "allow" } };
+  for (const sneaky of ['git difftool -y -x "touch x" HEAD', "git diff --no-index a b", "git diff /dev/null ~/.ssh/id_rsa", "git diff /dev/null /etc/passwd", "git log -p --ext-diff", "ls ~/.ssh", "ls ../otro"]) {
+    assert.equal(evaluate(cfg, "bash", sneaky), "ask", sneaky);
+    assert.equal(evaluate(old, "bash", sneaky), "ask", `${sneaky} (reglas antiguas)`);
+  }
+  // Escribir en .git o tocar la configuración de git: siempre se pregunta
+  assert.ok(permissions.touchesGitInternals("write", ".git/hooks/pre-commit"));
+  assert.ok(permissions.touchesGitInternals("bash", "cp malo .git/hooks/pre-commit"));
+  assert.ok(permissions.touchesGitInternals("bash", "git config core.fsmonitor ./malo"));
+  assert.ok(!permissions.touchesGitInternals("write", "src/app.ts"));
+  // Un repositorio cuya configuración de git ejecuta programas (y Git LFS, que no cuenta)
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-gitconfig-"));
+  fs.mkdirSync(path.join(repo, ".git"));
+  fs.writeFileSync(path.join(repo, ".git", "config"), '[filter "lfs"]\n\tclean = git-lfs clean -- %f\n');
+  assert.equal(permissions.riskyGitConfig(repo), false);
+  fs.writeFileSync(path.join(repo, ".git", "config"), '[diff "malo"]\n\ttextconv = sh -c id\n');
+  assert.equal(permissions.riskyGitConfig(repo), true);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("seguridad (auditoría): glob y grep no salen del proyecto", async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-fuga-"));
+  const root = path.join(base, "proyecto");
+  fs.mkdirSync(path.join(base, "fuera"));
+  fs.mkdirSync(root);
+  fs.writeFileSync(path.join(base, "fuera", "claves.json"), "SECRETO_FUERA");
+  fs.writeFileSync(path.join(root, "a.txt"), "hola");
+  const ctx = { root, bashTimeoutMs: 5000, readTimes: new Map(), ask: async () => ({ allow: false }) };
+  const run = async (name, args) => (await tools.runTool(tools.CORE_TOOLS, name, JSON.stringify(args), ctx, false)).output;
+  // Sin ripgrep, grep usa su propia búsqueda: también tiene que quedarse dentro
+  process.env.VIPCODE_RIPGREP = "0";
+  for (const pattern of ["../**/*", `${base}/fuera/*`, "{..,x}/fuera/*", "~/.ssh/*"]) {
+    assert.ok(!(await run("glob", { pattern })).includes("claves.json"), `glob ${pattern}`);
+    assert.ok(!(await run("grep", { pattern: "SECRETO", include: pattern })).includes("SECRETO_FUERA"), `grep ${pattern}`);
+  }
+  assert.match(await run("glob", { pattern: "**/*.txt" }), /a\.txt/);
+  assert.match(await run("grep", { pattern: "hola" }), /a\.txt:1: hola/);
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test("seguridad (auditoría): nada de lo que trae un proyecto se ejecuta ni se lee fuera de él", async (t) => {
+  const shell = await import("../dist/shell.js");
+  const { LspManager } = await import("../dist/lsp.js");
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-proyecto-malo-"));
+  const root = path.join(base, "proyecto");
+  const marker = path.join(base, "ejecutado.txt");
+  fs.mkdirSync(path.join(root, "node_modules", ".bin"), { recursive: true });
+  // Un «servidor de lenguaje» del proyecto (y un rg falso en la carpeta): no se ejecutan nunca
+  const script = process.platform === "win32" ? `@echo x > "${marker}"\r\n` : `#!/bin/sh\necho x > "${marker}"\n`;
+  for (const name of ["pyright-langserver", "basedpyright-langserver", "pylsp", "rg"]) {
+    const file = path.join(name === "rg" ? root : path.join(root, "node_modules", ".bin"), process.platform === "win32" ? `${name}.cmd` : name);
+    fs.writeFileSync(file, script, { mode: 0o755 });
+  }
+  fs.writeFileSync(path.join(root, "app.py"), "x = 1\n");
+  const lsp = new LspManager(root, config.DEFAULT_CONFIG);
+  await Promise.race([lsp.report(path.join(root, "app.py"), true).catch(() => ""), new Promise((r) => setTimeout(r, 3000))]);
+  await lsp.shutdown().catch(() => {});
+  // findProgram nunca devuelve el de la carpeta actual, aunque el PATH tenga «.» o una entrada vacía
+  const before = process.cwd();
+  process.chdir(root);
+  const found = shell.findProgram("rg", { PATH: ["", ".", "relativa"].join(path.delimiter), PATHEXT: process.env.PATHEXT });
+  process.chdir(before);
+  assert.equal(found, null);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(!fs.existsSync(marker), "se ha ejecutado un programa del proyecto");
+
+  // AGENTS.md y un agente del proyecto que son enlaces a ficheros de fuera no llegan al modelo
+  fs.writeFileSync(path.join(base, "secreto.txt"), "SECRETO_ENLAZADO");
+  fs.mkdirSync(path.join(root, ".vipcode", "agents"), { recursive: true });
+  try {
+    fs.symlinkSync(path.join(base, "secreto.txt"), path.join(root, "AGENTS.md"));
+    fs.symlinkSync(path.join(base, "secreto.txt"), path.join(root, ".vipcode", "agents", "programar.md"));
+  } catch (err) {
+    if (process.platform === "win32" && err.code === "EPERM") {
+      t.skip("Windows no deja crear enlaces simbólicos sin permisos");
+      fs.rmSync(base, { recursive: true, force: true });
+      return;
+    }
+    throw err;
+  }
+  const { systemPrompt } = await import("../dist/prompt.js");
+  const list = agents.loadAgents(root, config.DEFAULT_CONFIG);
+  const main = list.find((a) => a.name === "programar");
+  assert.ok(!systemPrompt(root, { agent: main, toolNames: [], instructions: [] }).includes("SECRETO_ENLAZADO"));
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test("seguridad (auditoría): webfetch pregunta siempre por las direcciones internas y el registro oculta claves", async () => {
+  for (const address of ["127.0.0.1", "10.1.2.3", "192.168.1.1", "172.20.0.1", "169.254.169.254", "::1", "fd00::1", "::ffff:127.0.0.1"]) {
+    assert.ok(tools.isInternalAddress(address), address);
+  }
+  for (const address of ["8.8.8.8", "1.1.1.1", "2606:4700::1111"]) {
+    assert.ok(!tools.isInternalAddress(address), address);
+  }
+  assert.ok(await tools.isInternalHost("localhost"));
+  assert.ok(await tools.isInternalHost("router"));
+  // Con webfetch en allow, una dirección interna se pregunta igualmente
+  let asked = null;
+  const ask = permissions.createAsker(() => ({ ...config.DEFAULT_PERMISSION, webfetch: "allow" }), new permissions.SessionGrants(), async (request) => {
+    asked = request;
+    return { allow: false };
+  });
+  const ctx = { root: os.tmpdir(), bashTimeoutMs: 5000, readTimes: new Map(), ask };
+  const result = await tools.runTool(tools.CORE_TOOLS, "webfetch", JSON.stringify({ url: "http://127.0.0.1:9/admin" }), ctx, false);
+  assert.ok(asked && /tu ordenador o de tu red/.test(asked.title), JSON.stringify(asked));
+  assert.match(result.output, /rechazado/);
+  const { redactSecrets } = await import("../dist/debug.js");
+  assert.equal(redactSecrets("error 401 sk-or-v1-abc123def456ghi789"), "error 401 [clave oculta]");
+  assert.equal(redactSecrets("Authorization: Bearer gsk_ABCDEFGH12345678"), "Authorization: Bearer [clave oculta]");
 });

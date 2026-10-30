@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { debugLog } from "./debug.js";
-import { splitArgs } from "./shell.js";
+import { findProgram, splitArgs } from "./shell.js";
 
 // Lo mínimo que necesita el inicio de sesión de la interfaz (terminal o TUI)
 export interface LoginUi {
@@ -32,7 +32,8 @@ export function openBrowser(url: string): void {
     args = [url];
   }
   try {
-    const child = spawn(command, args, { stdio: "ignore", detached: true });
+    // Por su ruta completa: nunca un programa con ese nombre que haya en la carpeta del proyecto
+    const child = spawn(findProgram(command) || command, args, { stdio: "ignore", detached: true });
     child.on("error", (err) => debugLog("navegador", err));
     child.unref();
   } catch (err) {

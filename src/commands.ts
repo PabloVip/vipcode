@@ -58,7 +58,7 @@ export function loadCommands(root: string, config: Config, trusted = projectTrus
     path.join(root, ".opencode", "commands"),
     path.join(root, ".vipcode", "commands"),
   ];
-  for (const entry of readMarkdownDir(dirs)) {
+  for (const entry of readMarkdownDir(dirs, root)) {
     const data = entry.data as Record<string, any>;
     commands.set(entry.name, {
       name: entry.name,

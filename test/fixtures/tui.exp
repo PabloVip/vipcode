@@ -49,6 +49,23 @@ expect {
   timeout { falla "no vuelve a quedar libre tras la respuesta larga" }
 }
 
+# 1c. Un comando que no cabe en el diálogo de permiso se escribe entero encima antes de preguntar (si no, la línea 31
+# podría esconder algo); se rechaza
+send "comando-largo\r"
+expect {
+  "LINEA-35" {}
+  timeout { falla "no se ve el comando largo entero" }
+}
+expect {
+  "justo encima" {}
+  timeout { falla "el diálogo no avisa de que el comando entero está encima" }
+}
+send "n"
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre tras rechazar el comando largo" }
+}
+
 # 2. Edición con diálogo de permiso: se ve el diff y se acepta con «s»
 send "cambia el fichero\r"
 expect {

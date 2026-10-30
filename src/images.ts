@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { findProgram } from "./shell.js";
 
 const MIME: Record<string, string> = {
   ".png": "image/png",
@@ -33,7 +34,13 @@ export function toDataUrl(file: string): string {
 
 function run(command: string, args: string[]): Promise<{ code: number; stdout: Buffer }> {
   return new Promise((resolve) => {
-    execFile(command, args, { encoding: "buffer", maxBuffer: 32 * 1024 * 1024, timeout: 10000 }, (err, stdout) => {
+    // Por su ruta completa: nunca un programa con ese nombre que haya en la carpeta del proyecto
+    const file = findProgram(command);
+    if (!file) {
+      resolve({ code: 127, stdout: Buffer.alloc(0) });
+      return;
+    }
+    execFile(file, args, { encoding: "buffer", maxBuffer: 32 * 1024 * 1024, timeout: 10000 }, (err, stdout) => {
       let code = 0;
       if (err) {
         code = typeof (err as any).code === "number" ? (err as any).code : 1;

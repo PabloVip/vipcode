@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import type { Config } from "./config.js";
 import { parseFrontmatter } from "./frontmatter.js";
-import { GLOBAL_SKILLS_DIR } from "./paths.js";
+import { GLOBAL_SKILLS_DIR, isInside, realInside } from "./paths.js";
+import { findProgram } from "./shell.js";
 import { type Tool, truncate } from "./tools.js";
 
 // Una skill es una carpeta con un SKILL.md (formato abierto Agent Skills, el mismo de Claude Code y opencode):
@@ -149,7 +150,12 @@ export function loadSkills(root: string, config: Config): SkillDefinition[] {
   const disabled = new Set((config.skills?.disabled || []).map((name) => normalizeSkillName(String(name))));
   const found = new Map<string, SkillDefinition>();
   for (const { dir, where } of skillDirs(root, config)) {
+    const inProject = isInside(path.resolve(dir), path.resolve(root));
     for (const skill of scanDir(dir, where)) {
+      // Una skill del proyecto que en realidad es un enlace a otra carpeta (o su SKILL.md, a otro fichero) no se usa
+      if (inProject && !(realInside(skill.dir, root) && SKILL_FILES.every((name) => !fs.existsSync(path.join(skill.dir, name)) || realInside(path.join(skill.dir, name), root)))) {
+        continue;
+      }
       if (!disabled.has(skill.name)) {
         found.set(skill.name, skill);
       }
@@ -316,7 +322,8 @@ export function installSkills(source: string, root: string, options: { project?:
       temp = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-skill-"));
       // Con «--» un origen que empiece por - no se toma como una opción de git (por ejemplo --upload-pack)
       const args = ["clone", "--depth", "1", ...(git.ref ? [`--branch=${git.ref}`] : []), "--", git.url, temp];
-      const clone = spawnSync("git", args, { encoding: "utf8", timeout: 120000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+      // git por su ruta completa: nunca un git.exe que haya en la carpeta del proyecto
+      const clone = spawnSync(findProgram("git") || "git", args, { encoding: "utf8", timeout: 120000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
       if (clone.error || clone.status !== 0) {
         throw new Error(`No he podido descargar ${git.url}: ${(clone.stderr || clone.error?.message || "").trim().split("\n").pop()}`);
       }

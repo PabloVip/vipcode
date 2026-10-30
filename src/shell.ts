@@ -27,10 +27,51 @@ export function withoutSecrets(env: NodeJS.ProcessEnv = process.env): Record<str
   return clean;
 }
 
+// Ruta completa de un programa, buscándolo solo en las carpetas absolutas del PATH. Nunca en la carpeta actual (la del
+// proyecto): en Windows, lanzar un programa por su nombre lo busca ahí primero, así que un proyecto podría traer su
+// propio rg.exe o git.exe y vipcode lo ejecutaría; en macOS y Linux pasaría lo mismo si el PATH tiene «.» o «::»
+const programs = new Map<string, string | null>();
+
+export function findProgram(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  if (path.isAbsolute(name)) {
+    return fs.existsSync(name) ? name : null;
+  }
+  const dirs = env.PATH ?? env.Path ?? "";
+  const key = `${name}\u0000${dirs}`;
+  if (programs.has(key)) {
+    return programs.get(key)!;
+  }
+  const extensions = process.platform === "win32" && !path.extname(name) ? (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
+  let found: string | null = null;
+  for (const dir of dirs.split(path.delimiter)) {
+    if (found || !dir || !path.isAbsolute(dir)) {
+      continue;
+    }
+    for (const extension of extensions) {
+      const candidate = path.join(dir, name + extension.toLowerCase());
+      try {
+        if (fs.statSync(candidate).isFile()) {
+          found = candidate;
+          break;
+        }
+      } catch {
+        // no está en esta carpeta
+      }
+    }
+  }
+  programs.set(key, found);
+  return found;
+}
+
+// Programas de Windows que siempre están en System32
+function system32(name: string): string {
+  return findProgram(name) || path.join(process.env.SystemRoot || "C:\\Windows", "System32", name);
+}
+
 // Para un programa y todo lo que haya lanzado. En Windows no hay grupos de procesos: taskkill /T recorre los hijos
 export function killTree(child: ChildProcess) {
   if (process.platform === "win32" && child.pid) {
-    const taskkill = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    const taskkill = spawn(system32("taskkill.exe"), ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
     taskkill.on("error", () => child.kill());
     return;
   }
@@ -56,19 +97,10 @@ export interface Shell {
   env: Record<string, string>;
 }
 
-function onPath(name: string, env: NodeJS.ProcessEnv): string | null {
-  for (const dir of (env.PATH || env.Path || "").split(path.delimiter)) {
-    if (dir && fs.existsSync(path.join(dir, name))) {
-      return path.join(dir, name);
-    }
-  }
-  return null;
-}
-
 // El bash de Git para Windows. No vale el de C:\Windows\System32, que es el de WSL y trabaja en otro sistema de ficheros
 function gitBash(env: NodeJS.ProcessEnv): string | null {
   const candidates: string[] = [];
-  const git = onPath("git.exe", env);
+  const git = findProgram("git.exe", env);
   if (git) {
     // git.exe está en …\Git\cmd, …\Git\bin o …\Git\mingw64\bin
     candidates.push(path.resolve(path.dirname(git), "..", "bin", "bash.exe"), path.resolve(path.dirname(git), "..", "..", "bin", "bash.exe"));
@@ -118,19 +150,24 @@ export function detectShell(env: NodeJS.ProcessEnv = process.env, platform: Node
   const custom = env.VIPCODE_SHELL;
   if (custom) {
     const base = path.basename(custom).toLowerCase().replace(/\.exe$/, "");
+    const file = findProgram(custom, env) || custom;
     if (base === "pwsh" || base === "powershell") {
-      return powershell(custom);
+      return powershell(file);
     }
     if (base === "cmd") {
-      return cmd(custom);
+      return cmd(file);
     }
-    return bash(custom, base, platform !== "win32");
+    return bash(file, base, platform !== "win32");
   }
   if (platform !== "win32") {
-    return bash("bash", "bash", true);
+    return bash(findProgram("bash", env) || "/bin/bash", "bash", true);
   }
   const found = gitBash(env);
-  return found ? bash(found, "Git Bash", false) : powershell(onPath("pwsh.exe", env) || "powershell.exe");
+  if (found) {
+    return bash(found, "Git Bash", false);
+  }
+  const systemRoot = env.SystemRoot || env.SYSTEMROOT || "C:\\Windows";
+  return powershell(findProgram("pwsh.exe", env) || findProgram("powershell.exe", env) || path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"));
 }
 
 let cached: Shell | null = null;

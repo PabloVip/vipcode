@@ -510,6 +510,11 @@ function ContextGauge(props: { used: number; total: number; detail: boolean }) {
   );
 }
 
+// Líneas de vista previa que caben en el diálogo de permiso (la zona en directo no puede pasar del alto de la pantalla)
+function permissionRoom(rows: number): number {
+  return Math.max(6, rows - 16);
+}
+
 function StatusBar(props: { app: App; agentName: string; busy: boolean; model: string; width: number }) {
   const { app } = props;
   const agent = app.agents.find((item) => item.name === props.agentName);
@@ -989,6 +994,11 @@ function Main(props: { app: App; initial: string }) {
     };
     app.promptPermission = (request: PermissionRequest, agent) =>
       new Promise<PermissionReply>((resolve) => {
+        // Un comando que no cabe en el diálogo se escribe entero en el historial antes de preguntar: lo que apruebas
+        // tienes que poder leerlo todo, y 30 líneas inofensivas podrían esconder una maliciosa al final
+        if (request.kind === "bash" && request.preview.split("\n").length > permissionRoom(process.stdout.rows || 24)) {
+          push({ kind: "block", text: `${pc.yellow("Comando entero que pide ejecutar:")}\n${colorPreview(request.preview)}` });
+        }
         setDialog({
           kind: "permission",
           request,
@@ -1346,10 +1356,11 @@ function Main(props: { app: App; initial: string }) {
   let dialogView: React.ReactNode = null;
   if (dialog?.kind === "permission") {
     const lines = dialog.request.preview.split("\n");
-    const room = Math.max(6, rows - 16);
+    const room = permissionRoom(rows);
     let request = dialog.request;
     if (lines.length > room) {
-      request = { ...request, preview: `${lines.slice(0, room).join("\n")}\n… ${lines.length - room} líneas más` };
+      const where = dialog.request.kind === "bash" ? ": el comando entero está justo encima, léelo antes de aprobarlo" : "";
+      request = { ...request, preview: `${lines.slice(0, room).join("\n")}\n… ${lines.length - room} líneas más${where}` };
     }
     dialogView = <PermissionDialog key="permission" request={request} agent={dialog.agent} onDone={dialog.resolve} />;
   } else if (dialog?.kind === "select") {

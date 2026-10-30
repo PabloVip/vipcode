@@ -36,6 +36,8 @@ npm run release -- 0.3.0 --dry-run   # comprueba que todo está listo y enseña 
 npm run release -- 0.3.0             # o patch, minor o major
 ```
 
-Sube el número en `package.json`, pasa las pruebas, crea el commit y la etiqueta, lo sube a GitHub, crea la release con el paquete compilado y lo publica en npm. Quien ya tenga vipcode verá el aviso de versión nueva en menos de un día.
+Antes de publicar, apunta los cambios en [CHANGELOG.md](CHANGELOG.md), en «Sin publicar»: el script los pasa a la versión nueva con su fecha y los usa como notas de la release de GitHub.
+
+El script sube el número en `package.json`, pasa las pruebas, crea el commit y la etiqueta, lo sube a GitHub, crea la release con el paquete compilado y lo publica en npm. Quien ya tenga vipcode verá el aviso de versión nueva en menos de un día.
 
 Si se crea la release de GitHub pero `npm publish` no termina (por ejemplo, porque no se completa la verificación en dos pasos), basta con ejecutar `npm publish` en la carpeta del proyecto.
