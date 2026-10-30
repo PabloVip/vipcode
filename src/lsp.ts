@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Config, LspServerConfig } from "./config.js";
 import { debugLog } from "./debug.js";
-import { killTree, spawnProgram } from "./shell.js";
+import { killTree, spawnProgram, withoutSecrets } from "./shell.js";
 
 export interface Diagnostic {
   line: number;
@@ -138,7 +138,7 @@ class LspClient {
     // En Windows muchos servidores son .cmd (instalados con npm)
     this.child = spawnProgram(command[0], command.slice(1), {
       cwd: root,
-      env: { ...process.env, ...(spec.env || {}) },
+      env: { ...withoutSecrets(), ...(spec.env || {}) },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });

@@ -1,10 +1,36 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServerConfig } from "./config.js";
 import { debugLog } from "./debug.js";
 import { type Tool, truncate } from "./tools.js";
+
+// {env:NOMBRE} se cambia por esa variable de tu entorno (vacío si no existe): así se le pasa a un servidor solo lo que
+// necesita, sin escribir la clave en la configuración
+export function expandEnv(text: string): string {
+  return text.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name: string) => process.env[name] ?? "");
+}
+
+// Además de lo imprescindible para arrancar (PATH, HOME…, lo mismo que deja el SDK de MCP): idioma, carpetas temporales,
+// proxy y certificados, que no son claves
+const EXTRA_INHERITED = ["LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TMP", "TEMP", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "COMSPEC", "PATHEXT"];
+
+// Variables de un servidor MCP local. No hereda tu entorno entero: si el paquete del servidor estuviera comprometido
+// (como pasa a veces con paquetes de npm), se llevaría tus claves y todo lo demás. Lo que necesite, en "environment"
+export function serverEnvironment(environment: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = getDefaultEnvironment();
+  for (const name of EXTRA_INHERITED) {
+    const value = process.env[name];
+    if (value !== undefined && !value.startsWith("()")) {
+      env[name] = value;
+    }
+  }
+  for (const [name, value] of Object.entries(environment)) {
+    env[name] = expandEnv(String(value));
+  }
+  return env;
+}
 
 export interface McpStatus {
   name: string;
@@ -134,7 +160,8 @@ export class McpManager {
         throw new Error("falta la url del servidor remoto");
       }
       const url = new URL(config.url);
-      const requestInit = { headers: config.headers || {} };
+      const headers = Object.fromEntries(Object.entries(config.headers || {}).map(([name, value]) => [name, expandEnv(String(value))]));
+      const requestInit = { headers };
       try {
         await withTimeout(client.connect(new StreamableHTTPClientTransport(url, { requestInit })), "conectar");
       } catch (err) {
@@ -155,17 +182,10 @@ export class McpManager {
       if (command.length === 0) {
         throw new Error("falta el comando del servidor local");
       }
-      const env: Record<string, string> = {};
-      for (const [key, value] of Object.entries(process.env)) {
-        if (value !== undefined) {
-          env[key] = value;
-        }
-      }
-      Object.assign(env, config.environment || {});
       const transport = new StdioClientTransport({
         command: command[0],
         args: command.slice(1),
-        env,
+        env: serverEnvironment(config.environment),
         cwd: config.cwd || this.root,
         // Su salida de errores no debe ensuciar la pantalla
         stderr: "pipe",

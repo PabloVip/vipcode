@@ -67,6 +67,14 @@ export function splitCommand(command: string): string[] {
     .filter((part) => part.length > 0);
 }
 
+// Lo que se pregunta siempre, aunque una regla o un «sí siempre» de la sesión permita ese comando: sustituciones
+// ($(…), `…`), escribir en ficheros (> o --output) y retornos de carro que pueden disfrazarlo. Si no, «ls > ~/.zshrc»
+// pasaría por «ls*», o «echo x > fichero» por un «sí siempre» a echo
+export function alwaysAsk(command: string): boolean {
+  const writes = /[<>]\(|>/.test(command.replace(HARMLESS_REDIRECTS, " ")) || /--output\b|\r/.test(command);
+  return writes || /\$\(|`/.test(command);
+}
+
 export function evaluate(config: PermissionConfig, kind: Permission, subject: string): PermissionAction {
   if (kind === "none") {
     return "allow";
@@ -88,11 +96,7 @@ export function evaluate(config: PermissionConfig, kind: Permission, subject: st
   for (const part of parts) {
     result = strictest(result, matchRules(config.bash, part, "ask"));
   }
-  // Una sustitución $(...) o `...` puede esconder cualquier cosa
-  // Sustituciones, escribir en ficheros (> o --output) y saltos de línea raros siempre se preguntan,
-  // aunque el comando esté permitido (si no, «ls > ~/.zshrc» pasaría por «ls*»)
-  const writes = /[<>]\(|>/.test(subject.replace(HARMLESS_REDIRECTS, " ")) || /--output\b|\r/.test(subject);
-  if (/\$\(|`/.test(subject) || writes) {
+  if (alwaysAsk(subject)) {
     result = strictest(result, "ask");
   }
   return result;
@@ -139,7 +143,8 @@ export class SessionGrants {
       return false;
     }
     if (kind === "bash") {
-      if (/\$\(|`/.test(subject)) {
+      // «Sí siempre a este comando» no cubre que escriba en ficheros ni que lleve sustituciones
+      if (alwaysAsk(subject)) {
         return false;
       }
       const parts = splitCommand(subject);

@@ -15,4 +15,11 @@ server.registerTool(
   async ({ a, b }) => ({ content: [{ type: "text", text: String(a + b) }] }),
 );
 
+// Qué le llega del entorno: no debe heredar tus claves, solo lo que se le pase en "environment"
+server.registerTool(
+  "entorno",
+  { description: "Variables que recibe el servidor", inputSchema: {}, annotations: { readOnlyHint: true } },
+  async () => ({ content: [{ type: "text", text: JSON.stringify({ gemini: process.env.GEMINI_API_KEY ?? null, pasada: process.env.PASADA ?? null, path: Boolean(process.env.PATH) }) }] }),
+);
+
 await server.connect(new StdioServerTransport());

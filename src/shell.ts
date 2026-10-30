@@ -12,6 +12,21 @@ export function spawnProgram(command: string, args: string[], options: SpawnOpti
   return spawn(command, args, options);
 }
 
+// Nombres de variables que suelen guardar claves (GEMINI_API_KEY, GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY…)
+const SECRET_NAME = /(^|_)(API_?KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|AUTH)(_|$)/i;
+
+// Tu entorno sin las claves, para los programas que vipcode arranca por su cuenta (los servidores de lenguaje): no
+// las necesitan, y así no se las podría llevar uno que estuviera comprometido
+export function withoutSecrets(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const clean: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined && !SECRET_NAME.test(name)) {
+      clean[name] = value;
+    }
+  }
+  return clean;
+}
+
 // Para un programa y todo lo que haya lanzado. En Windows no hay grupos de procesos: taskkill /T recorre los hijos
 export function killTree(child: ChildProcess) {
   if (process.platform === "win32" && child.pid) {

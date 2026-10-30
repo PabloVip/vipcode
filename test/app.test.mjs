@@ -127,21 +127,30 @@ test("MCP: conecta un servidor local y el agente usa su herramienta", async () =
   const mock = await startMock(({ body }) => {
     const last = lastMessage(body);
     if (last.role === "user") {
-      return { tools: [{ name: "calc_sumar", args: { a: 2, b: 3 } }] };
+      return { tools: [{ name: lastUserText(body).includes("entorno") ? "calc_entorno" : "calc_sumar", args: { a: 2, b: 3 } }] };
     }
     return { text: `resultado ${contentText(last.content)}` };
   });
   const ws = tempWorkspace();
+  // Una clave en tu entorno que el servidor no debe recibir, y una variable que se le pasa a propósito
+  process.env.GEMINI_API_KEY = "clave-que-no-debe-salir";
+  process.env.VIPCODE_PRUEBA_MCP = "valor-pasado";
   const { app, events } = makeApp(ws, mock.url, {
-    mcp: { calc: { type: "local", command: ["node", path.join(ROOT, "test", "fixtures", "mcp-server.mjs")] } },
+    mcp: { calc: { type: "local", command: ["node", path.join(ROOT, "test", "fixtures", "mcp-server.mjs")], environment: { PASADA: "{env:VIPCODE_PRUEBA_MCP}" } } },
   });
   await app.startMcp();
   assert.deepEqual(
     app.mcp.status().map((s) => [s.name, s.state, s.tools]),
-    [["calc", "conectado", 1]],
+    [["calc", "conectado", 2]],
   );
   await app.runPrompt({ text: "suma 2 y 3" }, {});
   assert.match(events.text, /resultado 5/);
+  // No hereda tu entorno entero: ni la clave de Gemini; sí PATH y lo que se le pasa con {env:…}
+  events.text = "";
+  await app.runPrompt({ text: "dime tu entorno" }, {});
+  assert.match(events.text, /resultado \{"gemini":null,"pasada":"valor-pasado","path":true\}/);
+  delete process.env.GEMINI_API_KEY;
+  delete process.env.VIPCODE_PRUEBA_MCP;
   const definition = mock.chats()[0].body.tools.find((tool) => tool.function.name === "calc_sumar");
   assert.equal(definition.function.parameters.type, "object");
   assert.ok(!("$schema" in definition.function.parameters));

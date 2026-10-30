@@ -850,3 +850,37 @@ test("límites: lo que dicen las cabeceras x-ratelimit de cada proveedor", () =>
   assert.equal(router.readLimitHeaders(new Headers({ "content-type": "text/event-stream" }), groq, now), null);
   assert.equal(router.readLimitHeaders(undefined, groq, now), null);
 });
+
+test("seguridad: «sí siempre» a un comando no deja escribir ficheros, y los programas que arranca vipcode no reciben tus claves", async () => {
+  const grants = new permissions.SessionGrants();
+  grants.allowPattern("bash", "echo*");
+  assert.ok(grants.allows("bash", "echo hola"));
+  assert.ok(grants.allows("bash", "echo hola 2>&1"));
+  for (const sneaky of ["echo x > fichero", "echo x >> ~/.zshrc", "echo x --output fichero", "echo $(id)", "echo `id`", "echo hola && rm -rf x"]) {
+    assert.equal(grants.allows("bash", sneaky), false, sneaky);
+  }
+  // «Sí a todo lo de este tipo» (y --yolo) sigue siendo todo
+  grants.allowKind("bash");
+  assert.ok(grants.allows("bash", "echo x > fichero"));
+  // Servidores de lenguaje: tu entorno sin las claves
+  const { withoutSecrets } = await import("../dist/shell.js");
+  const env = withoutSecrets({ PATH: "/bin", GOPATH: "/go", GEMINI_API_KEY: "a", GITHUB_TOKEN: "b", AWS_SECRET_ACCESS_KEY: "c", DB_PASSWORD: "d", OPENAI_APIKEY: "e", KEYBOARD: "es" });
+  assert.deepEqual(Object.keys(env).sort(), ["GOPATH", "KEYBOARD", "PATH"]);
+  // Servidores MCP: lo imprescindible y lo que se les pasa en "environment" ({env:NOMBRE} es una variable tuya)
+  const mcp = await import("../dist/mcp.js");
+  process.env.VIPCODE_PRUEBA_SECRETA = "secreto";
+  process.env.VIPCODE_PRUEBA_PASADA = "pasada";
+  const server = mcp.serverEnvironment({ TOKEN: "{env:VIPCODE_PRUEBA_PASADA}", FIJA: "x", NADA: "{env:VIPCODE_NO_EXISTE}" });
+  assert.equal(server.VIPCODE_PRUEBA_SECRETA, undefined);
+  assert.equal(server.TOKEN, "pasada");
+  assert.equal(server.FIJA, "x");
+  assert.equal(server.NADA, "");
+  assert.ok(server.PATH || server.Path);
+  delete process.env.VIPCODE_PRUEBA_SECRETA;
+  delete process.env.VIPCODE_PRUEBA_PASADA;
+  // Al pedir confianza en una carpeta, se dice qué variables tuyas recibiría cada servidor MCP
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-mcp-env-"));
+  fs.writeFileSync(path.join(root, "vipcode.json"), JSON.stringify({ mcp: { raro: { command: ["npx", "raro"], environment: { K: "{env:AWS_SECRET_ACCESS_KEY}" } } } }));
+  assert.ok(trust.projectTrust(root).changes.some((change) => change.includes("recibe tus variables AWS_SECRET_ACCESS_KEY")));
+  fs.rmSync(root, { recursive: true, force: true });
+});

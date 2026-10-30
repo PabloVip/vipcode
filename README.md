@@ -153,7 +153,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
     "webfetch": "allow"
   },
   "mcp": {
-    "github": { "type": "local", "command": ["npx", "-y", "@modelcontextprotocol/server-github"], "environment": { "GITHUB_PERSONAL_ACCESS_TOKEN": "..." } }
+    "github": { "type": "local", "command": ["npx", "-y", "@modelcontextprotocol/server-github"], "environment": { "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_TOKEN}" } }
   },
   "keyless": true,
   "checkUpdates": true
@@ -163,7 +163,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 - **order**: modelos que van primero. **disabledProviders**: proveedores que no quieres usar.
 - **providers**: un servidor tuyo compatible con la API de OpenAI (o cambios en los modelos de uno del catálogo).
 - **permission**: `allow`, `ask` o `deny` para `edit`, `bash`, `webfetch` y `mcp`; en `bash` y `mcp` gana el patrón más concreto. Las reglas `deny` se respetan incluso con `--yolo`.
-- **mcp**: servidores MCP locales (`command`) o remotos (`url`); los que piden iniciar sesión con OAuth todavía no funcionan.
+- **mcp**: servidores MCP locales (`command`) o remotos (`url`); los que piden iniciar sesión con OAuth todavía no funcionan. Un servidor local no recibe tus variables de entorno (ni tus claves), solo lo imprescindible para arrancar: lo que necesite, ponlo en `environment`. Ahí y en `headers`, `{env:NOMBRE}` se cambia por esa variable tuya.
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
 
 Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash) y `VIPCODE_BROWSER` (otro navegador).
@@ -240,6 +240,7 @@ Después de cada edición, le pasa al modelo los errores que encuentre el servid
 - **Permisos.** Antes de editar un fichero, ejecutar un comando, salir a internet o usar una herramienta MCP, vipcode pregunta. Solo se aprueban solos unos pocos comandos que no cambian nada (`git status`, `git diff`, `git log`, `ls`…). Con `--yolo` o `/yolo` se aprueba todo menos lo que tengas en `deny`: úsalo solo en carpetas sin nada que perder.
 - **Carpetas en las que confías.** Un proyecto puede traer su propia configuración de vipcode, y eso podría arrancar programas o mandar tus claves a otro sitio. Por eso vipcode no la usa hasta que confías en la carpeta: te enseña qué cambiaría y te pregunta (`vipcode trust` y `vipcode untrust` lo cambian a mano).
 - **Ficheros.** Solo lee y escribe dentro de la carpeta del proyecto, y no puede leer ni cambiar tus claves ni su configuración.
+- **Tus claves.** Los servidores MCP y de lenguaje que arranca vipcode no reciben tus claves: si el paquete de uno estuviera comprometido, no podría llevárselas. «Sí siempre a este comando» tampoco vale si el comando escribe en un fichero (`>`) o lleva `$(…)`: eso se pregunta siempre.
 - **Tus datos.** vipcode no envía datos de uso a nadie: solo habla con los proveedores de IA que uses, con las webs que consulte el agente, con tus servidores MCP, con LLM Stats si le das tu clave y, una vez al día, con npm y GitHub para ver si hay versión nueva.
 - **Planes gratuitos.** Los proveedores sin clave y varios planes gratis pueden guardar lo que les envías o usarlo para entrenar sus modelos. No mandes contraseñas ni código confidencial; para eso usa un modelo local (Ollama, LM Studio) y pon `"keyless": false` en la configuración.
 

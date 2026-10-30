@@ -66,7 +66,9 @@ function describeConfig(data: Record<string, unknown>): string[] {
     } else if (key === "mcp" && isObject(value)) {
       const servers = Object.entries(value).map(([name, server]) => {
         const detail = isObject(server) ? server.command || server.url : server;
-        return `${name} (${short(detail)})`;
+        // Las variables de tu entorno que se le pasan con {env:NOMBRE}
+        const uses = [...new Set([...JSON.stringify(server).matchAll(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g)].map((m) => m[1]))];
+        return `${name} (${short(detail)}${uses.length > 0 ? `; recibe tus variables ${uses.join(", ")}` : ""})`;
       });
       changes.push(`servidores MCP que se arrancan solos: ${servers.join(", ")}`);
     } else if (key === "lsp" && isObject(value)) {
