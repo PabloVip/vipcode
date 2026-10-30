@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.2.15] - 2026-10-30
+
 ### Añadido
 
 - `/interfaz` para elegir cómo se ve vipcode, y se guarda para la próxima vez: pantalla completa (la de serie), clásica (la conversación en la terminal normal), compacta (sin espacios ni bordes de más), alto contraste (sin texto atenuado y con colores vivos, también para fondos claros) y zen (lo justo). Al pasar a la clásica o volver de ella se rehace la pantalla y sigue la misma conversación.
@@ -190,7 +192,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.14...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.15...HEAD
+[0.2.15]: https://github.com/PabloVip/vipcode/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/PabloVip/vipcode/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/PabloVip/vipcode/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/PabloVip/vipcode/compare/v0.2.11...v0.2.12
