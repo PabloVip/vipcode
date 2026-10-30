@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Box, Static, Text, render, useAnimation, useApp, useInput, usePaste, useWindowSize } from "ink";
+import { Box, type DOMElement, Static, Text, render, renderToString, useAnimation, useApp, useBoxMetrics, useInput, usePaste, useWindowSize } from "ink";
 import pc from "picocolors";
+import sliceAnsi from "slice-ansi";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ToolEndEvent, ToolEvent, UserInput } from "../agent.js";
 import type { App, Progress, RunOptions, SelectItem, UiAdapter } from "../app.js";
@@ -19,10 +20,12 @@ import { showControl, stripControl, stripUnsafe } from "../sanitize.js";
 import { type Session, appendHistory, loadHistory, sessionMarkdownPath } from "../session.js";
 import { type Todo, suggestFiles } from "../tools.js";
 import { type TutorialCard, tutorialCard } from "../tutorial.js";
+import { copyToClipboard } from "../clipboard.js";
 import { colorPreview } from "../ui.js";
 import { CHECK_MS, checkForUpdate, stepProgress } from "../update.js";
 import { type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
 import * as E from "./editor.js";
+import { MOUSE_OFF, MOUSE_ON, type TextPos, mouseEvents, selectedColumns, selectedText } from "./mouse.js";
 
 
 type Item =
@@ -234,6 +237,13 @@ function toolDetail(event: ToolEndEvent): string[] {
 }
 
 // El resumen sale de lo que pidió el modelo (comandos, rutas): los caracteres de control se ven, no actúan
+// Lo que está haciendo una herramienta, en una línea: un comando de varias líneas ocuparía media pantalla (y no dejaría
+// sitio al diálogo de permiso, donde va entero)
+function oneLine(text: string): string {
+  const [first, ...rest] = text.split("\n");
+  return rest.length > 0 ? `${first} …` : text;
+}
+
 function ToolHeader(props: { name: string; summary: string }) {
   return (
     <>
@@ -594,7 +604,7 @@ function permissionRoom(rows: number): number {
   return Math.max(6, rows - 16);
 }
 
-function StatusBar(props: { app: App; agentName: string; busy: boolean; model: string; width: number }) {
+function StatusBar(props: { app: App; agentName: string; busy: boolean; model: string; width: number; flash?: string | null }) {
   const { app } = props;
   const agent = app.agents.find((item) => item.name === props.agentName);
   const current = props.model || app.router.pinned || app.agent.lastSlot;
@@ -614,7 +624,9 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   }
   // A la derecha, la ayuda (y su versión corta por si no cabe)
   let hint = { text: "ctrl+p comandos · /help", short: "/help", color: undefined as string | undefined, bold: false };
-  if (props.busy) {
+  if (props.flash) {
+    hint = { text: props.flash, short: props.flash, color: "green", bold: false };
+  } else if (props.busy) {
     hint = { text: "esc interrumpe · escribe para añadir instrucciones", short: "esc interrumpe", color: undefined, bold: false };
   } else if (app.updateInstalled) {
     hint = { text: "✓ vipcode actualizado · ciérralo y vuelve a abrirlo para usarlo", short: "✓ reinicia vipcode", color: "green", bold: false };
@@ -698,7 +710,7 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   );
 }
 
-function Main(props: { app: App; initial: string }) {
+function Main(props: { app: App; initial: string; fullscreen: boolean }) {
   const { app } = props;
   const { exit } = useApp();
   const { columns, rows } = useWindowSize();
@@ -709,6 +721,26 @@ function Main(props: { app: App; initial: string }) {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [todos, setTodos] = useState<Todo[]>(app.agent.session.todos);
   const [progress, setProgress] = useState<(Progress & { since: number; stepSince: number }) | null>(null);
+  // Pantalla completa: la conversación ya pintada, línea a línea (cada mensaje se pinta una vez para cada ancho), y
+  // hasta dónde se ha subido (null: abajo del todo, siguiendo lo que llega)
+  const painted = useRef(new Map<number, { width: number; lines: string[] }>());
+  const [scrollTop, setScrollTop] = useState<number | null>(null);
+  const historyRef = useRef<DOMElement>(null);
+  const historyBox = useBoxMetrics(historyRef);
+  const scrollState = useRef({ lines: 0, height: 1 });
+  // Lo seleccionado arrastrando con el ratón sobre la conversación (se copia al soltar), dónde empezó el arrastre y lo
+  // que se ve ahora (para saber qué línea hay bajo el ratón)
+  const [selection, setSelection] = useState<{ from: TextPos; to: TextPos } | null>(null);
+  const dragStart = useRef<TextPos | null>(null);
+  const view = useRef({ lines: [] as string[], top: 0, height: 1 });
+  // Un aviso corto en la barra de abajo («✓ copiado»)
+  const [flash, setFlash] = useState<string | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showFlash = (text: string) => {
+    clearTimeout(flashTimer.current ?? undefined);
+    setFlash(text);
+    flashTimer.current = setTimeout(() => setFlash(null), 2500);
+  };
   const [attachments, setAttachments] = useState<string[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
   const [suggestionsClosed, setSuggestionsClosed] = useState(false);
@@ -919,6 +951,9 @@ function Main(props: { app: App; initial: string }) {
     }
     setEditor(E.EMPTY);
     historyIndex.current = null;
+    // Al escribir se vuelve abajo del todo (y se quita lo seleccionado)
+    setScrollTop(null);
+    setSelection(null);
     if (text !== "") {
       appendHistory(text);
       history.current.push(text);
@@ -1303,7 +1338,151 @@ function Main(props: { app: App; initial: string }) {
     push({ kind: "info", text: `Imagen adjuntada: ${label}` });
   };
 
+  // La conversación, línea a línea, para la pantalla completa. Cada mensaje se pinta con renderToString en un
+  // temporizador, fuera de React: mientras Ink pinta (o en sus efectos) no se puede, y rompe su cálculo de tamaños
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const columnsRef = useRef(columns);
+  columnsRef.current = columns;
+  const [paintedCount, setPaintedCount] = useState(0);
+  const paintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!props.fullscreen || paintTimer.current) {
+      return;
+    }
+    paintTimer.current = setTimeout(() => {
+      paintTimer.current = null;
+      const width = columnsRef.current;
+      let changed = false;
+      for (const item of itemsRef.current) {
+        const done = painted.current.get(item.id);
+        if (done && done.width === width) {
+          continue;
+        }
+        const text = renderToString(
+          <Box width={width} flexDirection="column">
+            <ItemView item={item} app={app} width={width} />
+          </Box>,
+          { columns: width },
+        );
+        painted.current.set(item.id, { width, lines: text.split("\n") });
+        changed = true;
+      }
+      if (changed) {
+        setPaintedCount((count) => count + 1);
+      }
+    }, 0);
+  }, [items, columns]);
+  useEffect(
+    () => () => {
+      clearTimeout(paintTimer.current ?? undefined);
+      clearTimeout(flashTimer.current ?? undefined);
+    },
+    [],
+  );
+  const historyLines = useMemo(() => {
+    const lines: string[] = [];
+    for (const item of props.fullscreen ? items : []) {
+      const done = painted.current.get(item.id);
+      if (done && done.width === columns) {
+        lines.push(...done.lines);
+      }
+    }
+    return lines;
+  }, [items, columns, paintedCount]);
+  const viewHeight = historyBox.hasMeasured ? Math.max(1, historyBox.height) : Math.max(3, rows - 8);
+  scrollState.current = { lines: historyLines.length, height: viewHeight };
+  // La primera línea que se ve: abajo del todo si no has subido
+  const maxTop = Math.max(0, historyLines.length - viewHeight);
+  const top = scrollTop === null ? maxTop : Math.min(scrollTop, maxTop);
+  view.current = { lines: historyLines, top, height: viewHeight };
+
+  // Sube o baja la conversación; al llegar abajo del todo vuelve a seguir lo que llega
+  const scrollBy = (delta: number) => {
+    const { lines, height } = scrollState.current;
+    const max = Math.max(0, lines - height);
+    setScrollTop((current) => {
+      const next = (current ?? max) + delta;
+      return next >= max ? null : Math.max(0, next);
+    });
+  };
+
+  // AvPág/RePág, también con un diálogo abierto (para leer lo de arriba antes de contestar), salvo en las listas, que
+  // los usan para moverse por ellas
+  useInput(
+    (_input, key) => {
+      if (dialog?.kind !== "select" && (key.pageUp || key.pageDown)) {
+        scrollBy((key.pageUp ? -1 : 1) * Math.max(1, scrollState.current.height - 2));
+      }
+    },
+    { isActive: props.fullscreen },
+  );
+
+  // Con la pantalla completa, la terminal le manda el ratón a vipcode (la rueda mueve la conversación); al salir, también
+  // si sale de golpe, deja de hacerlo
+  useEffect(() => {
+    if (!props.fullscreen || !process.stdout.isTTY) {
+      return;
+    }
+    process.stdout.write(MOUSE_ON);
+    // Cada trozo que lee Ink también llega aquí, sin quitárselo
+    const onData = (chunk: Buffer | string) => {
+      for (const event of mouseEvents(String(chunk))) {
+        if (event.kind === "wheel") {
+          scrollBy(event.delta * 3);
+          continue;
+        }
+        const { lines, top, height } = view.current;
+        // La línea de la conversación que hay bajo el ratón (si está más abajo, la última que se ve)
+        const pos = { line: Math.max(0, Math.min(top + Math.min(event.y, height - 1), lines.length - 1)), col: event.x };
+        if (event.kind === "press") {
+          // Fuera de la conversación (en la caja o la barra) no se selecciona; un clic quita lo seleccionado
+          dragStart.current = event.y < height ? pos : null;
+          setSelection(dragStart.current ? { from: pos, to: pos } : null);
+        } else if (event.kind === "drag" && dragStart.current) {
+          // Contra el borde de arriba o por debajo de la conversación, se va moviendo para seguir seleccionando
+          if (event.y <= 0) {
+            scrollBy(-1);
+          } else if (event.y >= height) {
+            scrollBy(1);
+          }
+          setSelection({ from: dragStart.current, to: pos });
+        } else if (event.kind === "release" && dragStart.current) {
+          const start = dragStart.current;
+          dragStart.current = null;
+          if (start.line === pos.line && start.col === pos.col) {
+            setSelection(null);
+            continue;
+          }
+          setSelection({ from: start, to: pos });
+          const text = selectedText(lines, start, pos);
+          if (text.trim() !== "") {
+            void copyToClipboard(text).then((how) => showFlash(how ? "✓ copiado" : "No he podido copiarlo: prueba con /copiar"));
+          }
+        }
+      }
+    };
+    process.stdin.on("data", onData);
+    const off = () => {
+      try {
+        fs.writeSync(process.stdout.fd, MOUSE_OFF);
+      } catch {
+        // la terminal ya no está
+      }
+    };
+    process.on("exit", off);
+    return () => {
+      process.stdin.off("data", onData);
+      off();
+      process.off("exit", off);
+    };
+  }, []);
+
   useInput((input, key) => {
+    // AvPág/RePág mueven la conversación (lo hace el useInput de arriba)
+    if (props.fullscreen && (key.pageUp || key.pageDown)) {
+      return;
+    }
     // Ctrl+C funciona siempre: interrumpe, cierra el diálogo, borra lo escrito o sale
     if (key.ctrl && input === "c") {
       if (busy && controller.current) {
@@ -1536,6 +1715,110 @@ function Main(props: { app: App; initial: string }) {
     placeholder = "Escribe para añadir instrucciones mientras trabaja…";
   }
 
+  // Lo de abajo: lo que está pasando ahora, la caja de escribir (o el diálogo) y la barra
+  const bottom = (
+    <Box flexDirection="column" flexShrink={0}>
+      {live.current.reasoning ? (
+        <Text dimColor italic wrap="truncate-end">
+          💭 {lastLines(stripControl(live.current.reasoning).replace(/\s+/g, " "), 1).slice(-Math.max(20, columns - 6))}
+        </Text>
+      ) : null}
+      {liveText ? (
+        <Box marginTop={1}>
+          <Bullet color={color} />
+          <Box flexDirection="column" flexGrow={1}>
+            <Text>
+              {liveText}
+              <Text color={color}>▍</Text>
+            </Text>
+          </Box>
+        </Box>
+      ) : null}
+      {running.map(({ event, progress, since }) => (
+        <Box key={`${event.depth}:${event.id}`} flexDirection="column" marginLeft={event.depth > 0 ? 4 : 0}>
+          <Text wrap="truncate-end">
+            <Spinner /> <ToolHeader name={event.name} summary={oneLine(event.summary)} /> <Elapsed since={since} hideUnderMs={2000} />
+          </Text>
+          {progress ? (
+            <Text dimColor wrap="truncate-end">
+              {"    "}
+              {lastLines(stripControl(progress), 1).slice(0, Math.max(20, columns - 8))}
+            </Text>
+          ) : null}
+        </Box>
+      ))}
+      {shell ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text>
+            <Spinner color="yellow" /> <Text bold>{showControl(shell.command)}</Text> <Elapsed since={startedAt.current} hideUnderMs={1000} />
+          </Text>
+          {shell.output ? <Text dimColor>{lastLines(stripControl(shell.output), Math.min(8, liveRoom)).replace(/^/gm, "  ")}</Text> : null}
+        </Box>
+      ) : null}
+      <TodoPanel todos={todos} />
+      {progress ? <ProgressBar progress={progress} width={columns} /> : null}
+      {busy && !shell && running.length === 0 && !liveText && !answered.current ? (
+        <Box marginTop={1}>
+          <Text wrap="truncate-end">
+            <Spinner /> <Text dimColor>Pensando{live.current.model ? ` con ${live.current.model}` : ""}… </Text>
+            <Elapsed since={startedAt.current} hideUnderMs={1000} />
+          </Text>
+        </Box>
+      ) : null}
+      {dialogView || (
+        <InputBox
+          editor={editor}
+          color={color}
+          placeholder={placeholder}
+          attachments={attachments.length}
+          maxLines={Math.max(3, Math.floor(rows / 2) - 4)}
+          width={columns}
+        />
+      )}
+      {suggestionsVisible && !dialog ? (
+        <Box flexDirection="column" paddingX={2}>
+          {suggestions.map((suggestion, index) => (
+            <Text key={`${index}-${suggestion.label}`} color={index === selected ? "cyan" : undefined} wrap="truncate-end">
+              {index === selected ? "❯ " : "  "}
+              {suggestion.label}
+              {suggestion.description ? <Text dimColor> {suggestion.description}</Text> : null}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+      <StatusBar app={app} agentName={agentName} busy={busy} model={busy ? live.current.model : ""} width={columns} flash={flash} />
+    </Box>
+  );
+
+  if (props.fullscreen) {
+    // Lo que se ve de la conversación, con lo seleccionado en vídeo inverso; si has subido, la última línea dice cuánto
+    // queda por debajo
+    let visible = historyLines.slice(top, top + viewHeight).map((line, index) => {
+      const range = selection ? selectedColumns(top + index, selection.from, selection.to) : null;
+      if (!range || (selection!.from.line === selection!.to.line && selection!.from.col === selection!.to.col)) {
+        return line;
+      }
+      const [from, to] = range;
+      return `${sliceAnsi(line, 0, from)}${pc.inverse(stripControl(sliceAnsi(line, from, to)))}${sliceAnsi(line, to)}`;
+    });
+    const below = historyLines.length - (top + viewHeight);
+    if (scrollTop !== null && below > 0) {
+      visible = [...visible.slice(0, -1), pc.dim(`↓ ${below} líneas más · rueda del ratón o AvPág para bajar`)];
+    }
+    return (
+      <Box flexDirection="column" width={columns} height={rows}>
+        <Box ref={historyRef} flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
+          {visible.map((line, index) => (
+            <Text key={index} wrap="truncate-end">
+              {line || " "}
+            </Text>
+          ))}
+        </Box>
+        {bottom}
+      </Box>
+    );
+  }
+
   return (
     <>
       {/* Con el ancho fijo: si no, Ink parte las líneas largas al ancho de la terminal sin contar lo que llevan delante
@@ -1547,87 +1830,24 @@ function Main(props: { app: App; initial: string }) {
           </Box>
         )}
       </Static>
-      <Box flexDirection="column">
-        {live.current.reasoning ? (
-          <Text dimColor italic wrap="truncate-end">
-            💭 {lastLines(stripControl(live.current.reasoning).replace(/\s+/g, " "), 1).slice(-Math.max(20, columns - 6))}
-          </Text>
-        ) : null}
-        {liveText ? (
-          <Box marginTop={1}>
-            <Bullet color={color} />
-            <Box flexDirection="column" flexGrow={1}>
-              <Text>
-                {liveText}
-                <Text color={color}>▍</Text>
-              </Text>
-            </Box>
-          </Box>
-        ) : null}
-        {running.map(({ event, progress, since }) => (
-          <Box key={`${event.depth}:${event.id}`} flexDirection="column" marginLeft={event.depth > 0 ? 4 : 0}>
-            <Text wrap="truncate-end">
-              <Spinner /> <ToolHeader name={event.name} summary={event.summary} /> <Elapsed since={since} hideUnderMs={2000} />
-            </Text>
-            {progress ? (
-              <Text dimColor wrap="truncate-end">
-                {"    "}
-                {lastLines(stripControl(progress), 1).slice(0, Math.max(20, columns - 8))}
-              </Text>
-            ) : null}
-          </Box>
-        ))}
-        {shell ? (
-          <Box flexDirection="column" marginTop={1}>
-            <Text>
-              <Spinner color="yellow" /> <Text bold>{showControl(shell.command)}</Text> <Elapsed since={startedAt.current} hideUnderMs={1000} />
-            </Text>
-            {shell.output ? <Text dimColor>{lastLines(stripControl(shell.output), Math.min(8, liveRoom)).replace(/^/gm, "  ")}</Text> : null}
-          </Box>
-        ) : null}
-        <TodoPanel todos={todos} />
-        {progress ? <ProgressBar progress={progress} width={columns} /> : null}
-        {busy && !shell && running.length === 0 && !liveText && !answered.current ? (
-          <Box marginTop={1}>
-            <Text wrap="truncate-end">
-              <Spinner /> <Text dimColor>Pensando{live.current.model ? ` con ${live.current.model}` : ""}… </Text>
-              <Elapsed since={startedAt.current} hideUnderMs={1000} />
-            </Text>
-          </Box>
-        ) : null}
-        {dialogView || (
-          <InputBox
-            editor={editor}
-            color={color}
-            placeholder={placeholder}
-            attachments={attachments.length}
-            maxLines={Math.max(3, Math.floor(rows / 2) - 4)}
-            width={columns}
-          />
-        )}
-        {suggestionsVisible && !dialog ? (
-          <Box flexDirection="column" paddingX={2}>
-            {suggestions.map((suggestion, index) => (
-              <Text key={`${index}-${suggestion.label}`} color={index === selected ? "cyan" : undefined} wrap="truncate-end">
-                {index === selected ? "❯ " : "  "}
-                {suggestion.label}
-                {suggestion.description ? <Text dimColor> {suggestion.description}</Text> : null}
-              </Text>
-            ))}
-          </Box>
-        ) : null}
-        <StatusBar app={app} agentName={agentName} busy={busy} model={busy ? live.current.model : ""} width={columns} />
-      </Box>
+      {bottom}
     </>
   );
 }
 
 export async function startTui(app: App, options: { initial?: string } = {}) {
-  const instance = render(<Main app={app} initial={options.initial || ""} />, {
+  // Pantalla completa (salvo con "fullscreen": false): la conversación tiene su propio scroll
+  const fullscreen = app.config.fullscreen !== false;
+  const instance = render(<Main app={app} initial={options.initial || ""} fullscreen={fullscreen} />, {
     exitOnCtrlC: false,
     kittyKeyboard: { mode: "auto" },
+    alternateScreen: fullscreen,
   });
   await instance.waitUntilExit();
+  // La pantalla completa no deja la conversación en la terminal: se recuerda cómo seguir con ella
+  if (fullscreen && !app.relaunch && !app.installedVersion && app.agent.session.messages.length > 0) {
+    console.log(pc.dim("Conversación guardada: «vipcode -c» sigue con ella."));
+  }
   // Tras /update sigue abierta la versión de antes: se recuerda cómo abrir la nueva (salvo si ya se va a reiniciar)
   if (app.installedVersion && !app.relaunch) {
     console.log(pc.green(`✓ Abre vipcode otra vez para usar la versión ${stripControl(app.installedVersion)} (vipcode -c sigue con esta conversación).`));

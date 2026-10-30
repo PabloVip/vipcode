@@ -623,8 +623,16 @@ export class App {
       row("!comando", "lo ejecuta en la terminal; la salida le llega al agente con tu siguiente mensaje"),
       row("Esc", "interrumpe al agente (mientras trabaja puedes seguir escribiendo)"),
       row("Ctrl+C", "interrumpe o borra lo escrito; dos veces seguidas sale"),
-      row("Copiar", "selecciona con el ratón y Cmd+C (Mac), Ctrl+Shift+C (Linux) o Ctrl+C (Windows Terminal) · /copiar"),
     );
+    // Con la pantalla completa, el ratón lo maneja vipcode: la rueda mueve la conversación y arrastrar copia
+    if (this.config.fullscreen !== false) {
+      lines.push(
+        row("Rueda · AvPág · RePág", "sube y baja por la conversación (al escribir vuelves abajo)"),
+        row("Copiar", "arrastra con el ratón sobre la conversación: al soltar se copia solo · /copiar"),
+      );
+    } else {
+      lines.push(row("Copiar", "selecciona con el ratón y Cmd+C (Mac), Ctrl+Shift+C (Linux) o Ctrl+C (Windows Terminal) · /copiar"));
+    }
     return lines.join("\n");
   }
 

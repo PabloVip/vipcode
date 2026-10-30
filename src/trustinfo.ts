@@ -32,6 +32,7 @@ const SETTINGS: Record<string, string> = {
   checkUpdates: "los avisos de versiones nuevas",
   ranking: "el orden por puntuación",
   showReasoning: "si se ve lo que piensa el modelo",
+  fullscreen: "la pantalla completa",
 };
 
 function isObject(value: unknown): value is Json {

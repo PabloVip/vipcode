@@ -91,13 +91,16 @@ vipcode tutorial             # aprende lo básico en 5 pasos, en una carpeta de 
 - **!comando** lo ejecuta en la terminal sin salir de vipcode (por ejemplo `!git status`). El agente verá la salida con tu siguiente mensaje.
 - **Esc** interrumpe al agente. Mientras trabaja puedes seguir escribiendo: el mensaje se le entrega al acabar el paso.
 - **Ctrl+C** interrumpe, cierra el diálogo o borra lo escrito; dos veces seguidas sale.
-- **Copiar**: selecciona con el ratón y pulsa Cmd+C (Mac), Ctrl+Shift+C (Linux) o Ctrl+C (Windows Terminal). `/copiar` copia la última respuesta y `/copiar código`, su último bloque de código.
+- **La rueda del ratón**, **AvPág** y **RePág** suben y bajan por la conversación; la caja de escribir se queda abajo. Al escribir vuelves al final.
+- **Copiar**: arrastra con el ratón sobre la conversación y, al soltar, lo seleccionado se copia solo al portapapeles. `/copiar` copia la última respuesta y `/copiar código`, su último bloque de código. Para seleccionar como siempre lo hace la terminal (por ejemplo en la caja de escribir), mantén **Fn** (Terminal de macOS), **⌥** (iTerm2) o **Mayúsculas** (Windows y Linux) mientras arrastras.
 
 Antes de editar un fichero, ejecutar un comando o salir a internet, vipcode te enseña el cambio o el comando y pregunta. Puedes contestar que sí una vez, que sí a todo lo de ese tipo durante la sesión, que sí siempre a ese comando (por ejemplo `npm test*`), que no, o que no y decirle qué hacer.
 
 La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan gratis y cuánto contexto llevas gastado.
 
-Si quieres que lo que seleccionas se copie solo, actívalo en tu terminal (vipcode no puede hacerlo por ella):
+vipcode ocupa la pantalla completa mientras lo usas; al salir, la terminal vuelve a estar como antes y la conversación queda guardada (`vipcode -c` sigue con ella). Si prefieres que la conversación se quede en la terminal, pon `"fullscreen": false` en tu configuración.
+
+Con `"fullscreen": false`, lo que seleccionas se copia solo si lo activas en tu terminal:
 
 - **iTerm2**: viene activado (Ajustes → General → Selection).
 - **Windows Terminal**: Configuración → Interacción → «Copiar automáticamente la selección al portapapeles».
@@ -183,6 +186,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 - **permission**: `allow`, `ask` o `deny` para `edit`, `bash`, `webfetch` y `mcp`; en `bash` y `mcp` gana el patrón más concreto. Las reglas `deny` se respetan incluso con `--yolo`. Piénsatelo antes de poner `webfetch` en `allow`: un texto malicioso podría hacer que el modelo mande tus datos a una web sin preguntarte.
 - **mcp**: servidores MCP locales (`command`) o remotos (`url`); los que piden iniciar sesión con OAuth todavía no funcionan. Un servidor local no recibe tus variables de entorno (ni tus claves), solo lo imprescindible para arrancar: lo que necesite, ponlo en `environment`. Ahí y en `headers`, `{env:NOMBRE}` se cambia por esa variable tuya.
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
+- **fullscreen**: `false` para que la conversación se escriba en la terminal normal en vez de en pantalla completa (la rueda mueve entonces la terminal entera y se selecciona sin teclas).
 - **firstResponseMs**: cuánto se espera a que una IA empiece a contestar antes de probar otra (40000, unos 40 s; algo más con conversaciones largas). No cuenta para los modelos de tu ordenador.
 
 Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash), `VIPCODE_BROWSER` (otro navegador) y `VIPCODE_CLIPBOARD` (otro programa para copiar, que reciba el texto por su entrada).

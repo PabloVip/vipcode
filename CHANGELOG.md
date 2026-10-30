@@ -4,6 +4,15 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- Pantalla completa: la conversación tiene su propio scroll. La rueda del ratón, AvPág y RePág la mueven y la caja de escribir se queda abajo; al escribir vuelves al final. Al salir, la terminal queda como estaba y la conversación, guardada (`vipcode -c`). Con `"fullscreen": false` vuelve el modo de antes.
+- Copiar arrastrando: lo que seleccionas con el ratón sobre la conversación se copia solo al portapapeles al soltar, en cualquier terminal (también en la de macOS, que no sabe hacerlo).
+
+### Corregido
+
+- Un comando de varias líneas ya no ocupa media pantalla mientras se ejecuta (ni deja sin sitio al diálogo de permiso): se ve su primera línea.
+
 ## [0.2.12] - 2026-10-30
 
 ### Añadido

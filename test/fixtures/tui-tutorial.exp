@@ -33,8 +33,9 @@ expect {
 }
 libre
 send "arregla el fallo de @sal"
+# «❯ @saludo.js» es la línea de la lista de sugerencias (el texto del paso también dice @saludo.js)
 expect {
-  "@saludo.js" {}
+  "❯ @saludo.js" {}
   timeout { falla "no sugiere @saludo.js en la carpeta de prácticas" }
 }
 send "\t"

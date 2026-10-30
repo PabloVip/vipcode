@@ -89,7 +89,7 @@ expect {
 # 3. Autocompletado de @fichero con Tab
 send "mira @hol"
 expect {
-  "@hola.txt" {}
+  "❯ @hola.txt" {}
   timeout { falla "no sugiere @hola.txt" }
 }
 send "\t"
@@ -167,16 +167,26 @@ expect {
 }
 send "\r"
 expect {
-  "Conversación anterior" {}
-  timeout { falla "al cargar la sesión no se ve la conversación" }
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre tras cargar la sesión" }
+}
+# La pantalla completa se queda abajo, en lo último: la conversación anterior está encima y se sube con la rueda del
+# ratón (de 3 en 3 líneas) hasta ver dónde empieza
+set encontrada 0
+for {set i 0} {$i < 80 && !$encontrada} {incr i} {
+  send "\033\[<64;10;10M"
+  expect {
+    -timeout 1
+    "Conversación anterior" { set encontrada 1 }
+    timeout {}
+  }
+}
+if {!$encontrada} {
+  falla "al cargar la sesión no se ve la conversación (ni subiendo con la rueda)"
 }
 expect {
   "RESPUESTA-UNO" {}
   timeout { falla "no se ve lo que contestó antes" }
-}
-expect {
-  "Escribe tu mensaje" {}
-  timeout { falla "no vuelve a quedar libre tras cargar la sesión" }
 }
 
 # 8. /models abre la lista y Esc la cierra

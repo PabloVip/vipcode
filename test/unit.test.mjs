@@ -1170,3 +1170,22 @@ test("tutorial: la carpeta de prácticas no pisa nada tuyo y cada paso avanza co
   fs.rmSync(outside);
 });
 
+test("ratón: la rueda, pulsar, arrastrar y soltar, y el texto seleccionado sin colores", async () => {
+  const mouse = await import("../dist/tui/mouse.js");
+  // El botón derecho (2) no cuenta
+  assert.deepEqual(mouse.mouseEvents("\x1b[<64;5;3M\x1b[<65;5;3M\x1b[<0;2;1M\x1b[<32;9;2M\x1b[<0;9;2m\x1b[<2;1;1M"), [
+    { kind: "wheel", x: 4, y: 2, delta: -1 },
+    { kind: "wheel", x: 4, y: 2, delta: 1 },
+    { kind: "press", x: 1, y: 0, delta: 0 },
+    { kind: "drag", x: 8, y: 1, delta: 0 },
+    { kind: "release", x: 8, y: 1, delta: 0 },
+  ]);
+  const lines = ["\x1b[32m● hola mundo\x1b[39m   ", "  segunda línea", "  tercera"];
+  // De la «m» de mundo a la «s» de segunda, también arrastrando hacia arriba
+  assert.equal(mouse.selectedText(lines, { line: 0, col: 7 }, { line: 1, col: 2 }), "mundo\n  s");
+  assert.equal(mouse.selectedText(lines, { line: 1, col: 2 }, { line: 0, col: 7 }), "mundo\n  s");
+  assert.equal(mouse.selectedText(lines, { line: 2, col: 2 }, { line: 2, col: 8 }), "tercera");
+  assert.deepEqual(mouse.selectedColumns(1, { line: 0, col: 7 }, { line: 2, col: 3 }), [0, Number.MAX_SAFE_INTEGER]);
+  assert.equal(mouse.selectedColumns(3, { line: 0, col: 7 }, { line: 2, col: 3 }), null);
+});
+

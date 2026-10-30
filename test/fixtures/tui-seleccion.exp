@@ -1,0 +1,49 @@
+# Pantalla completa: arrastrar con el ratón sobre la conversación la selecciona y la copia al soltar (lo lanza
+# test/tui.test.mjs)
+set timeout 30
+log_user 1
+set cli [lindex $argv 0]
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+spawn -noecho node $cli
+stty rows 30 columns 100 < $spawn_out(slave,name)
+
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no arranca la interfaz" }
+}
+send "largo\r"
+expect {
+  "LINEA-80" {}
+  timeout { falla "no contesta" }
+}
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre" }
+}
+sleep 0.5
+
+# De la columna 3 de la primera fila a la 12 de la tercera, y soltar
+send "\033\[<0;3;1M"
+sleep 0.1
+send "\033\[<32;8;2M"
+sleep 0.1
+send "\033\[<32;12;3M"
+sleep 0.1
+send "\033\[<0;12;3m"
+expect {
+  "copiado" {}
+  timeout { falla "al soltar no dice que lo ha copiado" }
+}
+
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-SELECCION-OK"
+exit 0

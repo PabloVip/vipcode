@@ -77,10 +77,12 @@ test("interfaz: versión nueva destacada y bienvenida la primera vez", { skip: !
   const mock = await startMock(() => ({ text: "HOLA" }));
   const ws = tempWorkspace();
   // Un proveedor que no pide clave, como los anónimos, y una versión nueva ya comprobada hoy (no se mira internet)
+  // En el modo de antes (sin pantalla completa), que así también queda probado
   ws.writeConfig({
     providers: [{ name: "anon", baseURL: `${mock.url}/anon/v1`, noKey: true, models: [{ id: "m", context: 100000 }] }],
     enabledProviders: ["anon"],
     autoUpdateModels: false,
+    fullscreen: false,
   });
   // …con arreglos de seguridad, y vienes de una versión anterior (se enseñan las novedades)
   fs.writeFileSync(path.join(ws.home, "update.json"), JSON.stringify({ checked: Date.now(), latest: "99.0.0", security: true }));
@@ -163,6 +165,27 @@ test("interfaz: vipcode tutorial abre la carpeta de prácticas y lleva paso a pa
     // La carpeta de prácticas está en tu carpeta personal, no en la que lo abriste
     assert.ok(fs.existsSync(path.join(ws.home, "vipcode-tutorial", "saludo.js")));
     assert.ok(!fs.existsSync(path.join(ws.proj, "saludo.js")));
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
+});
+
+test("interfaz: en pantalla completa, arrastrar con el ratón selecciona y copia al soltar", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const answer = Array.from({ length: 80 }, (_, i) => `LINEA-${i + 1}`).join("\n");
+  const mock = await startMock(() => ({ text: answer }));
+  const ws = tempWorkspace();
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  // Un «portapapeles» que guarda en un fichero lo que le llega
+  const copied = path.join(ws.dir, "portapapeles.txt");
+  const script = path.join(ws.dir, "copiar.mjs");
+  fs.writeFileSync(script, `import fs from "node:fs";\nlet text = "";\nprocess.stdin.on("data", (d) => (text += d));\nprocess.stdin.on("end", () => fs.writeFileSync(${JSON.stringify(copied)}, text));\n`);
+  try {
+    const result = await runExpect("tui-seleccion.exp", ws, { VIPCODE_CLIPBOARD: `"${process.execPath}" "${script}"` });
+    assert.equal(result.code, 0, result.plain.slice(-3000));
+    assert.match(result.plain, /TUI-SELECCION-OK/);
+    // Tres líneas de la respuesta, desde donde empezó el arrastre, sin colores ni espacios al final
+    assert.match(fs.readFileSync(copied, "utf8"), /^LINEA-\d+\n {2}LINEA-\d+\n {2}LINEA-\d+$/);
   } finally {
     await mock.close();
     ws.cleanup();

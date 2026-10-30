@@ -186,6 +186,9 @@ export interface Config {
   skills: SkillsConfig;
   // Mostrar el razonamiento de los modelos que lo envían
   showReasoning: boolean;
+  // Pantalla completa: la conversación tiene su propio scroll (rueda del ratón, AvPág y RePág) y la caja de escribir
+  // queda fija abajo. Con false, la conversación se escribe en la terminal normal
+  fullscreen: boolean;
 }
 
 export const DEFAULT_PERMISSION: PermissionConfig = {
@@ -233,6 +236,7 @@ export const DEFAULT_CONFIG: Config = {
   ranking: { enabled: true, metric: "coding", anonymousLast: false },
   skills: { enabled: true, paths: [], disabled: [], external: true },
   showReasoning: true,
+  fullscreen: true,
 };
 
 // Proveedor de internet que se puede usar sin clave (los locales no cuentan)
