@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.2.17] - 2026-10-30
+
 ### Cambiado
 
 - Interfaz «Criaturas»: en terminales anchas (120 columnas y 32 filas o más) la criatura sale grande y con más detalle: esquinas redondeadas, luces y sombras y un brillo en los ojos. Si el panel no cabe entero, se quita primero el texto de debajo del dibujo.
@@ -206,7 +208,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.16...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.17...HEAD
+[0.2.17]: https://github.com/PabloVip/vipcode/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/PabloVip/vipcode/compare/v0.2.15...v0.2.16
 [0.2.15]: https://github.com/PabloVip/vipcode/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/PabloVip/vipcode/compare/v0.2.13...v0.2.14
