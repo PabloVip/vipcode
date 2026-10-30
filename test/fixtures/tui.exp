@@ -186,6 +186,11 @@ expect {
   timeout { falla "/sessions no abre la lista" }
 }
 send "\r"
+# Hasta que se ha pintado toda la conversación cargada (en una máquina lenta tarda): termina con «Sigues desde aquí»
+expect {
+  "Sigues desde aqu" {}
+  timeout { falla "al cargar la sesión no termina de enseñar la conversación" }
+}
 expect {
   "Escribe tu mensaje" {}
   timeout { falla "no vuelve a quedar libre tras cargar la sesión" }
