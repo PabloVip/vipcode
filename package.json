@@ -1,6 +1,6 @@
 {
   "name": "vipcode",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Agente de programación para la terminal que usa IAs gratuitas y salta a otro proveedor cuando uno se agota",
   "keywords": [
     "ai",
