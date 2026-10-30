@@ -16,6 +16,8 @@ import time
 CLI, HOME, PROJECT, OUT = sys.argv[1:5]
 COLS, ROWS = 100, 37
 PROMPT = "El descuento de carrito.js es un porcentaje, pero se resta tal cual. ¿Lo arreglas?"
+# Después, con Tab hasta el profe, una pregunta para entender el arreglo
+PROMPT_PROFE = "¿Por qué hay que dividir el descuento entre 100?"
 ANSI = re.compile(r"\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-_]")
 
 env = {
@@ -81,46 +83,52 @@ def marker(name):
     events.append([round(time.time() - start, 4), "m", name])
 
 
-wait_for(r"Escribe tu mensaje", 30)
-pump(2.5)
-marker("escribe")
-for char in PROMPT:
-    send(char)
-    pump(random.uniform(0.035, 0.085))
-pump(0.8)
-send("\r")
-marker("espera")
-mark = len(plain)
-
-# Hasta que conteste: se aceptan las ediciones; un comando solo si es un node sin nada más detrás
-answered = None
-deadline = time.time() + 240
-while time.time() < deadline:
-    pump(0.2)
-    tail = plain[mark:]
-    dialog = re.search(r"\? (Editar|Crear|Sobrescribir|Ejecutar)[^\n]*", tail)
-    if dialog:
-        marker("dialogo")
-        pump(3.0)
-        if dialog.group(1) == "Ejecutar":
-            command = re.search(r"\$ ([^\n]+)", plain[mark + dialog.start():])
-            safe = command and re.match(r"^node [\w ./=-]+$", command.group(1).strip())
-            send("s" if safe else "n")
-        else:
-            send("s")
-        # El diálogo se sigue viendo un momento: se espera a que se cierre antes de buscar el siguiente
-        marker("espera")
-        pump(1.5)
-        mark = len(plain)
-        continue
-    footer = re.search(r"◆ \S+/\S+[^\n]* · (<1|\d+(,\d)?) s", tail)
-    if footer and re.search(r"Escribe tu mensaje", tail[footer.end():]):
-        answered = time.time()
-        marker("hecho")
-        break
-if not answered:
+def ask(prompt, tabs=0):
+    """Escribe el mensaje (antes, Tab para cambiar de agente) y espera a que conteste: se aceptan las ediciones; un
+    comando solo si es un node sin nada más detrás."""
+    marker("escribe")
+    for _ in range(tabs):
+        send("\t")
+        pump(0.8)
+    for char in prompt:
+        send(char)
+        pump(random.uniform(0.035, 0.085))
+    pump(0.8)
+    send("\r")
+    marker("espera")
+    mark = len(plain)
+    deadline = time.time() + 240
+    while time.time() < deadline:
+        pump(0.2)
+        tail = plain[mark:]
+        dialog = re.search(r"\? (Editar|Crear|Sobrescribir|Ejecutar)[^\n]*", tail)
+        if dialog:
+            marker("dialogo")
+            pump(3.0)
+            if dialog.group(1) == "Ejecutar":
+                command = re.search(r"\$ ([^\n]+)", plain[mark + dialog.start():])
+                safe = command and re.match(r"^node [\w ./=-]+$", command.group(1).strip())
+                send("s" if safe else "n")
+            else:
+                send("s")
+            # El diálogo se sigue viendo un momento: se espera a que se cierre antes de buscar el siguiente
+            marker("espera")
+            pump(1.5)
+            mark = len(plain)
+            continue
+        footer = re.search(r"◆ \S+/\S+[^\n]* · (<1|\d+(,\d)?) s", tail)
+        if footer and re.search(r"Escribe tu mensaje", tail[footer.end():]):
+            marker("hecho")
+            return
     raise SystemExit(f"no ha terminado\n---\n{plain[-3000:]}")
 
+
+wait_for(r"Escribe tu mensaje", 30)
+pump(2.5)
+ask(PROMPT)
+pump(4.0)
+# Tab dos veces: planear y profe
+ask(PROMPT_PROFE, tabs=2)
 pump(5.0)
 events.append([round(time.time() - start, 4), "m", "fin"])
 send("\x03")

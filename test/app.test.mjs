@@ -544,3 +544,42 @@ test("/bug abre GitHub con el informe de /doctor ya puesto, sin claves ni colore
   }
 });
 
+test("velocidad: si una IA no empieza a contestar a tiempo se prueba otra, y las lentas pasan detrás", async () => {
+  const mock = await startMock(async ({ path: url }) => {
+    if (url.startsWith("/lento/")) {
+      // No contesta nada hasta mucho después
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return { text: "LENTO" };
+    }
+    if (url.startsWith("/pensando/")) {
+      // Empieza enseguida (razona) y el texto tarda más de lo que se espera a la primera respuesta
+      return { reasoning: "pienso…", pauseMs: 600, text: "PENSADO" };
+    }
+    return { text: "RAPIDO" };
+  });
+  const ws = tempWorkspace();
+  const { app, events } = makeApp(ws, mock.url, {
+    providers: [provider("lento", mock.url, ["m"]), provider("rapido", mock.url, ["m"]), provider("pensando", mock.url, ["m"])],
+    enabledProviders: ["lento", "rapido", "pensando"],
+    firstResponseMs: 300,
+  });
+  // El primero no empieza a contestar en 0,3 s: se prueba el siguiente, y el lento se queda un rato en pausa
+  await app.runPrompt({ text: "hola" }, {});
+  assert.match(events.text, /RAPIDO/);
+  assert.ok(events.notices.some((notice) => /lento\/m: no ha empezado a contestar en 0 s → pausa 5 min/.test(notice)), events.notices.join("\n"));
+  // Aunque se le quite la pausa, va detrás de los que van rápido mientras se recuerde que es lento
+  app.router.resetCooldowns();
+  const before = mock.chats().length;
+  await app.runPrompt({ text: "otra" }, {});
+  assert.ok(mock.chats()[before].path.startsWith("/rapido/"), mock.chats()[before].path);
+  assert.match(app.router.describe().find((row) => row.key === "lento/m").status, /lento: ~0 s en empezar a contestar/);
+  // Si ya ha empezado a contestar, se le espera aunque tarde más
+  events.text = "";
+  app.router.pinned = "pensando/m";
+  await app.runPrompt({ text: "piensa" }, {});
+  assert.match(events.text, /PENSADO/);
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+

@@ -151,3 +151,21 @@ test("interfaz: /update enseña una barra de carga, avisa de que hay que reinici
     ws.cleanup();
   }
 });
+
+test("interfaz: vipcode tutorial abre la carpeta de prácticas y lleva paso a paso hasta el final", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const mock = await startMock(() => ({ text: "VALE" }));
+  const ws = tempWorkspace();
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  try {
+    const result = await runExpect("tui-tutorial.exp", ws);
+    assert.equal(result.code, 0, result.plain.slice(-3000));
+    assert.match(result.plain, /TUI-TUTORIAL-OK/);
+    // La carpeta de prácticas está en tu carpeta personal, no en la que lo abriste
+    assert.ok(fs.existsSync(path.join(ws.home, "vipcode-tutorial", "saludo.js")));
+    assert.ok(!fs.existsSync(path.join(ws.proj, "saludo.js")));
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
+});
+

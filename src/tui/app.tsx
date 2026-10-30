@@ -18,6 +18,7 @@ import { NoSlotError } from "../router.js";
 import { showControl, stripControl, stripUnsafe } from "../sanitize.js";
 import { type Session, appendHistory, loadHistory, sessionMarkdownPath } from "../session.js";
 import { type Todo, suggestFiles } from "../tools.js";
+import { type TutorialCard, tutorialCard } from "../tutorial.js";
 import { colorPreview } from "../ui.js";
 import { CHECK_MS, checkForUpdate, stepProgress } from "../update.js";
 import { type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
@@ -38,6 +39,8 @@ type Item =
   | { id: number; kind: "news"; version: string; markdown: string; security: boolean }
   // /update ha instalado una versión nueva: hay que reiniciar vipcode para usarla
   | { id: number; kind: "updated"; version: string }
+  // El paso del tutorial en el que vas
+  | { id: number; kind: "tutorial"; step: number; total: number; title: string; text: string }
   | { id: number; kind: "info" | "notice" | "error" | "block"; text: string };
 
 type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never;
@@ -421,6 +424,18 @@ function ItemView(props: { item: Item; app: App; width: number }) {
           </Text>
         </Box>
       );
+    case "tutorial": {
+      const finished = item.step > item.total;
+      return (
+        <Box marginY={1} flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={2}>
+          <Text bold color="magenta">
+            {finished ? `✓ ${item.title}` : `Tutorial · paso ${item.step} de ${item.total}: ${item.title}`}
+          </Text>
+          <Text>{item.text}</Text>
+          {finished ? null : <Text dimColor>Cuando lo hagas, pasas solo al siguiente paso (/tutorial lo repite).</Text>}
+        </Box>
+      );
+    }
     case "news": {
       const lines = renderMarkdown(item.markdown, Math.max(20, width - 8)).split("\n");
       const shown = lines.slice(0, 18);
@@ -611,40 +626,46 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
     hint = { text: `↑ vipcode ${version} disponible · escribe /update`, short: `↑ ${version} · /update`, color: "green", bold: true };
   }
 
-  // Si no cabe todo en una línea se quitan, para dejar sitio a la ayuda corta, los tokens y el detalle del contexto;
-  // si aun así no cabe, los modelos disponibles y la ayuda
-  const model = ` · ${current || "rotación automática"}${slot && slot.score !== null ? ` ★${slot.score}` : ""}${app.router.pinned ? " (fijado)" : ""}`;
-  const gauge = app.agent.lastTokens > 0 && context > 0;
-  const fit = { tokens: spent > 0, detail: true, models: true, who: true };
+  // Si no cabe todo en una línea se va quitando, por este orden (primero lo que menos falta hace): la ayuda larga, los
+  // tokens, el detalle del contexto, los modelos disponibles, la nota del modelo, su nombre largo («kilo/nvidia/x» →
+  // «nvidia/x» → «x»), la ayuda corta, el medidor de contexto si todavía no avisa de nada y, lo último, de quién es el
+  // límite (es lo que dice a qué se refiere «quedan 46/50»)
+  const fit = { hint: 2, tokens: spent > 0, detail: true, models: true, score: true, name: 0, gauge: true, who: true };
+  const names = [current || "rotación automática", slot?.model.id, slot?.model.id.split("/").pop()];
+  const model = () => ` · ${names[fit.name] || names[0]}${slot && slot.score !== null && fit.score ? ` ★${slot.score}` : ""}${app.router.pinned ? " (fijado)" : ""}`;
+  const gauge = () => fit.gauge && app.agent.lastTokens > 0 && context > 0;
   // De quién es el límite: «OpenRouter: quedan 46/50 hoy»
   const quotaText = () => (quota && slot && fit.who ? `${providerName(slot.provider)}: ${quota.short}` : quota?.short || "");
-  const left = () =>
+  const hintText = () => [" ", hint.short, hint.text][fit.hint].trim();
+  const width = () =>
     props.agentName.length +
-    model.length +
+    model().length +
     (quota ? quotaText().length + 3 : 0) +
-    (gauge ? 12 + gaugeLabel(app.agent.lastTokens, context, fit.detail).length : 0) +
+    (gauge() ? 12 + gaugeLabel(app.agent.lastTokens, context, fit.detail).length : 0) +
     (fit.models ? ` · ${available}/${app.router.slots.length} modelos`.length : 0) +
     (fit.tokens ? ` · ${shortTokens(spent)} tokens`.length : 0) +
     (queued > 0 ? ` · ${queued} en cola`.length : 0) +
-    (app.yolo ? 7 : 0);
+    (app.yolo ? 7 : 0) +
+    (hintText() ? 2 + hintText().length : 0);
+  const warning = context > 0 && app.agent.lastTokens / context >= 0.6;
+  const steps = [
+    () => (fit.hint = 1),
+    () => (fit.tokens = false),
+    () => (fit.detail = false),
+    () => (fit.models = false),
+    () => (fit.score = false),
+    () => (fit.name = 1),
+    () => (fit.name = 2),
+    () => (fit.hint = 0),
+    () => (fit.gauge = warning),
+    () => (fit.who = false),
+  ];
   const room = props.width - 2;
-  for (const drop of ["tokens", "detail"] as const) {
-    if (left() + 2 + hint.short.length <= room) {
+  for (const step of steps) {
+    if (width() <= room) {
       break;
     }
-    fit[drop] = false;
-  }
-  if (left() > room) {
-    fit.models = false;
-  }
-  if (left() > room) {
-    fit.who = false;
-  }
-  let hintText = "";
-  if (left() + 2 + hint.text.length <= room) {
-    hintText = hint.text;
-  } else if (left() + 2 + hint.short.length <= room) {
-    hintText = hint.short;
+    step();
   }
 
   return (
@@ -653,14 +674,14 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
         <Text bold color={(agent?.color as any) || "magenta"}>
           {props.agentName}
         </Text>
-        <Text dimColor>{model}</Text>
+        <Text dimColor>{model()}</Text>
         {quota ? (
           <Text color={quotaColor} dimColor={!quotaColor}>
             {" "}
             · {stripControl(quotaText())}
           </Text>
         ) : null}
-        <ContextGauge used={app.agent.lastTokens} total={context} detail={fit.detail} />
+        {gauge() ? <ContextGauge used={app.agent.lastTokens} total={context} detail={fit.detail} /> : null}
         <Text dimColor>
           {fit.models ? ` · ${available}/${app.router.slots.length} modelos` : ""}
           {fit.tokens ? ` · ${shortTokens(spent)} tokens` : ""}
@@ -668,9 +689,9 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
         </Text>
         {app.yolo ? <Text color="red"> · yolo</Text> : null}
       </Text>
-      {hintText ? (
+      {hintText() ? (
         <Text wrap="truncate-start" color={hint.color} dimColor={!hint.color} bold={hint.bold}>
-          {hintText}
+          {hintText()}
         </Text>
       ) : null}
     </Box>
@@ -761,6 +782,7 @@ function Main(props: { app: App; initial: string }) {
       setInput: (text) => setEditor({ value: text, cursor: text.length }),
       progress: (state) => setProgress((previous) => (state ? { ...state, since: previous?.since ?? Date.now(), stepSince: Date.now() } : null)),
       updated: (version) => push({ kind: "updated", version }),
+      tutorial: (card) => push({ kind: "tutorial", ...card }),
     }),
     [],
   );
@@ -799,7 +821,15 @@ function Main(props: { app: App; initial: string }) {
 
   const sessionTokens = () => app.agent.session.usage.prompt + app.agent.session.usage.completion;
 
+  // Si lo que acaba de pasar completa el paso del tutorial, el siguiente
+  const tutorialStep = (card: TutorialCard | null) => {
+    if (card) {
+      push({ kind: "tutorial", ...card });
+    }
+  };
+
   const runAgent = async (input: UserInput, options: RunOptions) => {
+    const ranAs = options.agent || app.agent.agent.name;
     setBusy(true);
     startedAt.current = Date.now();
     answered.current = "";
@@ -833,6 +863,7 @@ function Main(props: { app: App; initial: string }) {
       if (tip) {
         push({ kind: "notice", text: tip });
       }
+      tutorialStep(app.tutorialEvent({ kind: "message", text: input.text, agent: ranAs }));
       live.current.running.clear();
       live.current.model = "";
       controller.current = null;
@@ -867,6 +898,7 @@ function Main(props: { app: App; initial: string }) {
         abort.signal,
       );
       push({ kind: "shell", command, output: result.output, code: result.code });
+      tutorialStep(app.tutorialEvent({ kind: "shell", text: command, agent: app.agent.agent.name }));
     } finally {
       live.current.shell = null;
       controller.current = null;
@@ -928,6 +960,7 @@ function Main(props: { app: App; initial: string }) {
           await restart();
           return;
         }
+        tutorialStep(app.tutorialEvent({ kind: "command", text, agent: app.agent.agent.name }));
         if (result.loaded) {
           replay(app.agent.session);
         }
@@ -961,6 +994,9 @@ function Main(props: { app: App; initial: string }) {
       return;
     }
     app.acceptPrivacyNotice();
+    if (app.tutorialStep === null) {
+      push({ kind: "info", text: "¿Es tu primera vez con vipcode? Escribe /tutorial: en 5 pasos aprendes lo básico, sin tocar tus ficheros." });
+    }
     if (choice === "connect") {
       await app.connect(adapter, "");
     } else if (choice === "off") {
@@ -1155,6 +1191,10 @@ function Main(props: { app: App; initial: string }) {
     const news = app.takeNews();
     if (news) {
       push({ kind: "news", ...news });
+    }
+    // «vipcode tutorial»: el primer paso
+    if (app.tutorialStep !== null) {
+      push({ kind: "tutorial", ...tutorialCard(app.tutorialStep) });
     }
     // Mira en npm y GitHub si hay una versión nueva de vipcode (como mucho una vez por hora). Al abrirlo la anuncia
     // con el recuadro; si sale con vipcode abierto, en la barra de abajo
@@ -1589,7 +1629,7 @@ export async function startTui(app: App, options: { initial?: string } = {}) {
   });
   await instance.waitUntilExit();
   // Tras /update sigue abierta la versión de antes: se recuerda cómo abrir la nueva (salvo si ya se va a reiniciar)
-  if (app.installedVersion && !app.restartRequested) {
+  if (app.installedVersion && !app.relaunch) {
     console.log(pc.green(`✓ Abre vipcode otra vez para usar la versión ${stripControl(app.installedVersion)} (vipcode -c sigue con esta conversación).`));
   }
 }

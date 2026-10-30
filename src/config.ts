@@ -163,6 +163,8 @@ export interface Config {
   bashTimeoutMs: number;
   // Si un proveedor está enfriándose menos de esto, esperamos en vez de fallar
   maxWaitMs: number;
+  // Lo que se espera a que una IA empiece a contestar antes de probar otra (con conversaciones largas, algo más)
+  firstResponseMs: number;
   permission: PermissionConfig;
   mcp: Record<string, McpServerConfig>;
   lsp: Record<string, LspServerConfig | false> | false;
@@ -217,6 +219,7 @@ export const DEFAULT_CONFIG: Config = {
   autoCompactTokens: 90000,
   bashTimeoutMs: 120000,
   maxWaitMs: 90000,
+  firstResponseMs: 40000,
   permission: DEFAULT_PERMISSION,
   mcp: {},
   lsp: {},

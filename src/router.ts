@@ -95,8 +95,20 @@ export interface UsageDay {
 export class NoSlotError extends Error {}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-// Si el proveedor no manda nada en este tiempo, cortamos y probamos otro
+// Si el proveedor deja de mandar datos este tiempo cuando ya está contestando, cortamos y probamos otro
 const IDLE_MS = 120000;
+// Lo que tarda cada modelo en empezar a contestar se recuerda unas horas (luego se le da otra oportunidad)
+const SPEED_TTL_MS = 6 * 60 * 60 * 1000;
+
+// Lo que se espera a que empiece a contestar: lo del config y 1 s más por cada 2.000 tokens que tiene que leer, sin pasar
+// del máximo de siempre
+export function firstResponseMs(base: number, tokens: number): number {
+  return Math.min(IDLE_MS, base + Math.round(tokens / 2000) * 1000);
+}
+
+function duration(ms: number): string {
+  return ms < 60000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60000)} min`;
+}
 
 // Estimación rápida de tokens (unos 3,6 caracteres por token; cada imagen cuenta como ~1.200)
 export function estimateTokens(value: unknown): number {
@@ -240,6 +252,10 @@ function classify(err: unknown): Classified {
   let status = 0;
   let retryAfterMs = 0;
 
+  // Tarda demasiado en empezar a contestar: un rato en pausa, para no volver a esperarle enseguida
+  if (message.startsWith("no ha empezado a contestar")) {
+    return { kind: "server", retryAfterMs: 5 * 60000, detail: message };
+  }
   if (err instanceof OpenAI.APIConnectionError) {
     return { kind: "server", retryAfterMs: 30000, detail: "sin conexión" };
   }
@@ -338,6 +354,8 @@ interface RouterState {
   usage?: UsageDay;
   limits?: Record<string, LimitSnapshot>;
   recent?: Record<string, number[]>;
+  // Lo que suele tardar cada modelo en empezar a contestar
+  speed?: Record<string, { ms: number; at: number }>;
 }
 
 function utcDay(time = Date.now()): string {
@@ -424,6 +442,8 @@ export class Router {
   usage: UsageDay = { day: utcDay(), providers: {} };
   limits: Record<string, LimitSnapshot> = {};
   recent: Record<string, number[]> = {};
+  // Lo que suele tardar cada modelo en empezar a contestar (media en la que pesa más lo último)
+  speed: Record<string, { ms: number; at: number }> = {};
   // Slots descartados durante esta ejecución (clave mala…)
   skipped = new Set<string>();
   // Si no es null, se usa ese slot primero
@@ -538,6 +558,7 @@ export class Router {
       }
       this.limits = data.limits || {};
       this.recent = data.recent || {};
+      this.speed = data.speed || {};
     } catch {
       this.cooldowns = {};
       this.unsupported = {};
@@ -567,6 +588,11 @@ export class Router {
         delete this.recent[name];
       }
     }
+    for (const [key, entry] of Object.entries(this.speed)) {
+      if (now - entry.at > SPEED_TTL_MS) {
+        delete this.speed[key];
+      }
+    }
     try {
       const state: RouterState = {
         cooldowns: this.cooldowns,
@@ -575,6 +601,7 @@ export class Router {
         usage: this.usage,
         limits: this.limits,
         recent: this.recent,
+        speed: this.speed,
       };
       fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
     } catch {
@@ -616,6 +643,22 @@ export class Router {
     }
   }
 
+  // Cuánto ha tardado en empezar a contestar (o lo que se le esperó si no llegó a empezar)
+  private noteSpeed(slot: Slot, ms: number) {
+    const old = this.speed[slot.key];
+    const fresh = old && Date.now() - old.at < SPEED_TTL_MS;
+    this.speed[slot.key] = { ms: Math.round(fresh ? old.ms * 0.6 + ms * 0.4 : ms), at: Date.now() };
+  }
+
+  // Lento: de media tarda en empezar más de la mitad de lo que se le espera
+  private slowStart(slot: Slot, now: number): number | null {
+    const entry = this.speed[slot.key];
+    if (!entry || slot.provider.local || now - entry.at > SPEED_TTL_MS || entry.ms <= this.config.firstResponseMs / 2) {
+      return null;
+    }
+    return entry.ms;
+  }
+
   private noteLimits(slot: Slot, headers: unknown) {
     const snapshot = readLimitHeaders(headers, slot.provider);
     if (snapshot) {
@@ -644,6 +687,10 @@ export class Router {
       } else if (until > now) {
         status = `en pausa hasta ${new Date(until).toLocaleTimeString()}`;
         available = false;
+      }
+      const slow = available ? this.slowStart(slot, now) : null;
+      if (slow) {
+        status += ` (lento: ~${duration(slow)} en empezar a contestar)`;
       }
       if (this.pinned === slot.key) {
         status += " (fijado)";
@@ -689,6 +736,9 @@ export class Router {
       }
       return slot.model.context >= estTokens;
     });
+    // Los que suelen tardar mucho en empezar a contestar, detrás (sin cambiar el orden de los demás)
+    const slow = list.filter((slot) => this.slowStart(slot, now) !== null);
+    list = [...list.filter((slot) => !slow.includes(slot)), ...slow];
     // El fijado con /model va el primero; detrás, el preferido del agente
     for (const pattern of [prefer, this.pinned]) {
       if (!pattern) {
@@ -837,7 +887,7 @@ export class Router {
           action = `pausa hasta ${new Date(until).toLocaleString()}`;
         } else if (info.kind === "server") {
           this.setCooldown([slot], now + info.retryAfterMs);
-          action = "pausa 30 s";
+          action = `pausa ${duration(info.retryAfterMs)}`;
         } else if (info.kind === "auth") {
           // Si la clave falla, fallan todos los modelos de ese proveedor
           for (const other of this.slots) {
@@ -888,14 +938,27 @@ export class Router {
       params.stream_options = { include_usage: true };
     }
 
-    // Si el proveedor deja de mandar datos mucho rato, cortamos para probar otro
+    // Hasta que empieza a contestar se le da poco tiempo (más si tiene mucho que leer): si no, se prueba otro. Cuando
+    // ya escribe, solo se corta si deja de mandar datos mucho rato. Los modelos de tu ordenador pueden tardar en
+    // empezar: con ellos se espera como siempre
+    const firstMs = slot.provider.local ? IDLE_MS : firstResponseMs(this.config.firstResponseMs, estimateTokens(params.messages));
+    const startedAt = Date.now();
+    let started = false;
     const idle = new AbortController();
     let combined: AbortSignal = idle.signal;
     if (signal) {
       combined = AbortSignal.any([signal, idle.signal]);
     }
-    let idleTimer = setTimeout(() => idle.abort(), IDLE_MS);
-    const bump = () => {
+    let idleTimer = setTimeout(() => idle.abort(), firstMs);
+    // Cada trozo que llega cuenta como que sigue vivo; empezar a contestar es mandar texto, razonamiento o herramientas
+    const bump = (answer: boolean) => {
+      if (!started && !answer) {
+        return;
+      }
+      if (!started) {
+        started = true;
+        this.noteSpeed(slot, Date.now() - startedAt);
+      }
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => idle.abort(), IDLE_MS);
     };
@@ -919,7 +982,7 @@ export class Router {
       const stream = data as unknown as AsyncIterable<any>;
 
       for await (const chunk of stream) {
-        bump();
+        bump(false);
         // Algunos proveedores mandan el error dentro del stream
         if (chunk && chunk.error) {
           const apiError = new Error(chunk.error.message || JSON.stringify(chunk.error) || "error en el stream");
@@ -937,15 +1000,18 @@ export class Router {
 
         const reasoning = delta.reasoning_content ?? delta.reasoning;
         if (typeof reasoning === "string" && reasoning.length > 0) {
+          bump(true);
           handlers.onReasoning?.(reasoning);
         }
 
         if (typeof delta.content === "string" && delta.content.length > 0) {
+          bump(true);
           content += delta.content;
           handlers.onText(delta.content);
         }
 
         if (Array.isArray(delta.tool_calls)) {
+          bump(true);
           for (const tc of delta.tool_calls) {
             let entry: PartialCall | undefined;
             if (typeof tc.index === "number") {
@@ -980,6 +1046,10 @@ export class Router {
       }
     } catch (err) {
       if (idle.signal.aborted && !signal?.aborted) {
+        if (!started) {
+          this.noteSpeed(slot, firstMs);
+          throw new Error(`no ha empezado a contestar en ${duration(firstMs)}`);
+        }
         throw new Error("el proveedor dejó de responder (timeout)");
       }
       throw err;

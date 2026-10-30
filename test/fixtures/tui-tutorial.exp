@@ -1,0 +1,92 @@
+# vipcode tutorial: los cinco pasos, de principio a fin (lo lanza test/tui.test.mjs)
+set timeout 30
+log_user 1
+set cli [lindex $argv 0]
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+proc libre {} {
+  expect {
+    "Escribe tu mensaje" {}
+    timeout { falla "no vuelve a quedar libre" }
+  }
+}
+
+spawn -noecho node $cli tutorial
+stty rows 40 columns 120 < $spawn_out(slave,name)
+
+# 1. Pedir algo con tus palabras
+expect {
+  "paso 1 de 5" {}
+  timeout { falla "no empieza el tutorial" }
+}
+libre
+send "que hace saludo.js\r"
+
+# 2. Señalar un fichero con @ (Tab completa el nombre)
+expect {
+  "paso 2 de 5" {}
+  timeout { falla "un mensaje no completa el paso 1" }
+}
+libre
+send "arregla el fallo de @sal"
+expect {
+  "@saludo.js" {}
+  timeout { falla "no sugiere @saludo.js en la carpeta de prácticas" }
+}
+send "\t"
+sleep 0.3
+send "\r"
+
+# 3. Un comando con !
+expect {
+  "paso 3 de 5" {}
+  timeout { falla "un mensaje con @saludo.js no completa el paso 2" }
+}
+libre
+send "!node saludo.js\r"
+expect {
+  "undefined" {}
+  timeout { falla "no ejecuta saludo.js" }
+}
+
+# 4. /undo
+expect {
+  "paso 4 de 5" {}
+  timeout { falla "un !comando no completa el paso 3" }
+}
+libre
+send "/undo\r"
+
+# 5. El profe: /undo ha devuelto el mensaje a la caja, se borra (Ctrl+U) y Tab dos veces (planear y profe)
+expect {
+  "paso 5 de 5" {}
+  timeout { falla "/undo no completa el paso 4" }
+}
+sleep 0.3
+send "\025"
+libre
+send "\t"
+sleep 0.3
+send "\t"
+expect {
+  -re {profe(\x1b\[[0-9;]*m)*\s*·} {}
+  timeout { falla "Tab no llega al profe" }
+}
+sleep 0.3
+send "como lo arreglo yo\r"
+expect {
+  "Tutorial terminado" {}
+  timeout { falla "preguntar al profe no termina el tutorial" }
+}
+
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-TUTORIAL-OK"
+exit 0

@@ -4,6 +4,16 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- `/tutorial` (y `vipcode tutorial`): aprende lo básico en 5 pasos (pedir cosas, señalar ficheros con `@`, ejecutar comandos con `!`, deshacer con `/undo` y preguntar al profe) en una carpeta de prácticas, sin tocar tus ficheros. Cada paso avanza solo cuando lo haces. La primera vez que abres vipcode, te lo sugiere.
+
+### Cambiado
+
+- Si una IA no empieza a contestar en unos 40 segundos (algo más con conversaciones largas), vipcode prueba otra en vez de esperar hasta 2 minutos, y recuerda durante unas horas las que suelen tardar para usarlas después de las rápidas. Si ya está escribiendo, se le espera como siempre, y los modelos de tu ordenador no cuentan. Se cambia con `firstResponseMs`.
+- En terminales estrechas, la barra de abajo acorta el nombre del modelo antes que quitar de quién es el límite.
+- Animación nueva en el README, también con el profe.
+
 ## [0.2.11] - 2026-10-30
 
 ### Añadido

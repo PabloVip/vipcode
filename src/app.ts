@@ -25,6 +25,7 @@ import { type Session, deleteSession, listSessions, newSession, saveExport, save
 import { Snapshots } from "./snapshot.js";
 import { commandShell, findProgram, killTree } from "./shell.js";
 import { type UpdateStep, compareVersions, updateVipcode } from "./update.js";
+import { type TutorialCard, type TutorialEvent, isTutorialDir, tutorialCard, tutorialDone } from "./tutorial.js";
 import { formatTodos, truncate } from "./tools.js";
 import { showLine } from "./sanitize.js";
 import { type ProjectTrust, projectTrust } from "./trust.js";
@@ -51,6 +52,8 @@ export interface UiAdapter {
   progress?(progress: Progress | null): void;
   // Se ha instalado una versión nueva de vipcode: hay que reiniciarlo para usarla
   updated?(version: string): void;
+  // El paso del tutorial en el que vas
+  tutorial?(card: TutorialCard): void;
 }
 
 export interface Progress extends UpdateStep {
@@ -89,6 +92,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "copiar", args: "[código]", description: "copia la última respuesta (o su último bloque de código) al portapapeles" },
   { name: "doctor", description: "comprueba que todo funciona (programas, claves, proveedores) y dice cómo arreglar lo que falte" },
   { name: "bug", args: "[qué ha pasado]", description: "avisa de un fallo: abre un issue en GitHub con el informe de /doctor ya puesto (sin tus claves)" },
+  { name: "tutorial", description: "aprende lo básico en 5 pasos, en una carpeta de prácticas" },
   { name: "undo", description: "deshacer el último mensaje (ficheros y conversación)" },
   { name: "redo", description: "rehacer lo deshecho" },
   { name: "diff", args: "[all]", description: "cambios del último mensaje (o de toda la sesión)" },
@@ -194,8 +198,10 @@ export class App {
   updateInstalled = false;
   // La versión que se ha instalado con /update (al salir se recuerda abrir vipcode otra vez para usarla)
   installedVersion: string | null = null;
-  // «Reiniciar ahora» tras /update: al cerrar la interfaz se abre la versión nueva
-  restartRequested = false;
+  // Con qué abrir vipcode otra vez al cerrar la interfaz: la versión nueva tras /update o el tutorial
+  relaunch: string[] | null = null;
+  // El paso del tutorial en el que vas (null si no lo estás haciendo)
+  tutorialStep: number | null = null;
   // Proveedores a los que ya se les ha sugerido otra cuenta porque se les acaban las peticiones (una vez cada uno)
   private quotaTips = new Set<string>();
   // La interfaz pone aquí cómo preguntar los permisos
@@ -454,6 +460,23 @@ export class App {
   // Para abrir la versión nueva en esta misma conversación (si todavía no hay nada, una nueva)
   restartArgs(): string[] {
     return this.agent.session.messages.length > 0 ? ["--session", this.agent.session.id] : [];
+  }
+
+  startTutorial(): TutorialCard {
+    this.tutorialStep = 0;
+    return tutorialCard(0);
+  }
+
+  // Si lo que acaba de pasar completa el paso del tutorial, el siguiente (o el final)
+  tutorialEvent(event: TutorialEvent): TutorialCard | null {
+    if (this.tutorialStep === null || !tutorialDone(this.tutorialStep, event)) {
+      return null;
+    }
+    const card = tutorialCard(++this.tutorialStep);
+    if (card.step > card.total) {
+      this.tutorialStep = null;
+    }
+    return card;
   }
 
   // Cuando quedan pocas peticiones gratis hoy en el modelo en uso: lo dice una vez y sugiere las cuentas gratis que más
@@ -1115,6 +1138,26 @@ export class App {
       case "/bug":
         await this.reportBug(ui, arg);
         return {};
+      case "/tutorial": {
+        // Ya en la carpeta de prácticas: se empieza (o se repite el paso en el que vas)
+        if (ui.tutorial && (this.tutorialStep !== null || isTutorialDir(this.root))) {
+          ui.tutorial(this.tutorialStep !== null ? tutorialCard(this.tutorialStep) : this.startTutorial());
+          return {};
+        }
+        if (!ui.tutorial || !ui.select) {
+          ui.info("El tutorial necesita la interfaz completa: ábrelo en tu terminal con «vipcode tutorial».");
+          return {};
+        }
+        const choice = await ui.select("El tutorial se hace en una carpeta de prácticas (~/vipcode-tutorial), para no tocar tus ficheros. ¿Lo abro?", [
+          { label: "Abrir el tutorial", description: "cuando acabes, vipcode -c te devuelve a esta conversación", value: "si" },
+          { label: "Ahora no", value: "no" },
+        ]);
+        if (choice === "si") {
+          this.relaunch = ["tutorial"];
+          return { restart: true };
+        }
+        return {};
+      }
       case "/limites":
       case "/limits":
         ui.block(limitsReport(this.router));
@@ -1195,7 +1238,7 @@ export class App {
               { label: "Más tarde", description: "cuando quieras: /exit y vuelve a abrirlo con vipcode -c", value: "luego" },
             ]);
             if (choice === "ahora") {
-              this.restartRequested = true;
+              this.relaunch = this.restartArgs();
               return { restart: true };
             }
           }

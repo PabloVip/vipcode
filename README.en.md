@@ -4,7 +4,7 @@
 
 A coding agent for your terminal (command `vipcode`) that only uses **free AI models** and **automatically switches provider** when one runs out. The interface and messages are in Spanish.
 
-![vipcode fixing a bug in carrito.js: it reads the file, shows the change, asks for permission and applies it](https://raw.githubusercontent.com/PabloVip/vipcode/main/docs/demo.svg)
+![vipcode fixing a bug in carrito.js: it reads the file, shows the change, asks for permission and applies it; then the teacher agent explains why](https://raw.githubusercontent.com/PabloVip/vipcode/main/docs/demo.svg)
 
 - **Works right after installing, with no keys or sign-up**: it uses providers that allow anonymous access (Kilo Gateway, OVHcloud, LLM7 and Pollinations).
 - For higher limits and better models, add free keys from the 20+ included providers (Gemini, NVIDIA, Mistral, Cerebras, OpenRouter, Groq, Z.ai…). With OpenRouter you just sign in through the browser.
@@ -28,6 +28,7 @@ To update, type `/update` inside vipcode or run `vipcode update`: a progress bar
 ```bash
 cd my-project
 vipcode                                # open vipcode
+vipcode tutorial                       # learn the basics in 5 steps, in a practice folder
 vipcode "fix the failing test"         # and start with that message
 vipcode -c                             # continue the last conversation in this folder
 vipcode run "task"                     # non-interactive: does the task and exits

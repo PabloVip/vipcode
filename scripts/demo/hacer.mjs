@@ -18,9 +18,10 @@ const home = path.join(work, "home");
 const project = path.join(home, "tienda");
 fs.mkdirSync(path.join(home, ".vipcode"), { recursive: true });
 fs.mkdirSync(project);
-// Sin buscar modelos ni versiones nuevas, y con la bienvenida ya vista
+// Sin buscar modelos ni versiones nuevas, y con la bienvenida y las novedades de esta versión ya vistas
+const { version } = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 fs.writeFileSync(path.join(home, ".vipcode", "config.json"), JSON.stringify({ autoUpdateModels: false, checkUpdates: false }));
-fs.writeFileSync(path.join(home, ".vipcode", "notices.json"), JSON.stringify({ privacy: new Date().toISOString() }));
+fs.writeFileSync(path.join(home, ".vipcode", "notices.json"), JSON.stringify({ privacy: new Date().toISOString(), lastVersion: version }));
 // El proyecto de ejemplo: el descuento es un porcentaje, pero se resta tal cual
 const BUG = "return suma - descuento;";
 fs.writeFileSync(

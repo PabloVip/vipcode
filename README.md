@@ -4,7 +4,7 @@
 
 Agente de programación para la terminal (comando `vipcode`) que solo usa **modelos gratuitos** y **rota automáticamente** entre proveedores cuando uno se agota.
 
-![vipcode arreglando un fallo en carrito.js: lee el fichero, enseña el cambio, pide permiso y lo aplica](https://raw.githubusercontent.com/PabloVip/vipcode/main/docs/demo.svg)
+![vipcode arreglando un fallo en carrito.js: lee el fichero, enseña el cambio, pide permiso y lo aplica; después, el profe explica por qué](https://raw.githubusercontent.com/PabloVip/vipcode/main/docs/demo.svg)
 
 - **Funciona nada más instalarlo, sin claves ni registro**: usa los proveedores que permiten el acceso anónimo (Kilo Gateway, OVHcloud, LLM7 y Pollinations).
 - Con claves gratuitas de los más de 20 proveedores incluidos (Gemini, NVIDIA, Mistral, Cerebras, OpenRouter, Groq, Z.ai…) tienes más límites y mejores modelos; en OpenRouter basta con iniciar sesión en el navegador.
@@ -28,7 +28,9 @@ Si algo falla, ejecuta `vipcode doctor` (o `/doctor` dentro de vipcode): comprue
 
 ## Primeros pasos
 
-Abre `vipcode` en la carpeta de tu proyecto y escribe lo que quieres hacer. No hace falta configurar nada: sin claves usa proveedores que permiten el acceso anónimo, con pocos mensajes (Kilo Gateway, 200 por hora; OVHcloud, 2 por minuto en cada modelo; LLM7, unos 60 por hora; Pollinations, un límite por hora). Cuando uno se agota, salta al siguiente.
+¿Es tu primera vez? `vipcode tutorial` te enseña lo básico en 5 pasos, en una carpeta de prácticas.
+
+Abre `vipcode` en la carpeta de tu proyecto y escribe lo que quieres hacer. No hace falta configurar nada: sin claves usa proveedores que permiten el acceso anónimo, con pocos mensajes (Kilo Gateway, 200 por hora; OVHcloud, 2 por minuto en cada modelo; LLM7, unos 60 por hora; Pollinations, un límite por hora). Cuando uno se agota, o tarda mucho en empezar a contestar, salta al siguiente.
 
 Para tareas largas se quedan cortos, así que conviene añadir alguna clave gratuita; con una de Gemini, NVIDIA o Mistral se nota mucho:
 
@@ -77,6 +79,7 @@ vipcode run "tarea"          # hace la tarea sin interfaz y termina
 vipcode limites              # cuánto te queda hoy de cada plan gratis
 vipcode doctor               # comprueba que todo funciona
 vipcode bug                  # avisa de un fallo en GitHub con el informe de vipcode doctor
+vipcode tutorial             # aprende lo básico en 5 pasos, en una carpeta de prácticas
 ```
 
 ### En la interfaz
@@ -119,6 +122,7 @@ Si quieres que lo que seleccionas se copie solo, actívalo en tu terminal (vipco
 | `/copiar [código]` | Copia la última respuesta (o su último bloque de código) al portapapeles |
 | `/doctor` | Comprueba que todo funciona y dice cómo arreglar lo que falte |
 | `/bug [qué ha pasado]` | Avisa de un fallo: abre un issue en GitHub con el informe de `/doctor` ya puesto (sin tus claves) |
+| `/tutorial` | Aprende lo básico en 5 pasos, en una carpeta de prácticas |
 | `/usage` | Tokens usados |
 | `/mcp`, `/lsp` | Estado de los servidores MCP y de lenguaje |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión |
@@ -179,6 +183,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 - **permission**: `allow`, `ask` o `deny` para `edit`, `bash`, `webfetch` y `mcp`; en `bash` y `mcp` gana el patrón más concreto. Las reglas `deny` se respetan incluso con `--yolo`. Piénsatelo antes de poner `webfetch` en `allow`: un texto malicioso podría hacer que el modelo mande tus datos a una web sin preguntarte.
 - **mcp**: servidores MCP locales (`command`) o remotos (`url`); los que piden iniciar sesión con OAuth todavía no funcionan. Un servidor local no recibe tus variables de entorno (ni tus claves), solo lo imprescindible para arrancar: lo que necesite, ponlo en `environment`. Ahí y en `headers`, `{env:NOMBRE}` se cambia por esa variable tuya.
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
+- **firstResponseMs**: cuánto se espera a que una IA empiece a contestar antes de probar otra (40000, unos 40 s; algo más con conversaciones largas). No cuenta para los modelos de tu ordenador.
 
 Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash), `VIPCODE_BROWSER` (otro navegador) y `VIPCODE_CLIPBOARD` (otro programa para copiar, que reciba el texto por su entrada).
 

@@ -27,6 +27,7 @@ const SETTINGS: Record<string, string> = {
   autoCompactTokens: "cuándo se resume la conversación",
   bashTimeoutMs: "cuánto pueden durar los comandos",
   maxWaitMs: "cuánto se espera a una IA ocupada",
+  firstResponseMs: "cuánto se espera a que una IA empiece a contestar",
   autoUpdateModels: "la búsqueda de modelos nuevos",
   checkUpdates: "los avisos de versiones nuevas",
   ranking: "el orden por puntuación",

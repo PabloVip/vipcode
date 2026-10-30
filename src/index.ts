@@ -17,6 +17,7 @@ import { showLine } from "./sanitize.js";
 import { createSkill, installSkills, loadSkills, removeSkill } from "./skills.js";
 import { type ProjectTrust, projectTrust, trustProject, untrustProject } from "./trust.js";
 import { describeTrust, joinList } from "./trustinfo.js";
+import { prepareTutorial } from "./tutorial.js";
 import { restartVipcode, updateVipcode } from "./update.js";
 import { completeMention } from "./tools.js";
 import { plainAdapter, plainEvents, plainPermissionPrompt, printLog, progressLine, ui } from "./ui.js";
@@ -34,6 +35,7 @@ Uso:
   vipcode limites                  cuánto te queda hoy de cada plan gratis
   vipcode doctor                   comprueba que todo funciona y dice cómo arreglar lo que falte
   vipcode bug [qué ha pasado]      avisa de un fallo: abre un issue en GitHub con el informe de vipcode doctor
+  vipcode tutorial                 aprende lo básico en 5 pasos, en una carpeta de prácticas
   vipcode skills                   skills instaladas (instrucciones que el agente carga cuando las necesita)
   vipcode skills add <origen>      instala skills de una carpeta o de un repositorio git (p. ej. anthropics/skills)
   vipcode skills new <nombre>      crea una skill vacía para rellenar
@@ -72,6 +74,8 @@ interface Options {
   images: string[];
   project: boolean;
   force: boolean;
+  // «vipcode tutorial»: se abre en la carpeta de prácticas con el tutorial en marcha
+  tutorial: boolean;
 }
 
 function helpText(): string {
@@ -104,8 +108,9 @@ function parseArgs(argv: string[]): Options {
     images: [],
     project: false,
     force: false,
+    tutorial: false,
   };
-  const commands = ["run", "auth", "models", "limites", "limits", "doctor", "bug", "skills", "sessions", "export", "update", "trust", "untrust", "help"];
+  const commands = ["run", "auth", "models", "limites", "limits", "doctor", "bug", "tutorial", "skills", "sessions", "export", "update", "trust", "untrust", "help"];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "-c" || arg === "--continue") {
@@ -502,6 +507,19 @@ async function plainLoop(app: App, options: Options, root: string) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  // El tutorial va en su carpeta de prácticas, para no tocar tus ficheros
+  if (options.command === "tutorial") {
+    if (!process.stdin.isTTY || !process.stdout.isTTY || options.plain) {
+      ui.error("El tutorial necesita la interfaz completa: ábrelo en una terminal con «vipcode tutorial».");
+      process.exitCode = 1;
+      return;
+    }
+    const dir = prepareTutorial();
+    process.chdir(dir);
+    ui.info(`Carpeta de prácticas: ${dir}`);
+    options.command = "";
+    options.tutorial = true;
+  }
   const root = process.cwd();
 
   if (options.command === "help") {
@@ -598,6 +616,9 @@ async function main() {
   }
   app.setYolo(options.yolo);
   await app.detectLocalModels();
+  if (options.tutorial) {
+    app.startTutorial();
+  }
 
   const interactive = options.command === "" && Boolean(process.stdin.isTTY && process.stdout.isTTY) && !options.plain;
   if (!interactive) {
@@ -663,9 +684,9 @@ async function main() {
   } finally {
     await app.shutdown();
   }
-  // «Reiniciar ahora» tras /update: la versión nueva, en esta misma conversación
-  if (app.restartRequested) {
-    process.exitCode = await restartVipcode(app.restartArgs());
+  // Al cerrar la interfaz: la versión nueva tras «Reiniciar ahora» (en esta misma conversación) o el tutorial
+  if (app.relaunch) {
+    process.exitCode = await restartVipcode(app.relaunch);
   }
 }
 

@@ -33,7 +33,7 @@ export function systemText(body) {
 
 // Servidor que imita la API de OpenAI; "handler" decide qué contestar en cada petición:
 // { text, tools: [{ name, args }], reasoning, usage, headers } en streaming, { status, json, headers } para errores,
-// { json } para /models
+// { json } para /models. Con pauseMs, el razonamiento sale enseguida y el texto tarda eso (una IA que ya contesta)
 export async function startMock(handler) {
   const requests = [];
   const server = http.createServer((req, res) => {
@@ -77,6 +77,9 @@ export async function startMock(handler) {
       const send = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
       if (reply.reasoning) {
         send({ choices: [{ delta: { reasoning: reply.reasoning } }] });
+      }
+      if (reply.pauseMs) {
+        await new Promise((resolve) => setTimeout(resolve, reply.pauseMs));
       }
       if (reply.text) {
         send({ choices: [{ delta: { content: reply.text } }] });

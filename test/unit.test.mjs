@@ -1131,3 +1131,42 @@ test("barra de abajo y /bug: el nombre corto del proveedor y un enlace que GitHu
   assert.ok(!body.includes("\x1b"));
 });
 
+test("tutorial: la carpeta de prácticas no pisa nada tuyo y cada paso avanza con lo que pide", async () => {
+  const tutorial = await import("../dist/tutorial.js");
+  // Una carpeta tuya con ese nombre no se toca: se usa otra
+  const mine = path.join(HOME, "vipcode-tutorial");
+  writeFile(path.join(mine, "mio.txt"), "MIO");
+  const dir = tutorial.prepareTutorial();
+  assert.equal(dir, path.join(HOME, "vipcode-tutorial-2"));
+  assert.equal(fs.readFileSync(path.join(mine, "mio.txt"), "utf8"), "MIO");
+  assert.ok(tutorial.isTutorialDir(dir) && !tutorial.isTutorialDir(mine));
+  assert.match(fs.readFileSync(path.join(dir, "saludo.js"), "utf8"), /i <= personas\.length/);
+  // Al repetirlo vuelve a estar como al principio, y si dentro hay un enlace no se escribe al otro lado
+  fs.writeFileSync(path.join(dir, "saludo.js"), "cambiado");
+  const outside = path.join(HOME, "fuera.txt");
+  fs.writeFileSync(outside, "FUERA");
+  fs.rmSync(path.join(dir, "LEEME.md"));
+  try {
+    fs.symlinkSync(outside, path.join(dir, "LEEME.md"));
+  } catch {
+    // en Windows crear enlaces necesita permisos
+  }
+  assert.equal(tutorial.prepareTutorial(), dir);
+  assert.match(fs.readFileSync(path.join(dir, "saludo.js"), "utf8"), /personas/);
+  assert.equal(fs.readFileSync(outside, "utf8"), "FUERA");
+  // Cada paso se da por hecho con lo que pide
+  const event = (kind, text, agent = "programar") => ({ kind, text, agent });
+  assert.ok(tutorial.tutorialDone(0, event("message", "¿qué hace saludo.js?")));
+  assert.ok(!tutorial.tutorialDone(1, event("message", "arregla el fallo")));
+  assert.ok(tutorial.tutorialDone(1, event("message", "arregla el fallo de @saludo.js")));
+  assert.ok(tutorial.tutorialDone(2, event("shell", "node saludo.js")));
+  assert.ok(!tutorial.tutorialDone(3, event("command", "/redo")));
+  assert.ok(tutorial.tutorialDone(3, event("command", "/undo")));
+  assert.ok(!tutorial.tutorialDone(4, event("message", "¿cómo lo arreglo?")));
+  assert.ok(tutorial.tutorialDone(4, event("message", "¿cómo lo arreglo?", "profe")));
+  assert.equal(tutorial.tutorialCard(5).title, "Tutorial terminado");
+  fs.rmSync(mine, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(outside);
+});
+
