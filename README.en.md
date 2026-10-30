@@ -36,7 +36,7 @@ vipcode auth login                     # add a free key (or /connect inside vipc
 vipcode limites                        # how much of each free plan is left today
 ```
 
-Inside vipcode: Enter sends, Tab switches between the `programar`, `planear` (read-only) and `profe` (it teaches you step by step and lets you make the changes) agents, Ctrl+P opens the command palette, `@path` attaches files, `!command` runs a shell command, Esc interrupts and `/help` lists everything. vipcode runs full screen: the mouse wheel and PgUp/PgDn scroll the conversation, and dragging over it with the mouse selects text and copies it when you let go. `"fullscreen": false` in the config writes the conversation to the normal terminal instead. Every conversation is saved in `~/.vipcode/sessions/`, also as Markdown.
+Inside vipcode: Enter sends, Tab switches between the `programar`, `planear` (read-only) and `profe` (it teaches you step by step and lets you make the changes) agents, Ctrl+P opens the command palette, `@path` attaches files, `!command` runs a shell command, Esc interrupts and `/help` lists everything. vipcode runs full screen: the mouse wheel and PgUp/PgDn scroll the conversation, and dragging over it with the mouse selects text and copies it when you let go (double click: a word; triple click: the line). Ctrl+F searches the conversation, a click on a tool line expands its full output, and Ctrl+Home/Ctrl+End jump to the start or the end. `"fullscreen": false` in the config writes the conversation to the normal terminal instead. Every conversation is saved in `~/.vipcode/sessions/`, also as Markdown.
 
 ## Security and privacy
 

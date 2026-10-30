@@ -627,8 +627,11 @@ export class App {
     // Con la pantalla completa, el ratón lo maneja vipcode: la rueda mueve la conversación y arrastrar copia
     if (this.config.fullscreen !== false) {
       lines.push(
-        row("Rueda · AvPág · RePág", "sube y baja por la conversación (al escribir vuelves abajo)"),
-        row("Copiar", "arrastra con el ratón sobre la conversación: al soltar se copia solo · /copiar"),
+        row("Rueda · AvPág · RePág", "sube y baja por la conversación (al escribir vuelves abajo); también la barra de la derecha"),
+        row("Ctrl+Inicio · Ctrl+Fin", "al principio o al final de la conversación"),
+        row("Ctrl+F", "busca en la conversación (Enter o ↑ la anterior, ↓ la siguiente, Esc cierra)"),
+        row("Copiar", "arrastra con el ratón y se copia al soltar; doble clic, una palabra; triple, la línea · /copiar"),
+        row("Clic en una herramienta", "despliega su salida entera (otro clic la pliega)"),
       );
     } else {
       lines.push(row("Copiar", "selecciona con el ratón y Cmd+C (Mac), Ctrl+Shift+C (Linux) o Ctrl+C (Windows Terminal) · /copiar"));

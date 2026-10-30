@@ -1,0 +1,117 @@
+# Pantalla completa: barra de desplazamiento, Ctrl+F, doble clic, herramientas que se despliegan y Ctrl+Fin (lo lanza
+# test/tui.test.mjs)
+set timeout 30
+log_user 1
+set cli [lindex $argv 0]
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+# Espera sin dejar de leer la pantalla: con sleep, la salida de la pseudo-terminal se llena (en macOS enseguida, con la
+# pantalla completa repintándose) y vipcode se queda parado escribiendo, sin atender al teclado
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
+proc libre {} {
+  expect {
+    "Escribe tu mensaje" {}
+    timeout { falla "no vuelve a quedar libre" }
+  }
+}
+
+spawn -noecho node $cli
+stty rows 30 columns 100 < $spawn_out(slave,name)
+libre
+
+# Una herramienta (ls de 20 ficheros: el resumen solo enseña los últimos) y una respuesta larga
+send "lista\r"
+expect {
+  "HECHO" {}
+  timeout { falla "no ejecuta la herramienta" }
+}
+libre
+send "largo\r"
+expect {
+  "LINEA-80" {}
+  timeout { falla "no llega la respuesta larga" }
+}
+libre
+pausa 0.5
+
+# 1. Ctrl+F: sin distinguir mayúsculas; Enter va a la anterior
+send "\006"
+pausa 0.3
+send "linea-7"
+expect {
+  "11 de 11" {}
+  timeout { falla "Ctrl+F no encuentra las 11 veces que sale linea-7" }
+}
+send "\r"
+expect {
+  "10 de 11" {}
+  timeout { falla "Enter no va a la coincidencia anterior" }
+}
+send "\033"
+libre
+
+# 2. Doble clic en el centro (la coincidencia, que se queda en medio): copia la palabra
+send "\033\[<0;5;13M\033\[<0;5;13m"
+pausa 0.05
+send "\033\[<0;5;13M\033\[<0;5;13m"
+expect {
+  "copiado" {}
+  timeout { falla "el doble clic no copia la palabra" }
+}
+
+# 3. Pinchar arriba en la barra de desplazamiento (la última columna) lleva al principio
+send "\033\[<0;100;1M\033\[<0;100;1m"
+expect {
+  "programa con IAs gratuitas" {}
+  timeout { falla "pinchar en la barra no lleva al principio" }
+}
+pausa 0.3
+
+# 4. Un clic en la línea de la herramienta despliega su salida entera, con «▾ plegar» en esa línea y los 20 ficheros
+# debajo (se va probando fila a fila)
+set desplegada 0
+for {set fila 8} {$fila <= 20 && !$desplegada} {incr fila} {
+  send "\033\[<0;5;${fila}M\033\[<0;5;${fila}m"
+  expect {
+    -timeout 1
+    "plegar" { set desplegada 1 }
+    timeout {}
+  }
+}
+if {!$desplegada} {
+  falla "un clic en la herramienta no despliega su salida"
+}
+expect {
+  "fichero-01" {}
+  timeout { falla "la herramienta desplegada no enseña toda su salida" }
+}
+
+# 5. Ctrl+Fin vuelve al final
+send "\033\[1;5F"
+expect {
+  "LINEA-80" {}
+  timeout { falla "Ctrl+Fin no vuelve al final" }
+}
+
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-VISTA-OK"
+exit 0

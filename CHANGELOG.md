@@ -4,6 +4,13 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- Ctrl+F busca en la conversación, sin distinguir mayúsculas ni tildes, resalta lo encontrado y dice cuántas veces sale («3 de 12»).
+- Doble clic copia una palabra (también una ruta o una dirección entera) y triple clic, la línea.
+- Un clic en una herramienta despliega su salida entera (lo que vio el agente) y otro clic la pliega.
+- Barra de desplazamiento a la derecha de la conversación, que se puede pinchar y arrastrar, y Ctrl+Inicio y Ctrl+Fin para ir al principio o al final.
+
 ## [0.2.13] - 2026-10-30
 
 ### Añadido

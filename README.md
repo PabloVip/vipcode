@@ -91,8 +91,10 @@ vipcode tutorial             # aprende lo básico en 5 pasos, en una carpeta de 
 - **!comando** lo ejecuta en la terminal sin salir de vipcode (por ejemplo `!git status`). El agente verá la salida con tu siguiente mensaje.
 - **Esc** interrumpe al agente. Mientras trabaja puedes seguir escribiendo: el mensaje se le entrega al acabar el paso.
 - **Ctrl+C** interrumpe, cierra el diálogo o borra lo escrito; dos veces seguidas sale.
-- **La rueda del ratón**, **AvPág** y **RePág** suben y bajan por la conversación; la caja de escribir se queda abajo. Al escribir vuelves al final.
-- **Copiar**: arrastra con el ratón sobre la conversación y, al soltar, lo seleccionado se copia solo al portapapeles. `/copiar` copia la última respuesta y `/copiar código`, su último bloque de código. Para seleccionar como siempre lo hace la terminal (por ejemplo en la caja de escribir), mantén **Fn** (Terminal de macOS), **⌥** (iTerm2) o **Mayúsculas** (Windows y Linux) mientras arrastras.
+- **La rueda del ratón**, **AvPág** y **RePág** suben y bajan por la conversación; la caja de escribir se queda abajo. Al escribir vuelves al final. La barra de la derecha dice por dónde vas (también se puede pinchar y arrastrar), y **Ctrl+Inicio** y **Ctrl+Fin** llevan al principio y al final.
+- **Ctrl+F** busca en la conversación, sin distinguir mayúsculas ni tildes: Enter o ↑ va a la coincidencia anterior, ↓ a la siguiente y Esc cierra.
+- **Un clic en una herramienta** (la línea que dice qué ha hecho) despliega su salida entera, y otro clic la pliega.
+- **Copiar**: arrastra con el ratón sobre la conversación y, al soltar, lo seleccionado se copia solo al portapapeles. Doble clic copia una palabra (también una ruta o una dirección entera) y triple clic, la línea. `/copiar` copia la última respuesta y `/copiar código`, su último bloque de código. Para seleccionar como siempre lo hace la terminal (por ejemplo en la caja de escribir), mantén **Fn** (Terminal de macOS), **⌥** (iTerm2) o **Mayúsculas** (Windows y Linux) mientras arrastras.
 
 Antes de editar un fichero, ejecutar un comando o salir a internet, vipcode te enseña el cambio o el comando y pregunta. Puedes contestar que sí una vez, que sí a todo lo de ese tipo durante la sesión, que sí siempre a ese comando (por ejemplo `npm test*`), que no, o que no y decirle qué hacer.
 

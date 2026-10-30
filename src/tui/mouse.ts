@@ -1,4 +1,5 @@
 import sliceAnsi from "slice-ansi";
+import stringWidth from "string-width";
 import { stripControl } from "../sanitize.js";
 
 // Con la pantalla completa, vipcode pide el ratón a la terminal (modo SGR, con arrastre): la rueda mueve la conversación
@@ -63,4 +64,44 @@ export function selectedText(lines: string[], a: TextPos, b: TextPos): string {
     out.push(stripControl(sliceAnsi(lines[line] || "", from, to)).replace(/\s+$/, ""));
   }
   return out.join("\n");
+}
+
+// Lo que cuenta como parte de una palabra al hacer doble clic: también rutas, direcciones y comandos (src/app.ts:12,
+// https://ejemplo.com/a?b=1, --force)
+const WORD = /[\p{L}\p{N}_\-./:@~#%+=?&]/u;
+
+// Las columnas [desde, hasta) de la palabra que hay en esa columna, o null si ahí no hay ninguna
+export function wordAt(line: string, col: number): [number, number] | null {
+  const chars = [...stripControl(line)];
+  const starts: number[] = [];
+  let width = 0;
+  let index = -1;
+  for (const [i, char] of chars.entries()) {
+    starts.push(width);
+    width += stringWidth(char);
+    if (index < 0 && width > col) {
+      index = i;
+    }
+  }
+  if (index < 0 || !WORD.test(chars[index])) {
+    return null;
+  }
+  let first = index;
+  let last = index;
+  while (first > 0 && WORD.test(chars[first - 1])) {
+    first--;
+  }
+  while (last < chars.length - 1 && WORD.test(chars[last + 1])) {
+    last++;
+  }
+  // El punto, la coma o los dos puntos del final de una frase no son de la palabra
+  while (last > first && /[.,:;?]/.test(chars[last])) {
+    last--;
+  }
+  return [starts[first], starts[last] + stringWidth(chars[last])];
+}
+
+// Las columnas [0, hasta) con texto de la línea (sin los espacios del final)
+export function lineColumns(line: string): [number, number] {
+  return [0, stringWidth(stripControl(line).replace(/\s+$/, ""))];
 }

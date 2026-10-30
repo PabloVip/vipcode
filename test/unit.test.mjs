@@ -1189,3 +1189,35 @@ test("ratón: la rueda, pulsar, arrastrar y soltar, y el texto seleccionado sin 
   assert.equal(mouse.selectedColumns(3, { line: 0, col: 7 }, { line: 2, col: 3 }), null);
 });
 
+test("pantalla completa: la palabra del doble clic, lo que encuentra Ctrl+F y la barra de desplazamiento", async () => {
+  const mouse = await import("../dist/tui/mouse.js");
+  const view = await import("../dist/tui/view.js");
+  // Doble clic: palabras, rutas y direcciones enteras, sin el punto del final de la frase
+  const line = "\x1b[2m  ⎿ mira src/tui/app.tsx:12 y https://ejemplo.com/a?b=1.\x1b[22m";
+  const word = (col) => {
+    const range = mouse.wordAt(line, col);
+    return range && line.replace(/\x1b\[\d+m/g, "").slice(range[0], range[1]);
+  };
+  assert.equal(word(6), "mira");
+  assert.equal(word(14), "src/tui/app.tsx:12");
+  assert.equal(word(40), "https://ejemplo.com/a?b=1");
+  // Entre dos palabras no hay ninguna
+  assert.equal(mouse.wordAt(line, 8), null);
+  // Con caracteres que ocupan dos columnas, las columnas siguen cuadrando
+  assert.deepEqual(mouse.wordAt("💭 hola", 4), [3, 7]);
+  assert.deepEqual(mouse.lineColumns("  hola   "), [0, 6]);
+  // Ctrl+F: sin mayúsculas ni tildes, con la columna en pantalla
+  const lines = ["Una sesión", "\x1b[1mSESION\x1b[22m guardada", "💭 sesion"];
+  assert.deepEqual(view.findMatches(lines, "sesion"), [
+    { line: 0, col: 4, width: 6 },
+    { line: 1, col: 0, width: 6 },
+    { line: 2, col: 3, width: 6 },
+  ]);
+  assert.deepEqual(view.findMatches(lines, "  "), []);
+  // La barra: si cabe todo no hay; si no, el trozo que se ve, arriba, en medio o abajo
+  assert.equal(view.scrollThumb(10, 20, 0), null);
+  assert.deepEqual(view.scrollThumb(100, 20, 0), { start: 0, size: 4 });
+  assert.deepEqual(view.scrollThumb(100, 20, 80), { start: 16, size: 4 });
+  assert.deepEqual(view.scrollThumb(100, 20, 40), { start: 8, size: 4 });
+});
+

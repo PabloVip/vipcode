@@ -196,3 +196,31 @@ test("interfaz: en pantalla completa, arrastrar con el ratón selecciona y copia
   }
 });
 
+test("interfaz: Ctrl+F, doble clic, barra de desplazamiento, herramientas que se despliegan y Ctrl+Fin", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const answer = Array.from({ length: 80 }, (_, i) => `LINEA-${i + 1}`).join("\n");
+  const mock = await startMock(({ body }) => {
+    const last = lastMessage(body);
+    if (last.role === "tool") {
+      return { text: "HECHO" };
+    }
+    // «ls» se aprueba solo: 20 ficheros, de los que el resumen solo enseña los últimos
+    return contentText(last.content).includes("lista") ? { tools: [{ name: "bash", args: { command: "ls -1" } }] } : { text: answer };
+  });
+  const files = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`fichero-${String(i + 1).padStart(2, "0")}.txt`, "x"]));
+  const ws = tempWorkspace(files);
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  const copied = path.join(ws.dir, "portapapeles.txt");
+  const script = path.join(ws.dir, "copiar.mjs");
+  fs.writeFileSync(script, `import fs from "node:fs";\nlet text = "";\nprocess.stdin.on("data", (d) => (text += d));\nprocess.stdin.on("end", () => fs.writeFileSync(${JSON.stringify(copied)}, text));\n`);
+  try {
+    const result = await runExpect("tui-vista.exp", ws, { VIPCODE_CLIPBOARD: `"${process.execPath}" "${script}"` });
+    assert.equal(result.code, 0, result.plain.slice(-3000));
+    assert.match(result.plain, /TUI-VISTA-OK/);
+    // El doble clic copió una palabra entera, sin los espacios de delante
+    assert.match(fs.readFileSync(copied, "utf8"), /^LINEA-\d+$/);
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
+});
+

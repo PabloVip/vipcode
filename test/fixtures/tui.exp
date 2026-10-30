@@ -51,11 +51,11 @@ expect {
   timeout { falla "la barra de abajo no dice de quién es el límite ni cuánto queda" }
 }
 
-# 1b. Una respuesta más ancha que la terminal se parte dentro de su hueco (120 columnas menos el «● »), no en el
-# borde de la terminal, que la cortaría por en medio
+# 1b. Una respuesta más ancha que la terminal se parte dentro de su hueco (120 columnas menos la de la barra de
+# desplazamiento y el «● »), no en el borde de la terminal, que la cortaría por en medio
 send "largo\r"
 expect {
-  -re {y{118}\r?\n  y{12}} {}
+  -re {y{117}[^y\n]*\r?\n  y{13}} {}
   timeout { falla "la respuesta larga no se parte en su hueco" }
 }
 expect {
