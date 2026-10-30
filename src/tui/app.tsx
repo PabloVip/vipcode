@@ -19,7 +19,7 @@ import { showControl, stripControl, stripUnsafe } from "../sanitize.js";
 import { type Session, appendHistory, loadHistory, sessionMarkdownPath } from "../session.js";
 import { type Todo, suggestFiles } from "../tools.js";
 import { colorPreview } from "../ui.js";
-import { checkForUpdate } from "../update.js";
+import { CHECK_MS, checkForUpdate } from "../update.js";
 import { type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
 import * as E from "./editor.js";
 
@@ -1082,7 +1082,9 @@ function Main(props: { app: App; initial: string }) {
     if (news) {
       push({ kind: "news", ...news });
     }
-    // Una vez al día mira en GitHub si hay una versión nueva de vipcode
+    // Mira en npm y GitHub si hay una versión nueva de vipcode (como mucho una vez por hora). Al abrirlo la anuncia
+    // con el recuadro; si sale con vipcode abierto, en la barra de abajo
+    let updates: ReturnType<typeof setInterval> | undefined;
     if (app.config.checkUpdates !== false) {
       void checkForUpdate().then((update) => {
         if (update) {
@@ -1091,6 +1093,15 @@ function Main(props: { app: App; initial: string }) {
           push({ kind: "update", version: update.version, security: update.security });
         }
       });
+      updates = setInterval(() => {
+        void checkForUpdate().then((update) => {
+          if (update && !app.updateInstalled && update.version !== app.newVersion) {
+            app.newVersion = update.version;
+            app.newVersionSecurity = update.security;
+            refresh();
+          }
+        });
+      }, CHECK_MS / 6);
     }
     if (app.config.autoUpdateModels && discoveryIsStale()) {
       void app
@@ -1111,7 +1122,10 @@ function Main(props: { app: App; initial: string }) {
         void submit(props.initial);
       }
     });
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      clearInterval(updates);
+    };
   }, []);
 
   const suggestions = useMemo<Suggestion[]>(() => {

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
-import { TRUST_PATH, ensureHomeDir } from "./paths.js";
+import { HOME_DIR, TRUST_PATH, ensureHomeDir, isDataDir, realInside } from "./paths.js";
 
 // Lo que un proyecto puede traer y que cambia qué ejecuta vipcode o a dónde manda tus claves: servidores MCP y
 // de lenguaje, proveedores, permisos, agentes con permisos propios y comandos que lanzan órdenes. No se usa hasta
@@ -11,11 +11,17 @@ const CONFIG_FILES = ["vipcode.json", path.join(".vipcode", "config.json")];
 const AGENT_DIRS = [path.join(".vipcode", "agents"), path.join(".opencode", "agent"), path.join(".opencode", "agents")];
 const COMMAND_DIRS = [path.join(".vipcode", "commands"), path.join(".opencode", "command"), path.join(".opencode", "commands")];
 
+// Un fichero que necesita tu confianza, con el texto leído: lo que se te cuenta (trustinfo.ts) es justo lo que apruebas
+export interface TrustSource {
+  file: string;
+  text: string;
+  kind: "config" | "agent" | "command";
+}
+
 export interface ProjectTrust {
   // Ficheros del proyecto que necesitan tu confianza (relativos a la carpeta)
   files: string[];
-  // Qué cambian, para enseñártelo antes de confiar
-  changes: string[];
+  sources: TrustSource[];
   fingerprint: string | null;
   // true si no trae nada de eso o si ya confiaste en esta misma versión
   trusted: boolean;
@@ -23,11 +29,6 @@ export interface ProjectTrust {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function short(value: unknown): string {
-  const text = typeof value === "string" ? value : JSON.stringify(value);
-  return text.length > 100 ? `${text.slice(0, 99)}…` : text;
 }
 
 function readText(file: string): string | null {
@@ -54,41 +55,6 @@ function markdownFiles(root: string, dirs: string[]): string[] {
   return files;
 }
 
-function describeConfig(data: Record<string, unknown>): string[] {
-  const changes: string[] = [];
-  const keys = Object.keys(data).filter((key) => !key.startsWith("$"));
-  const rest: string[] = [];
-  for (const key of keys) {
-    const value = data[key];
-    if (key === "providers" && Array.isArray(value)) {
-      const names = value.map((item) => (isObject(item) ? String(item.name || "?") : "?"));
-      changes.push(`proveedores: ${names.join(", ")} (pueden cambiar a dónde se mandan tus claves)`);
-    } else if (key === "mcp" && isObject(value)) {
-      const servers = Object.entries(value).map(([name, server]) => {
-        const detail = isObject(server) ? server.command || server.url : server;
-        // Las variables de tu entorno que se le pasan con {env:NOMBRE}
-        const uses = [...new Set([...JSON.stringify(server).matchAll(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g)].map((m) => m[1]))];
-        return `${name} (${short(detail)}${uses.length > 0 ? `; recibe tus variables ${uses.join(", ")}` : ""})`;
-      });
-      changes.push(`servidores MCP que se arrancan solos: ${servers.join(", ")}`);
-    } else if (key === "lsp" && isObject(value)) {
-      changes.push(`servidores de lenguaje: ${short(value)}`);
-    } else if (key === "permission") {
-      changes.push(`permisos: ${short(value)}`);
-    } else if (key === "agents" && isObject(value)) {
-      changes.push(`agentes: ${Object.keys(value).join(", ")}`);
-    } else if (key === "commands" && isObject(value)) {
-      changes.push(`comandos: ${Object.keys(value).join(", ")}`);
-    } else {
-      rest.push(key);
-    }
-  }
-  if (rest.length > 0) {
-    changes.push(`otros ajustes: ${rest.join(", ")}`);
-  }
-  return changes;
-}
-
 function readStore(): Record<string, { fingerprint: string; date: string }> {
   try {
     const data = JSON.parse(fs.readFileSync(TRUST_PATH, "utf8"));
@@ -108,62 +74,52 @@ function key(root: string): string {
 }
 
 export function projectTrust(root: string): ProjectTrust {
-  const files: string[] = [];
-  const changes: string[] = [];
-  const parts: string[] = [];
-  const add = (file: string, text: string, change: string[]) => {
-    // Con / también en Windows: así se enseñan igual en todos los sistemas
-    const relative = file.split(path.sep).join("/");
-    files.push(relative);
-    parts.push(`${relative}\u0000${text}`);
-    changes.push(...change.map((item) => `${relative}: ${item}`));
-  };
-  for (const relative of CONFIG_FILES) {
+  const sources: TrustSource[] = [];
+  // Abierto en tu carpeta personal, su .vipcode es la carpeta de datos de vipcode: lo que hay ahí es tuyo
+  const own = isDataDir(path.join(root, ".vipcode"));
+  const fromProject = (relative: string) => !(own && relative.split(path.sep)[0] === ".vipcode");
+  // Con / también en Windows: así se enseñan igual en todos los sistemas
+  const add = (file: string, text: string, kind: TrustSource["kind"]) => sources.push({ file: file.split(path.sep).join("/"), text, kind });
+  for (const relative of CONFIG_FILES.filter(fromProject)) {
     const text = readText(path.join(root, relative));
-    if (text === null) {
-      continue;
+    if (text !== null) {
+      add(relative, text, "config");
     }
-    let data: unknown = {};
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = {};
-    }
-    const described = isObject(data) ? describeConfig(data) : [];
-    add(relative, text, described.length > 0 ? described : ["configuración de vipcode"]);
   }
-  for (const relative of markdownFiles(root, AGENT_DIRS)) {
+  for (const relative of markdownFiles(root, AGENT_DIRS.filter(fromProject))) {
     const text = readText(path.join(root, relative)) || "";
     const { data } = parseFrontmatter(text);
     // Un agente que solo trae instrucciones es como un AGENTS.md: no hace falta confiar
     if (data.permission !== undefined || data.readOnly !== undefined) {
-      add(relative, text, [`agente con permisos propios: ${short({ permission: data.permission, readOnly: data.readOnly })}`]);
+      add(relative, text, "agent");
     }
   }
-  for (const relative of markdownFiles(root, COMMAND_DIRS)) {
+  for (const relative of markdownFiles(root, COMMAND_DIRS.filter(fromProject))) {
     const text = readText(path.join(root, relative)) || "";
     if (/!`[^`]+`/.test(text)) {
-      add(relative, text, ["comando que ejecuta órdenes en la terminal al usarlo"]);
+      add(relative, text, "command");
     }
   }
+  const files = sources.map((source) => source.file);
   if (files.length === 0) {
-    return { files, changes, fingerprint: null, trusted: true };
+    return { files, sources, fingerprint: null, trusted: true };
   }
+  const parts = sources.map((source) => `${source.file}\u0000${source.text}`);
   const fingerprint = crypto.createHash("sha256").update(parts.join("\u0000\u0000")).digest("hex");
-  return { files, changes, fingerprint, trusted: readStore()[key(root)]?.fingerprint === fingerprint };
+  return { files, sources, fingerprint, trusted: readStore()[key(root)]?.fingerprint === fingerprint };
 }
 
-// Confías en la configuración que trae la carpeta tal como está ahora
-export function trustProject(root: string): ProjectTrust {
-  const trust = projectTrust(root);
-  if (!trust.fingerprint) {
-    return trust;
+// Confías en la configuración que trae la carpeta tal como la has visto: si ha cambiado desde entonces, no vale y se
+// te vuelve a preguntar
+export function trustProject(root: string, seen: ProjectTrust = projectTrust(root)): ProjectTrust {
+  if (!seen.fingerprint) {
+    return seen;
   }
   const store = readStore();
-  store[key(root)] = { fingerprint: trust.fingerprint, date: new Date().toISOString() };
+  store[key(root)] = { fingerprint: seen.fingerprint, date: new Date().toISOString() };
   ensureHomeDir();
   fs.writeFileSync(TRUST_PATH, JSON.stringify(store, null, 2), { mode: 0o600 });
-  return { ...trust, trusted: true };
+  return { ...seen, trusted: true };
 }
 
 export function untrustProject(root: string): boolean {
@@ -177,9 +133,10 @@ export function untrustProject(root: string): boolean {
   return true;
 }
 
-// Ficheros de un agente o comando que están dentro del proyecto (los tuyos de ~/.vipcode no cuentan)
+// Ficheros de un agente o comando que están dentro del proyecto (los tuyos de ~/.vipcode no cuentan, tampoco si abres
+// vipcode en tu carpeta personal)
 export function isProjectFile(root: string, file: string | undefined): boolean {
-  if (!file) {
+  if (!file || realInside(file, HOME_DIR)) {
     return false;
   }
   const relative = path.relative(root, file);

@@ -26,7 +26,9 @@ import { Snapshots } from "./snapshot.js";
 import { commandShell, findProgram, killTree } from "./shell.js";
 import { compareVersions, updateVipcode } from "./update.js";
 import { formatTodos, truncate } from "./tools.js";
+import { showLine } from "./sanitize.js";
 import { type ProjectTrust, projectTrust } from "./trust.js";
+import { joinList } from "./trustinfo.js";
 
 export interface SelectItem<T> {
   label: string;
@@ -191,7 +193,7 @@ export class App {
     this.trust = projectTrust(root);
     this.trusted = options.trusted ?? this.trust.trusted;
     if (!this.trusted) {
-      const notice = `Esta carpeta trae configuración de vipcode que no estoy usando (${this.trust.files.join(", ")}): puede arrancar programas o cambiar a dónde van tus claves. Si confías en ella, ejecuta «vipcode trust».`;
+      const notice = showLine(`No estoy usando la configuración que trae esta carpeta (${joinList(this.trust.files, Infinity)}). Si es tuya o te fías de ella, escribe «vipcode trust» en la terminal para usarla.`);
       if (!configNotices.includes(notice)) {
         configNotices.push(notice);
       }

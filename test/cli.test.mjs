@@ -646,11 +646,11 @@ test("seguridad: un proyecto en el que no confías no puede desviar tus claves a
   ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"] });
   let result = await runVip(["run", "hola"], { cwd: ws.proj, home: ws.home });
   assert.match(result.output, /HOLA/, result.output);
-  assert.match(result.output, /configuración de vipcode que no estoy usando \(vipcode\.json\).*vipcode trust/s);
+  assert.match(result.output, /No estoy usando la configuración que trae esta carpeta \(vipcode\.json\).*vipcode trust/s);
   assert.ok(mock.chats().length > 0 && mock.chats().every((r) => r.path.startsWith("/p/")), "no debe ir a la dirección del proyecto");
   // Si confías en la carpeta, se usa (y vipcode trust enseña qué cambia)
   result = await runVip(["trust"], { cwd: ws.proj, home: ws.home });
-  assert.match(result.output, /proveedores: p/);
+  assert.match(result.output, /proveedor «p»/);
   const before = mock.chats().length;
   result = await runVip(["run", "hola"], { cwd: ws.proj, home: ws.home });
   assert.ok(mock.chats().slice(before).every((r) => r.path.startsWith("/malo/")));

@@ -6,7 +6,8 @@ import { PACKAGE_NAME, REPO_URL, VERSION } from "./meta.js";
 import { INSTALL_DIR, UPDATE_PATH, ensureHomeDir, isInside } from "./paths.js";
 import { findProgram, spawnProgram } from "./shell.js";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+// Cada cuánto se vuelve a mirar si hay una versión nueva (con un día, el aviso llegaba tarde a quien ya lo había abierto)
+export const CHECK_MS = 60 * 60 * 1000;
 
 // Carpeta donde está instalado vipcode (la que contiene dist/). VIPCODE_INSTALL_ROOT permite fingir otra en las pruebas
 export function packageRoot(): string {
@@ -140,7 +141,7 @@ export interface UpdateNotice {
   security: boolean;
 }
 
-// Una vez al día, en segundo plano: la versión nueva si la hay (y nunca falla)
+// Como mucho una vez por hora, en segundo plano: la versión nueva si la hay (y nunca falla)
 export async function checkForUpdate(): Promise<UpdateNotice | null> {
   let cache: { checked?: number; latest?: string; security?: boolean; from?: string } = {};
   try {
@@ -148,8 +149,8 @@ export async function checkForUpdate(): Promise<UpdateNotice | null> {
   } catch {
     // primera vez
   }
-  // Se vuelve a mirar cada día, y también si has actualizado desde la última vez (cambia lo que te falta)
-  if (!cache.checked || Date.now() - cache.checked > DAY_MS || !cache.latest || (cache.from && cache.from !== VERSION)) {
+  // Se vuelve a mirar cada hora, y también si has actualizado desde la última vez (cambia lo que te falta)
+  if (!cache.checked || Date.now() - cache.checked > CHECK_MS || !cache.latest || (cache.from && cache.from !== VERSION)) {
     try {
       const release = await latestRelease();
       const latest = release?.version || VERSION;

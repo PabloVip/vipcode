@@ -44,7 +44,7 @@ Inside vipcode: Enter sends, Tab switches between the `programar`, `planear` (re
 - It only reads, searches and writes inside the project folder and can't read or change your keys or its own configuration. Nothing a project brings runs by itself: vipcode never starts programs from the project folder, ignores `AGENTS.md`, agents, commands or skills that are symlinks to files outside it, and always asks before writing into `.git`.
 - MCP and language servers started by vipcode don't get your keys (an MCP server only receives what you put in its `environment`, where `{env:NAME}` passes one of your variables).
 - Anonymous providers and several free tiers may store what you send or use it for training: don't send secrets or confidential code. For that, use a local model (Ollama, LM Studio) and set `"keyless": false`.
-- vipcode sends no usage data; besides your AI providers (and LLM Stats if you give it your key), it only checks npm and GitHub once a day for a new version.
+- vipcode sends no usage data; besides your AI providers (and LLM Stats if you give it your key), it only checks npm and GitHub for a new version, at most once an hour.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 

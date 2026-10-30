@@ -67,6 +67,18 @@ export function realInside(file: string, dir: string): boolean {
   }
 }
 
+// true si la carpeta es la de datos de vipcode: al abrir vipcode en tu carpeta personal, su .vipcode es tu
+// configuración, no la que trae un proyecto
+export function isDataDir(dir: string): boolean {
+  try {
+    const a = fs.realpathSync.native(dir);
+    const b = fs.realpathSync.native(HOME_DIR);
+    return FOLD_CASE ? a.toLowerCase() === b.toLowerCase() : a === b;
+  } catch {
+    return false;
+  }
+}
+
 export function protectedDirs(): { dir: string; read: boolean }[] {
   const dirs = [{ dir: HOME_DIR, read: true }];
   if (process.env.VIPCODE_ALLOW_SELF_EDIT !== "1") {

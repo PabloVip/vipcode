@@ -13,9 +13,10 @@ import { limitsReport } from "./limits.js";
 import { REPO_URL, VERSION } from "./meta.js";
 import { NoSlotError } from "./router.js";
 import { appendHistory, exportMarkdown, listSessions, loadSession, saveExport } from "./session.js";
-import { stripControl } from "./sanitize.js";
+import { showLine } from "./sanitize.js";
 import { createSkill, installSkills, loadSkills, removeSkill } from "./skills.js";
 import { type ProjectTrust, projectTrust, trustProject, untrustProject } from "./trust.js";
+import { describeTrust, joinList } from "./trustinfo.js";
 import { updateVipcode } from "./update.js";
 import { completeMention } from "./tools.js";
 import { plainAdapter, plainEvents, plainPermissionPrompt, printLog, ui } from "./ui.js";
@@ -305,20 +306,36 @@ function runSkills(options: Options, root: string) {
   process.exitCode = 1;
 }
 
-function showTrust(trust: ProjectTrust) {
-  console.log(pc.yellow("⚠ Esta carpeta trae configuración propia de vipcode:"));
-  for (const change of trust.changes) {
-    console.log(`  · ${stripControl(change)}`);
+// Qué cambiaría la configuración de la carpeta, en palabras sencillas: primero lo que puede hacerte daño. Devuelve true
+// si hay algo de eso
+function showTrust(trust: ProjectTrust): boolean {
+  const { changes, settings } = describeTrust(trust);
+  const title = showLine(`Esta carpeta trae su propia configuración de vipcode (${joinList(trust.files, Infinity)}).`);
+  const rest = joinList(settings, 8);
+  if (changes.length === 0) {
+    console.log(title);
+    console.log(settings.length > 0 ? `  Solo cambia ajustes sin riesgo: ${rest}.` : "  No cambia nada de lo que tienes.");
+    return false;
   }
-  console.log(pc.dim("  Puede hacer que vipcode arranque programas, mande tus claves a otro servidor o deje de pedirte permiso."));
+  console.log(pc.yellow(`⚠ ${title}`));
+  console.log("  Si la usas, vipcode:");
+  for (const change of changes) {
+    console.log(`  · ${change}`);
+  }
+  if (settings.length > 0) {
+    console.log(`  · y cambiará ajustes sin riesgo: ${rest}`);
+  }
+  return true;
 }
 
 // Antes de abrir la interfaz: ¿usamos la configuración del proyecto?
 async function askTrust(trust: ProjectTrust): Promise<boolean> {
-  showTrust(trust);
+  if (showTrust(trust)) {
+    console.log(pc.dim("  Si la carpeta es tuya o de alguien de confianza, puedes decir que sí. Si la has descargado y no sabes qué trae, mejor di que no: vipcode funcionará igual, con tu configuración de siempre."));
+  }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = (await rl.question("¿Confías en esta carpeta y quieres usar esa configuración? (s/N) ")).trim().toLowerCase();
+    const answer = (await rl.question("¿Usar la configuración de esta carpeta? (s/N) ")).trim().toLowerCase();
     return ["s", "si", "sí", "y", "yes"].includes(answer);
   } catch {
     return false;
@@ -501,7 +518,7 @@ async function main() {
       return;
     }
     showTrust(trust);
-    trustProject(root);
+    trustProject(root, trust);
     ui.info("Hecho: vipcode usará esa configuración en esta carpeta. Si cambia, te volverá a preguntar.");
     return;
   }
@@ -558,16 +575,13 @@ async function main() {
     session = listSessions(root)[0];
   }
 
-  // En la interfaz se pregunta si usar la configuración del proyecto; con «run» se avisa y no se usa
-  let trusted: boolean | undefined;
+  // En la interfaz se pregunta si usar la configuración del proyecto; con «run» se avisa y no se usa. Se aprueba lo que
+  // has visto: si la carpeta cambia mientras contestas, no se usa
   const trust = projectTrust(root);
-  if (!trust.trusted && options.command === "" && process.stdin.isTTY) {
-    trusted = await askTrust(trust);
-    if (trusted) {
-      trustProject(root);
-    }
+  if (!trust.trusted && options.command === "" && process.stdin.isTTY && (await askTrust(trust))) {
+    trustProject(root, trust);
   }
-  const app = new App(root, { session, agentName: options.agent || undefined, trusted });
+  const app = new App(root, { session, agentName: options.agent || undefined });
   if (options.agent && !app.agents.some((agent) => agent.name === agentName(options.agent))) {
     ui.error(`No existe el agente «${options.agent}».`);
     process.exitCode = 1;

@@ -7,6 +7,8 @@ const SEQUENCES = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x
 const CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
 // Colores y estilos (SGR): son inofensivos salvo «oculto» (8), que escondería texto
 const SGR = /\x1b\[([0-9;]*)m/g;
+// Invisibles que cambian cómo se lee un texto: los de dirección (pueden poner un trozo del revés) y los de anchura cero
+const INVISIBLE = /[\u061c\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 
 // Para enseñar texto que no es nuestro
 export function stripControl(text: string): string {
@@ -28,15 +30,22 @@ export function stripUnsafe(text: string): string {
   return result + stripControl(input.slice(last));
 }
 
-// Para lo que vas a aprobar (comandos, rutas, diffs): los caracteres de control se ven en vez de actuar
+// Para lo que vas a aprobar (comandos, rutas, diffs): los caracteres de control y los invisibles se ven en vez de actuar
 export function showControl(text: string): string {
-  return String(text).replace(CONTROLS, (char) => {
-    if (char === "\x1b") {
-      return "␛";
-    }
-    if (char === "\r") {
-      return "␍";
-    }
-    return `\\x${char.charCodeAt(0).toString(16).padStart(2, "0")}`;
-  });
+  return String(text)
+    .replace(CONTROLS, (char) => {
+      if (char === "\x1b") {
+        return "␛";
+      }
+      if (char === "\r") {
+        return "␍";
+      }
+      return `\\x${char.charCodeAt(0).toString(16).padStart(2, "0")}`;
+    })
+    .replace(INVISIBLE, (char) => `<U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}>`);
+}
+
+// Lo mismo para una sola línea: un salto de línea también se ve, así no puede fingir otra línea debajo
+export function showLine(text: string): string {
+  return showControl(text).replace(/\n/g, "\\n").replace(/\t/g, " ");
 }

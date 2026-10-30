@@ -4,6 +4,21 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Seguridad
+
+- La pregunta de si confías en una carpeta enseña enteros los comandos y las direcciones que trae su configuración (antes se cortaban los largos), y un nombre con saltos de línea ya no puede fingir otra línea.
+- Los caracteres invisibles que cambian cómo se lee un texto (los que ponen un trozo del revés y los de anchura cero) se ven en el diálogo de permisos y en esa pregunta, para que no puedan disfrazar un comando.
+- Si la carpeta cambia mientras contestas, su configuración no se usa: se aprueba justo lo que has visto.
+
+### Cambiado
+
+- La pregunta de si confías en una carpeta se entiende mejor: cuenta en palabras sencillas qué haría su configuración (qué programas arrancaría, a dónde mandaría lo que escribes, qué dejaría de preguntarte), y solo lo que cambia respecto a lo que ya tienes.
+
+### Corregido
+
+- El aviso de versión nueva llega como mucho una hora después de publicarse, también si tienes vipcode abierto. Antes podía tardar hasta un día si ya lo habías abierto ese día.
+- Al abrir vipcode en tu carpeta personal ya no te pregunta si confías en tu propia configuración (`~/.vipcode`).
+
 ## [0.2.9] - 2026-10-30
 
 ### Añadido

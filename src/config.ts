@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CONFIG_PATH, HOME_DIR, ensureHomeDir } from "./paths.js";
+import { CONFIG_PATH, HOME_DIR, ensureHomeDir, isDataDir } from "./paths.js";
 import { projectTrust } from "./trust.js";
 
 export { CONFIG_PATH, HOME_DIR, SESSIONS_DIR, STATE_PATH } from "./paths.js";
@@ -174,7 +174,7 @@ export interface Config {
   snapshot: boolean;
   // Buscar modelos gratis nuevos una vez al día
   autoUpdateModels: boolean;
-  // Mirar una vez al día en GitHub si hay una versión nueva de vipcode
+  // Mirar cada hora en npm y GitHub si hay una versión nueva de vipcode
   checkUpdates: boolean;
   // Usar los proveedores gratuitos que no piden clave (Kilo, OVHcloud, LLM7, Pollinations); pueden guardar lo que envías
   keyless: boolean;
@@ -387,8 +387,9 @@ function readJson(file: string): Record<string, unknown> {
 
 // Config del proyecto: vipcode.json o .vipcode/config.json en la carpeta donde ejecutas vipcode
 export function projectConfigFiles(root: string): string[] {
-  const candidates = [path.join(root, "vipcode.json"), path.join(root, ".vipcode", "config.json")];
-  return candidates.filter((file) => path.resolve(file) !== path.resolve(CONFIG_PATH) && fs.existsSync(file));
+  // Abierto en tu carpeta personal, .vipcode/config.json es tu propia config: ya está cargada
+  const candidates = [path.join(root, "vipcode.json"), ...(isDataDir(path.join(root, ".vipcode")) ? [] : [path.join(root, ".vipcode", "config.json")])];
+  return candidates.filter((file) => fs.existsSync(file));
 }
 
 // Cambia un valor de tu config global (~/.vipcode/config.json) sin tocar el resto
