@@ -2,6 +2,9 @@
 set timeout 30
 log_user 1
 set cli [lindex $argv 0]
+# Con la pantalla completa cada repintado ocupa varios KB: con el búfer de serie (2.000 bytes), expect tiraría lo de
+# arriba de la pantalla antes de buscar en ello
+match_max -d 200000
 
 proc falla {motivo} {
   puts "\nFALLO: $motivo"
