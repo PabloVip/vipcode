@@ -602,6 +602,11 @@ test("actualizaciones: comparar versiones y mirar en npm y GitHub como mucho una
   assert.equal(update.compareVersions("0.2.0", "v0.2.0"), 0);
   assert.ok(update.compareVersions("0.2.0", "0.3.0-beta.1") < 0);
   assert.ok(update.compareVersions("1.0", "0.99.99") > 0);
+  // La barra de carga de /update empieza donde empieza el paso, avanza y no llega al final hasta que termina
+  const paso = { text: "Instalando", from: 0.1, to: 0.9 };
+  assert.equal(update.stepProgress(paso, 0), 0.1);
+  assert.ok(update.stepProgress(paso, 5000) > 0.1 && update.stepProgress(paso, 5000) < update.stepProgress(paso, 30000));
+  assert.ok(update.stepProgress(paso, 120000) < 0.9);
   const { startMock } = await import("./helpers/mock-llm.mjs");
   // npm y GitHub simulados: cada prueba cambia lo que responden
   let npm = { status: 404, json: {} };
@@ -1111,3 +1116,18 @@ test("profe: enseña paso a paso y no puede cambiar nada; el consejo de Git en W
   assert.match(gitAdvice("win32", false, "PowerShell", false), /winget install Git\.Git/);
   assert.match(gitAdvice("win32", true, "PowerShell", false), /winget install Git\.Git/);
 });
+
+test("barra de abajo y /bug: el nombre corto del proveedor y un enlace que GitHub puede abrir", async () => {
+  const { providerName } = await import("../dist/limits.js");
+  assert.equal(providerName({ name: "openrouter", label: "OpenRouter (modelos :free)" }), "OpenRouter");
+  assert.equal(providerName({ name: "mio" }), "mio");
+  // Un informe enorme se recorta por el final para que el enlace no pase de lo que abre GitHub
+  const { bugReportUrl } = await import("../dist/doctor.js");
+  const url = bugReportUrl(Array.from({ length: 2000 }, (_, i) => `\x1b[32m✓\x1b[39m línea ${i}`).join("\n"));
+  assert.ok(url.length <= 8000, String(url.length));
+  const body = new URL(url).searchParams.get("body");
+  assert.match(body, /línea 0\n/);
+  assert.match(body, /… \(recortado\)\n```$/);
+  assert.ok(!body.includes("\x1b"));
+});
+

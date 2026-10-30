@@ -9,7 +9,7 @@ import { type CommandDefinition, expandCommand, loadCommands } from "./commands.
 import { CONFIG_PATH, type Config, type ModelConfig, type ProviderConfig, configNotices, isAnonymous, loadConfig, setGlobalConfigValue } from "./config.js";
 import { type RefreshSummary, buildProviders, detectLocal, refreshModels } from "./discovery.js";
 import { isRemoteSession, loginOpenRouter, openBrowser } from "./login.js";
-import { limitsReport } from "./limits.js";
+import { limitsReport, providerName, quotaFor } from "./limits.js";
 import { LspManager } from "./lsp.js";
 import { McpManager } from "./mcp.js";
 import { VERSION } from "./meta.js";
@@ -20,11 +20,11 @@ import { Router } from "./router.js";
 import { type SkillDefinition, loadSkills, skillContent } from "./skills.js";
 import { hasSecurity, localChangelog, sectionsBetween } from "./changelog.js";
 import { cleanForClipboard, copyToClipboard, lastCodeBlock } from "./clipboard.js";
-import { doctorReport, gitAdvice } from "./doctor.js";
+import { bugReportUrl, doctorReport, gitAdvice } from "./doctor.js";
 import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession, sessionMarkdownPath } from "./session.js";
 import { Snapshots } from "./snapshot.js";
 import { commandShell, findProgram, killTree } from "./shell.js";
-import { compareVersions, updateVipcode } from "./update.js";
+import { type UpdateStep, compareVersions, updateVipcode } from "./update.js";
 import { formatTodos, truncate } from "./tools.js";
 import { showLine } from "./sanitize.js";
 import { type ProjectTrust, projectTrust } from "./trust.js";
@@ -47,6 +47,15 @@ export interface UiAdapter {
   prompt?(title: string, options?: { mask?: boolean; placeholder?: string }): Promise<string | null>;
   // Vuelve a poner un texto en la caja de escritura (tras /undo)
   setInput?(text: string): void;
+  // Barra de carga de algo que tarda (/update); null la quita
+  progress?(progress: Progress | null): void;
+  // Se ha instalado una versión nueva de vipcode: hay que reiniciarlo para usarla
+  updated?(version: string): void;
+}
+
+export interface Progress extends UpdateStep {
+  // Lo que se está haciendo, encima de la barra («Actualizando vipcode»)
+  title: string;
 }
 
 export interface RunOptions {
@@ -57,6 +66,8 @@ export interface RunOptions {
 
 export interface CommandResult {
   exit?: boolean;
+  // Cerrar y abrir la versión nueva en esta misma conversación (tras /update)
+  restart?: boolean;
   run?: { input: UserInput; options: RunOptions };
   // Se ha cargado otra sesión: la interfaz enseña su conversación
   loaded?: boolean;
@@ -77,6 +88,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "limites", description: "cuánto te queda hoy de cada plan gratis" },
   { name: "copiar", args: "[código]", description: "copia la última respuesta (o su último bloque de código) al portapapeles" },
   { name: "doctor", description: "comprueba que todo funciona (programas, claves, proveedores) y dice cómo arreglar lo que falte" },
+  { name: "bug", args: "[qué ha pasado]", description: "avisa de un fallo: abre un issue en GitHub con el informe de /doctor ya puesto (sin tus claves)" },
   { name: "undo", description: "deshacer el último mensaje (ficheros y conversación)" },
   { name: "redo", description: "rehacer lo deshecho" },
   { name: "diff", args: "[all]", description: "cambios del último mensaje (o de toda la sesión)" },
@@ -180,6 +192,12 @@ export class App {
   newVersionSecurity = false;
   // /update ya la ha instalado: se usa al cerrar y volver a abrir vipcode
   updateInstalled = false;
+  // La versión que se ha instalado con /update (al salir se recuerda abrir vipcode otra vez para usarla)
+  installedVersion: string | null = null;
+  // «Reiniciar ahora» tras /update: al cerrar la interfaz se abre la versión nueva
+  restartRequested = false;
+  // Proveedores a los que ya se les ha sugerido otra cuenta porque se les acaban las peticiones (una vez cada uno)
+  private quotaTips = new Set<string>();
   // La interfaz pone aquí cómo preguntar los permisos
   promptPermission: (request: PermissionRequest, agent: AgentDefinition) => Promise<PermissionReply> = async () => ({
     allow: false,
@@ -430,6 +448,51 @@ export class App {
   async startMcp(onChange?: () => void) {
     if (this.mcp) {
       await this.mcp.start(onChange);
+    }
+  }
+
+  // Para abrir la versión nueva en esta misma conversación (si todavía no hay nada, una nueva)
+  restartArgs(): string[] {
+    return this.agent.session.messages.length > 0 ? ["--session", this.agent.session.id] : [];
+  }
+
+  // Cuando quedan pocas peticiones gratis hoy en el modelo en uso: lo dice una vez y sugiere las cuentas gratis que más
+  // dan de las que todavía no tienes
+  lowQuotaTip(): string | null {
+    const slot = this.router.slotFor(this.agent.lastSlot);
+    const quota = slot ? quotaFor(this.router, slot) : null;
+    if (!slot || !quota?.limit || quota.period !== "day" || quota.remaining > Math.max(3, Math.ceil(quota.limit * 0.1)) || this.quotaTips.has(slot.provider.name)) {
+      return null;
+    }
+    this.quotaTips.add(slot.provider.name);
+    const who = providerName(slot.provider);
+    const left =
+      quota.remaining <= 0
+        ? `Se han acabado por hoy las peticiones gratis de ${who}: vipcode sigue solo con otro proveedor`
+        : `Te ${quota.remaining === 1 ? "queda 1 petición gratis" : `quedan ${quota.remaining} peticiones gratis`} hoy en ${who}. Cuando se acaben, vipcode seguirá solo con otro proveedor`;
+    const offers = ["cerebras", "groq"]
+      .filter((name) => name !== slot.provider.name && !this.router.slots.some((other) => other.provider.name === name))
+      .flatMap((name) => {
+        const perDay = CATALOG.find((provider) => provider.name === name)?.freeLimits?.perDay;
+        return perDay ? [`/connect ${name} (${perDay.toLocaleString("es-ES")} al día por modelo)`] : [];
+      });
+    return offers.length > 0 ? `${left}. Para tener muchas más, conecta una cuenta gratis: ${offers.join(" o ")}.` : `${left}.`;
+  }
+
+  // /bug: GitHub con el informe de /doctor ya puesto; la persona cuenta qué ha pasado y lo envía ella
+  async reportBug(ui: UiAdapter, description: string) {
+    ui.info("Preparando el informe…");
+    const url = bugReportUrl(await doctorReport(this), description);
+    // Por SSH, o en Linux sin escritorio, el navegador de esta máquina no es el tuyo: el enlace, al portapapeles (salvo si
+    // has dicho con VIPCODE_BROWSER cómo abrirlo)
+    const local = Boolean(process.env.VIPCODE_BROWSER) || (!isRemoteSession() && (process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)));
+    if (local) {
+      openBrowser(url);
+      ui.info("He abierto GitHub en tu navegador con el informe ya puesto. Cuenta qué ha pasado y pulsa «Submit new issue»: no se envía nada hasta entonces. El informe no lleva tus claves, pero revísalo por si hay algo que no quieras compartir.");
+    } else if ((await copyToClipboard(url)) === "portapapeles") {
+      ui.info("He copiado al portapapeles el enlace para avisar del fallo en GitHub: pégalo en tu navegador, cuenta qué ha pasado y pulsa «Submit new issue».");
+    } else {
+      ui.info(`Abre este enlace en tu navegador para avisar del fallo (no se envía nada hasta que pulses «Submit new issue»):\n${url}`);
     }
   }
 
@@ -1049,6 +1112,9 @@ export class App {
         ui.info("Comprobando…");
         ui.block(await doctorReport(this));
         return {};
+      case "/bug":
+        await this.reportBug(ui, arg);
+        return {};
       case "/limites":
       case "/limits":
         ui.block(limitsReport(this.router));
@@ -1101,15 +1167,38 @@ export class App {
         return {};
       }
       case "/update": {
-        const result = await updateVipcode((text) => ui.info(text));
+        let result;
+        try {
+          result = await updateVipcode((step) => (ui.progress ? ui.progress({ title: "Actualizando vipcode", ...step }) : ui.info(`${step.text}…`)));
+        } finally {
+          ui.progress?.(null);
+        }
         if (result.status === "error") {
           ui.error(result.message);
         } else if (result.status === "manual") {
           ui.notice(result.message);
         } else {
-          ui.info(result.message);
           this.newVersion = null;
-          this.updateInstalled ||= result.status === "updated";
+          if (result.status === "updated") {
+            this.updateInstalled = true;
+            this.installedVersion = result.version || null;
+          }
+          if (result.status === "updated" && result.version && ui.updated) {
+            ui.updated(result.version);
+          } else {
+            ui.info(result.message);
+          }
+          // La interfaz completa sabe reiniciarse sola, en esta misma conversación
+          if (result.status === "updated" && ui.updated && ui.select) {
+            const choice = await ui.select(`vipcode ${result.version || ""} está instalado. ¿Lo reinicias ahora para usarlo?`, [
+              { label: "Reiniciar ahora", description: "sigues en esta misma conversación", value: "ahora" },
+              { label: "Más tarde", description: "cuando quieras: /exit y vuelve a abrirlo con vipcode -c", value: "luego" },
+            ]);
+            if (choice === "ahora") {
+              this.restartRequested = true;
+              return { restart: true };
+            }
+          }
         }
         return {};
       }

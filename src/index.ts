@@ -17,9 +17,9 @@ import { showLine } from "./sanitize.js";
 import { createSkill, installSkills, loadSkills, removeSkill } from "./skills.js";
 import { type ProjectTrust, projectTrust, trustProject, untrustProject } from "./trust.js";
 import { describeTrust, joinList } from "./trustinfo.js";
-import { updateVipcode } from "./update.js";
+import { restartVipcode, updateVipcode } from "./update.js";
 import { completeMention } from "./tools.js";
-import { plainAdapter, plainEvents, plainPermissionPrompt, printLog, ui } from "./ui.js";
+import { plainAdapter, plainEvents, plainPermissionPrompt, printLog, progressLine, ui } from "./ui.js";
 
 
 const USAGE = `vipcode ${VERSION} · agente de programación para la terminal con IAs gratuitas
@@ -33,6 +33,7 @@ Uso:
   vipcode models [refresh]         modelos disponibles (refresh busca modelos gratis nuevos)
   vipcode limites                  cuánto te queda hoy de cada plan gratis
   vipcode doctor                   comprueba que todo funciona y dice cómo arreglar lo que falte
+  vipcode bug [qué ha pasado]      avisa de un fallo: abre un issue en GitHub con el informe de vipcode doctor
   vipcode skills                   skills instaladas (instrucciones que el agente carga cuando las necesita)
   vipcode skills add <origen>      instala skills de una carpeta o de un repositorio git (p. ej. anthropics/skills)
   vipcode skills new <nombre>      crea una skill vacía para rellenar
@@ -104,7 +105,7 @@ function parseArgs(argv: string[]): Options {
     project: false,
     force: false,
   };
-  const commands = ["run", "auth", "models", "limites", "limits", "doctor", "skills", "sessions", "export", "update", "trust", "untrust", "help"];
+  const commands = ["run", "auth", "models", "limites", "limits", "doctor", "bug", "skills", "sessions", "export", "update", "trust", "untrust", "help"];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "-c" || arg === "--continue") {
@@ -444,6 +445,10 @@ async function plainLoop(app: App, options: Options, root: string) {
     } finally {
       current = null;
     }
+    const tip = app.lowQuotaTip();
+    if (tip) {
+      ui.notice(tip);
+    }
   };
 
   const adapter: UiAdapter = { ...plainAdapter, setInput: (text) => ui.info(`Tu mensaje era: ${text}`) };
@@ -527,7 +532,8 @@ async function main() {
     return;
   }
   if (options.command === "update") {
-    const result = await updateVipcode((text) => ui.info(text));
+    const bar = progressLine();
+    const result = await updateVipcode((step) => bar.step(step)).finally(() => bar.done());
     if (result.status === "error") {
       ui.error(result.message);
       process.exitCode = 1;
@@ -623,6 +629,10 @@ async function main() {
     console.log(await doctorReport(app));
     return;
   }
+  if (options.command === "bug") {
+    await app.reportBug(plainAdapter, options.args.join(" "));
+    return;
+  }
 
   if (options.command === "limites" || options.command === "limits") {
     console.log(limitsReport(app.router));
@@ -652,6 +662,10 @@ async function main() {
     }
   } finally {
     await app.shutdown();
+  }
+  // «Reiniciar ahora» tras /update: la versión nueva, en esta misma conversación
+  if (app.restartRequested) {
+    process.exitCode = await restartVipcode(app.restartArgs());
   }
 }
 

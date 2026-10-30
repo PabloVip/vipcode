@@ -1,0 +1,53 @@
+# /update y «Reiniciar ahora»: se abre la versión nueva en la misma conversación (lo lanza test/tui.test.mjs)
+set timeout 60
+log_user 1
+set cli [lindex $argv 0]
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+spawn -noecho node $cli
+stty rows 40 columns 120 < $spawn_out(slave,name)
+
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no arranca la interfaz" }
+}
+
+# 1. Una conversación, para ver que la versión nueva sigue en ella
+send "hola\r"
+expect {
+  "HOLA" {}
+  timeout { falla "no contesta" }
+}
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre" }
+}
+
+# 2. Se actualiza y se elige «Reiniciar ahora» (la primera opción)
+send "/update\r"
+expect {
+  "vipcode 9.9.9 instalado" {}
+  timeout { falla "no avisa de que se ha instalado" }
+}
+expect {
+  "Lo reinicias ahora para usarlo" {}
+  timeout { falla "no pregunta si reiniciar" }
+}
+sleep 0.3
+send "\r"
+
+# 3. Se abre la versión nueva (la de mentira dice con qué la han abierto) con esta misma conversación
+expect {
+  "NUEVA-9.9.9 args: --session " {}
+  timeout { falla "no abre la versión nueva en esta conversación" }
+}
+expect {
+  eof {}
+  timeout { falla "no termina al cerrarse la versión nueva" }
+}
+puts "\nTUI-REINICIO-OK"
+exit 0

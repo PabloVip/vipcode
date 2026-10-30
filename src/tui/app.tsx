@@ -5,12 +5,12 @@ import { Box, Static, Text, render, useAnimation, useApp, useInput, usePaste, us
 import pc from "picocolors";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ToolEndEvent, ToolEvent, UserInput } from "../agent.js";
-import type { App, RunOptions, SelectItem, UiAdapter } from "../app.js";
+import type { App, Progress, RunOptions, SelectItem, UiAdapter } from "../app.js";
 import { configNotices } from "../config.js";
 import { discoveryIsStale } from "../discovery.js";
 import { isImagePath, readClipboardImage, toDataUrl } from "../images.js";
 import { toolLabel } from "../labels.js";
-import { quotaFor } from "../limits.js";
+import { providerName, quotaFor } from "../limits.js";
 import { renderMarkdown } from "../markdown.js";
 import { VERSION } from "../meta.js";
 import type { PermissionReply, PermissionRequest } from "../permissions.js";
@@ -19,7 +19,7 @@ import { showControl, stripControl, stripUnsafe } from "../sanitize.js";
 import { type Session, appendHistory, loadHistory, sessionMarkdownPath } from "../session.js";
 import { type Todo, suggestFiles } from "../tools.js";
 import { colorPreview } from "../ui.js";
-import { CHECK_MS, checkForUpdate } from "../update.js";
+import { CHECK_MS, checkForUpdate, stepProgress } from "../update.js";
 import { type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
 import * as E from "./editor.js";
 
@@ -36,6 +36,8 @@ type Item =
   | { id: number; kind: "update"; version: string; security: boolean }
   // Lo que trae esta versión, la primera vez que la abres
   | { id: number; kind: "news"; version: string; markdown: string; security: boolean }
+  // /update ha instalado una versión nueva: hay que reiniciar vipcode para usarla
+  | { id: number; kind: "updated"; version: string }
   | { id: number; kind: "info" | "notice" | "error" | "block"; text: string };
 
 type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never;
@@ -98,6 +100,28 @@ function Elapsed(props: { since: number; hideUnderMs?: number }) {
     return null;
   }
   return <Text dimColor>{formatDuration(ms)}</Text>;
+}
+
+// Barra de carga (/update): el paso en el que va, cuánto lleva hecho y el tiempo
+function ProgressBar(props: { progress: Progress & { since: number; stepSince: number }; width: number }) {
+  useAnimation({ interval: 100 });
+  const value = stepProgress(props.progress, Date.now() - props.progress.stepSince);
+  const cells = Math.max(10, Math.min(30, props.width - 60));
+  const filled = Math.round(value * cells);
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text>
+        <Spinner color="green" /> <Text bold>{props.progress.title}</Text>
+      </Text>
+      <Text wrap="truncate-end">
+        {"  "}
+        <Text color="green">{"█".repeat(filled)}</Text>
+        <Text dimColor>{"░".repeat(cells - filled)}</Text> {Math.floor(value * 100)} %
+        <Text dimColor> · {stripControl(props.progress.text)}… · </Text>
+        <Elapsed since={props.progress.since} />
+      </Text>
+    </Box>
+  );
 }
 
 function shortTokens(tokens: number): string {
@@ -377,6 +401,26 @@ function ItemView(props: { item: Item; app: App; width: number }) {
         </Box>
       );
     }
+    case "updated":
+      // Hasta que no se reinicia sigue funcionando la versión de antes: que no pase desapercibido
+      return (
+        <Box marginY={1} alignSelf="flex-start" flexDirection="column" borderStyle="round" borderColor="green" paddingX={2}>
+          <Text bold color="green">
+            ✓ vipcode {stripControl(item.version)} instalado
+          </Text>
+          <Text>
+            Para usar la versión nueva, reinicia vipcode: escribe{" "}
+            <Text bold color="cyan">
+              /exit
+            </Text>{" "}
+            y vuelve a abrirlo con{" "}
+            <Text bold color="cyan">
+              vipcode -c
+            </Text>{" "}
+            para seguir en esta conversación.
+          </Text>
+        </Box>
+      );
     case "news": {
       const lines = renderMarkdown(item.markdown, Math.max(20, width - 8)).split("\n");
       const shown = lines.slice(0, 18);
@@ -571,11 +615,13 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   // si aun así no cabe, los modelos disponibles y la ayuda
   const model = ` · ${current || "rotación automática"}${slot && slot.score !== null ? ` ★${slot.score}` : ""}${app.router.pinned ? " (fijado)" : ""}`;
   const gauge = app.agent.lastTokens > 0 && context > 0;
-  const fit = { tokens: spent > 0, detail: true, models: true };
+  const fit = { tokens: spent > 0, detail: true, models: true, who: true };
+  // De quién es el límite: «OpenRouter: quedan 46/50 hoy»
+  const quotaText = () => (quota && slot && fit.who ? `${providerName(slot.provider)}: ${quota.short}` : quota?.short || "");
   const left = () =>
     props.agentName.length +
     model.length +
-    (quota ? quota.short.length + 3 : 0) +
+    (quota ? quotaText().length + 3 : 0) +
     (gauge ? 12 + gaugeLabel(app.agent.lastTokens, context, fit.detail).length : 0) +
     (fit.models ? ` · ${available}/${app.router.slots.length} modelos`.length : 0) +
     (fit.tokens ? ` · ${shortTokens(spent)} tokens`.length : 0) +
@@ -590,6 +636,9 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   }
   if (left() > room) {
     fit.models = false;
+  }
+  if (left() > room) {
+    fit.who = false;
   }
   let hintText = "";
   if (left() + 2 + hint.text.length <= room) {
@@ -608,7 +657,7 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
         {quota ? (
           <Text color={quotaColor} dimColor={!quotaColor}>
             {" "}
-            · {quota.short}
+            · {stripControl(quotaText())}
           </Text>
         ) : null}
         <ContextGauge used={app.agent.lastTokens} total={context} detail={fit.detail} />
@@ -638,6 +687,7 @@ function Main(props: { app: App; initial: string }) {
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [todos, setTodos] = useState<Todo[]>(app.agent.session.todos);
+  const [progress, setProgress] = useState<(Progress & { since: number; stepSince: number }) | null>(null);
   const [attachments, setAttachments] = useState<string[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
   const [suggestionsClosed, setSuggestionsClosed] = useState(false);
@@ -709,6 +759,8 @@ function Main(props: { app: App; initial: string }) {
           });
         }),
       setInput: (text) => setEditor({ value: text, cursor: text.length }),
+      progress: (state) => setProgress((previous) => (state ? { ...state, since: previous?.since ?? Date.now(), stepSince: Date.now() } : null)),
+      updated: (version) => push({ kind: "updated", version }),
     }),
     [],
   );
@@ -735,6 +787,14 @@ function Main(props: { app: App; initial: string }) {
     await app.shutdown();
     exit();
     setTimeout(() => process.exit(0), 100);
+  };
+
+  // «Reiniciar ahora» tras /update: se cierra la interfaz y la versión nueva la abre index.ts (este proceso no sale)
+  const restart = async () => {
+    controller.current?.abort();
+    cancelDialog();
+    await app.shutdown();
+    exit();
   };
 
   const sessionTokens = () => app.agent.session.usage.prompt + app.agent.session.usage.completion;
@@ -767,6 +827,11 @@ function Main(props: { app: App; initial: string }) {
           ms: Date.now() - startedAt.current,
           tokens: sessionTokens() - tokensAtStart.current,
         });
+      }
+      // Si se acaban las peticiones gratis de hoy, la cuenta gratis que más da (una vez por proveedor)
+      const tip = app.lowQuotaTip();
+      if (tip) {
+        push({ kind: "notice", text: tip });
       }
       live.current.running.clear();
       live.current.model = "";
@@ -815,6 +880,11 @@ function Main(props: { app: App; initial: string }) {
     if (text === "" && attachments.length === 0) {
       return;
     }
+    // Mientras se instala la versión nueva, nada más: que no se mezclen ficheros de las dos versiones
+    if (progress) {
+      push({ kind: "error", text: "Espera a que termine la actualización." });
+      return;
+    }
     setEditor(E.EMPTY);
     historyIndex.current = null;
     if (text !== "") {
@@ -852,6 +922,10 @@ function Main(props: { app: App; initial: string }) {
         refresh();
         if (result.exit) {
           await quit();
+          return;
+        }
+        if (result.restart) {
+          await restart();
           return;
         }
         if (result.loaded) {
@@ -1472,6 +1546,7 @@ function Main(props: { app: App; initial: string }) {
           </Box>
         ) : null}
         <TodoPanel todos={todos} />
+        {progress ? <ProgressBar progress={progress} width={columns} /> : null}
         {busy && !shell && running.length === 0 && !liveText && !answered.current ? (
           <Box marginTop={1}>
             <Text wrap="truncate-end">
@@ -1513,4 +1588,8 @@ export async function startTui(app: App, options: { initial?: string } = {}) {
     kittyKeyboard: { mode: "auto" },
   });
   await instance.waitUntilExit();
+  // Tras /update sigue abierta la versión de antes: se recuerda cómo abrir la nueva (salvo si ya se va a reiniciar)
+  if (app.installedVersion && !app.restartRequested) {
+    console.log(pc.green(`✓ Abre vipcode otra vez para usar la versión ${stripControl(app.installedVersion)} (vipcode -c sigue con esta conversación).`));
+  }
 }

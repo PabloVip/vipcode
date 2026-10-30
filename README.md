@@ -22,9 +22,9 @@ npm install -g vipcode
 
 **En Windows** instala también [Git para Windows](https://git-scm.com/download/win) (`winget install Git.Git`): vipcode usa su bash para los comandos y git para `/undo`. Sin él usa PowerShell, y te lo recuerda al abrirlo.
 
-Para actualizar, escribe `/update` dentro de vipcode o `vipcode update` en la terminal. Cuando sale una versión nueva, vipcode te avisa al abrirlo (y te dice si trae arreglos de seguridad), y al abrir la nueva te enseña lo que trae. Todas las novedades están en [CHANGELOG.md](CHANGELOG.md).
+Para actualizar, escribe `/update` dentro de vipcode o `vipcode update` en la terminal: verás cómo va con una barra de carga y, al terminar, te ofrecerá reiniciar vipcode para usar la versión nueva sin salir de la conversación. Cuando sale una versión nueva, vipcode te avisa (y te dice si trae arreglos de seguridad), y al abrir la nueva te enseña lo que trae. Todas las novedades están en [CHANGELOG.md](CHANGELOG.md).
 
-Si algo falla, ejecuta `vipcode doctor` (o `/doctor` dentro de vipcode): comprueba los programas, tus claves y los proveedores, y dice cómo arreglar lo que falte. Si no se arregla, [abre un issue](https://github.com/PabloVip/vipcode/issues) y pega su informe, que no lleva tus claves. Con `VIPCODE_DEBUG=1 vipcode` se guarda además en `~/.vipcode/debug.log` un registro que ayuda a encontrar el problema.
+Si algo falla, ejecuta `vipcode doctor` (o `/doctor` dentro de vipcode): comprueba los programas, tus claves y los proveedores, y dice cómo arreglar lo que falte. Si no se arregla, escribe `/bug` (o `vipcode bug`): abre en tu navegador un issue de GitHub con ese informe ya puesto, que no lleva tus claves; tú cuentas qué ha pasado y lo envías. Con `VIPCODE_DEBUG=1 vipcode` se guarda además en `~/.vipcode/debug.log` un registro que ayuda a encontrar el problema.
 
 ## Primeros pasos
 
@@ -76,6 +76,7 @@ vipcode --plan               # empieza con el agente planear (solo lectura)
 vipcode run "tarea"          # hace la tarea sin interfaz y termina
 vipcode limites              # cuánto te queda hoy de cada plan gratis
 vipcode doctor               # comprueba que todo funciona
+vipcode bug                  # avisa de un fallo en GitHub con el informe de vipcode doctor
 ```
 
 ### En la interfaz
@@ -117,6 +118,7 @@ Si quieres que lo que seleccionas se copie solo, actívalo en tu terminal (vipco
 | `/limites` | Cuánto te queda hoy de cada plan gratis |
 | `/copiar [código]` | Copia la última respuesta (o su último bloque de código) al portapapeles |
 | `/doctor` | Comprueba que todo funciona y dice cómo arreglar lo que falte |
+| `/bug [qué ha pasado]` | Avisa de un fallo: abre un issue en GitHub con el informe de `/doctor` ya puesto (sin tus claves) |
 | `/usage` | Tokens usados |
 | `/mcp`, `/lsp` | Estado de los servidores MCP y de lenguaje |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión |

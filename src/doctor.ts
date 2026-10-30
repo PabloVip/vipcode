@@ -9,11 +9,12 @@ import { clipboardProgram } from "./clipboard.js";
 import { isAnonymous } from "./config.js";
 import type { ProviderConfig } from "./config.js";
 import { installedLanguageServers } from "./lsp.js";
-import { VERSION } from "./meta.js";
+import { REPO_URL, VERSION } from "./meta.js";
 import { AUTH_PATH, HOME_DIR } from "./paths.js";
 import { stripControl } from "./sanitize.js";
 import { commandShell, findProgram } from "./shell.js";
 import { compareVersions, latestRelease, packageRoot } from "./update.js";
+import { redactSecrets } from "./debug.js";
 
 // vipcode doctor: qué funciona, qué falta y cómo arreglarlo. No lleva claves: se puede pegar en un issue
 
@@ -165,4 +166,50 @@ export async function doctorReport(app: App): Promise<string> {
 
   lines.push("", pc.dim("Si abres un issue, puedes pegar este informe: no lleva tus claves."));
   return lines.join("\n");
+}
+
+const MAX_URL = 8000;
+
+// /bug: el enlace para abrir un issue en GitHub con el informe ya puesto, sin colores ni nada con pinta de clave. No se
+// envía nada: la persona lo revisa, cuenta qué ha pasado y pulsa el botón
+export function bugReportUrl(report: string, description = ""): string {
+  const what = redactSecrets(description.trim()).slice(0, 2000);
+  const make = (lines: string[]) => {
+    const body = [
+      "### Qué ha pasado",
+      "",
+      what || "<!-- Cuéntalo con tus palabras: qué estabas haciendo, qué esperabas y qué ha salido -->",
+      "",
+      "### Cómo repetirlo",
+      "",
+      "1. ",
+      "",
+      "### Informe de vipcode doctor",
+      "",
+      "<!-- No lleva tus claves. Revísalo por si hay algo que no quieras compartir -->",
+      "",
+      "```",
+      ...lines,
+      "```",
+    ].join("\n");
+    return `${REPO_URL}/issues/new?title=${encodeURIComponent(what.slice(0, 120))}&body=${encodeURIComponent(body)}&labels=bug`;
+  };
+  const lines = redactSecrets(stripControl(report)).trim().split("\n");
+  const url = make(lines);
+  if (url.length <= MAX_URL) {
+    return url;
+  }
+  // GitHub no abre enlaces demasiado largos: el informe se recorta por el final, dejando todas las líneas que quepan
+  const cut = (keep: number) => make([...lines.slice(0, keep), "… (recortado)"]);
+  let low = 0;
+  let high = lines.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (cut(middle).length <= MAX_URL) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return cut(low);
 }

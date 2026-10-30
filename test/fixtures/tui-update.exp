@@ -1,0 +1,58 @@
+# /update: barra de carga mientras instala, aviso de reiniciar y «Más tarde» (lo lanza test/tui.test.mjs)
+set timeout 60
+log_user 1
+set cli [lindex $argv 0]
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+spawn -noecho node $cli
+stty rows 40 columns 120 < $spawn_out(slave,name)
+
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no arranca la interfaz" }
+}
+
+# 1. Mientras instala, la barra de carga con el paso en el que va
+send "/update\r"
+expect {
+  "Descargando e instalando vipcode 9.9.9" {}
+  timeout { falla "no se ve la barra de carga" }
+}
+
+# 2. Al terminar, el recuadro que dice cómo reiniciar y la pregunta de si reiniciar ya
+expect {
+  "vipcode 9.9.9 instalado" {}
+  timeout { falla "no avisa de que se ha instalado" }
+}
+expect {
+  "vipcode -c" {}
+  timeout { falla "no dice cómo reiniciar" }
+}
+expect {
+  "Lo reinicias ahora para usarlo" {}
+  timeout { falla "no pregunta si reiniciar" }
+}
+
+# 3. «Más tarde»: sigue abierta la de antes, y al salir se recuerda abrir la nueva
+send "\033\[B"
+sleep 0.3
+send "\r"
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "la pregunta de reiniciar no se cierra" }
+}
+send "/exit\r"
+expect {
+  "Abre vipcode otra vez" {}
+  timeout { falla "al salir no recuerda abrir la versión nueva" }
+}
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-UPDATE-OK"
+exit 0

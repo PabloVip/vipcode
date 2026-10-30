@@ -31,10 +31,10 @@ expect {
   "Escribe tu mensaje" {}
   timeout { falla "no vuelve a quedar libre" }
 }
-# Y en la barra de abajo, cuánto queda del plan gratis
+# Y en la barra de abajo, de quién es el plan gratis y cuánto queda
 expect {
-  "quedan 99/100 hoy" {}
-  timeout { falla "la barra de abajo no dice cuánto queda" }
+  "Proveedor P: *quedan 99/100 hoy" {}
+  timeout { falla "la barra de abajo no dice de quién es el límite ni cuánto queda" }
 }
 
 # 1b. Una respuesta más ancha que la terminal se parte dentro de su hueco (120 columnas menos el «● »), no en el

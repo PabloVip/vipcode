@@ -4,6 +4,22 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- `/update` y `vipcode update` enseñan una barra de carga con el paso en el que van. Al terminar, un recuadro te dice que reinicies vipcode para usar la versión nueva (con `vipcode -c` sigues en la misma conversación), y al salir te lo recuerda.
+- Después de instalar, `/update` comprueba que la versión instalada es de verdad la nueva.
+- «Reiniciar ahora» al terminar `/update`: abre la versión nueva sin salir de la conversación. Mientras se instala no se pueden enviar mensajes, para que no se mezclen las dos versiones.
+- `/bug` (y `vipcode bug`) para avisar de un fallo: abre en tu navegador un issue de GitHub con el informe de `/doctor` ya puesto, sin tus claves. No se envía nada hasta que lo revisas y pulsas el botón.
+- Cuando quedan pocas peticiones gratis hoy en un proveedor, vipcode te lo dice una vez y te sugiere una cuenta gratis que da muchas más (Cerebras o Groq), si no la tienes.
+
+### Cambiado
+
+- La barra de abajo dice de quién es el límite que enseña: «OpenRouter: quedan 46/50 hoy».
+
+### Corregido
+
+- `/update` ya no vuelve a instalar la versión nueva si ya la habías instalado y solo faltaba reiniciar.
+
 ## [0.2.10] - 2026-10-30
 
 ### Seguridad

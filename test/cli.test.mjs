@@ -592,6 +592,12 @@ test("vipcode update instalado con npm: instala el paquete de la última versió
   const current = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
   assert.ok(result.output.includes(`vipcode 9.9.9 instalado (tenías la ${current})`), result.output);
   assert.equal(JSON.parse(fs.readFileSync(path.join(installed, "package.json"), "utf8")).version, "9.9.9");
+  // Sin terminal, cada paso de la barra de carga va en su línea
+  assert.match(result.output, /Buscando la última versión…[\s\S]*Descargando e instalando vipcode 9\.9\.9 desde GitHub…[\s\S]*Comprobando la instalación…/, result.output);
+  // Si npm termina bien pero deja otra versión (el paquete no es el que dice ser), se avisa
+  latest = "v9.9.10";
+  result = await update(installed);
+  assert.match(result.output, /la versión instalada es la 9\.9\.9 y no la 9\.9\.10/, result.output);
   latest = `v${current}`;
   result = await update(installed);
   assert.ok(result.output.includes(`Ya tienes la última versión (${current})`), result.output);
@@ -629,6 +635,7 @@ test("vipcode update instalado desde el código: trae lo último del repositorio
   git(work, "push", "-q", "origin", "HEAD:main");
   result = await update();
   assert.match(result.output, /Actualizado desde el repositorio \(1 cambio nuevo\)/, result.output);
+  assert.match(result.output, /1 cambio nuevo: instalando dependencias…[\s\S]*Compilando…/, result.output);
   assert.equal(fs.readFileSync(path.join(clone, "nuevo.txt"), "utf8"), "hola");
   assert.equal(fs.readFileSync(path.join(clone, "compilado.txt"), "utf8"), "si");
   // Con cambios sin guardar no toca nada

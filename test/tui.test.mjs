@@ -8,11 +8,11 @@ import { CLI, ROOT, contentText, lastMessage, provider, startMock, systemEnv, te
 const hasExpect = spawnSync("expect", ["-v"], { stdio: "ignore" }).status === 0;
 
 // Lanza un guion de expect de test/fixtures contra la interfaz y devuelve lo que se vio (sin colores)
-function runExpect(script, ws) {
+function runExpect(script, ws, env = {}) {
   return new Promise((resolve) => {
     const child = spawn("expect", [path.join(ROOT, "test", "fixtures", script), CLI], {
       cwd: ws.proj,
-      env: { ...systemEnv(ws.home), VIPCODE_HOME: ws.home, TERM: "xterm-256color" },
+      env: { ...systemEnv(ws.home), VIPCODE_HOME: ws.home, TERM: "xterm-256color", ...env },
     });
     let output = "";
     child.stdout.on("data", (d) => (output += d));
@@ -57,8 +57,13 @@ test("interfaz completa en una pseudo-terminal", { skip: !hasExpect && "falta el
     return { text: "RESPUESTA-UNO" };
   });
   const ws = tempWorkspace({ "hola.txt": "hola\n" });
-  // Con un límite diario conocido, la barra de abajo dice cuántas peticiones quedan
-  ws.writeConfig({ providers: [provider("p", mock.url, ["m"], { freeLimits: { perDay: 100 } })], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  // Con un límite diario conocido, la barra de abajo dice de quién es y cuántas peticiones quedan
+  ws.writeConfig({
+    providers: [provider("p", mock.url, ["m"], { label: "Proveedor P (gratis)", freeLimits: { perDay: 100 } })],
+    enabledProviders: ["p"],
+    autoUpdateModels: false,
+    checkUpdates: false,
+  });
 
   const result = await runExpect("tui.exp", ws);
   assert.equal(result.code, 0, result.plain.slice(-3000));
@@ -89,4 +94,60 @@ test("interfaz: versión nueva destacada y bienvenida la primera vez", { skip: !
   assert.ok(JSON.parse(fs.readFileSync(path.join(ws.home, "notices.json"), "utf8")).privacy);
   await mock.close();
   ws.cleanup();
+});
+
+test("interfaz: /update enseña una barra de carga, avisa de que hay que reiniciar y sabe reiniciar", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const ws = tempWorkspace();
+  const quiet = { npm_config_audit: "false", npm_config_fund: "false", npm_config_update_notifier: "false" };
+  // Un paquete «vipcode 9.9.9» de mentira, publicado en un GitHub de prueba
+  const fake = path.join(ws.dir, "paquete");
+  fs.mkdirSync(fake);
+  fs.writeFileSync(path.join(fake, "package.json"), JSON.stringify({ name: "vipcode", version: "9.9.9", bin: { vipcode: "index.js" } }));
+  // La versión nueva de mentira dice con qué argumentos la han abierto
+  fs.writeFileSync(path.join(fake, "index.js"), "#!/usr/bin/env node\nconsole.log('NUEVA-9.9.9 args: ' + process.argv.slice(2).join(' '));\n");
+  // Sin las variables npm_* del «npm test» que lanza las pruebas (apuntan a la carpeta real)
+  const clean = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toLowerCase().startsWith("npm_")));
+  assert.equal(spawnSync("npm", ["pack", "--pack-destination", ws.dir], { cwd: fake, env: { ...clean, HOME: ws.home, ...quiet } }).status, 0);
+  const tarball = fs.readFileSync(path.join(ws.dir, "vipcode-9.9.9.tgz"));
+  const mock = await startMock(({ path: url }) => {
+    if (url === "/repos/PabloVip/vipcode/releases/latest") {
+      return { json: { tag_name: "v9.9.9", assets: [{ name: "vipcode.tgz", browser_download_url: `${mock.url}/descargas/vipcode.tgz` }] } };
+    }
+    if (url === "/descargas/vipcode.tgz") {
+      return { body: tarball };
+    }
+    if (url.endsWith("/chat/completions")) {
+      return { text: "HOLA" };
+    }
+    return { status: 404, json: {} };
+  });
+  // Un npm global de prueba con vipcode 0.2.0 «instalado»
+  const prefix = path.join(ws.dir, "npm-global");
+  const installed = path.join(prefix, "lib", "node_modules", "vipcode");
+  fs.mkdirSync(installed, { recursive: true });
+  fs.writeFileSync(path.join(installed, "package.json"), JSON.stringify({ name: "vipcode", version: "0.2.0" }));
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+
+  const env = {
+    ...quiet,
+    npm_config_prefix: prefix,
+    VIPCODE_INSTALL_ROOT: installed,
+    VIPCODE_UPDATE_URL: `${mock.url}/repos/PabloVip/vipcode`,
+    VIPCODE_REGISTRY_URL: `${mock.url}/npm`,
+  };
+  try {
+    // «Más tarde»: al salir se recuerda abrir la versión nueva
+    let result = await runExpect("tui-update.exp", ws, env);
+    assert.equal(result.code, 0, result.plain.slice(-3000));
+    assert.match(result.plain, /TUI-UPDATE-OK/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(installed, "package.json"), "utf8")).version, "9.9.9");
+    // «Reiniciar ahora»: se abre la nueva en la misma conversación (otra vez desde la 0.2.0)
+    fs.writeFileSync(path.join(installed, "package.json"), JSON.stringify({ name: "vipcode", version: "0.2.0" }));
+    result = await runExpect("tui-reinicio.exp", ws, env);
+    assert.equal(result.code, 0, result.plain.slice(-3000));
+    assert.match(result.plain, /TUI-REINICIO-OK/);
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
 });

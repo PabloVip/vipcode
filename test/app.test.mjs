@@ -480,3 +480,67 @@ test("novedades al abrir una versión nueva y /copiar (sin caracteres invisibles
   await mock.close();
   ws.cleanup();
 });
+
+test("límites: si quedan pocas peticiones gratis hoy, se sugiere una cuenta gratis que da más (una vez)", async () => {
+  const mock = await startMock(() => ({ text: "HOLA" }));
+  const ws = tempWorkspace();
+  const { quotaFor } = await import("../dist/limits.js");
+  // Con un nombre que no usa ninguna otra prueba: lo gastado hoy se guarda en la carpeta de datos compartida
+  const { app } = makeApp(ws, mock.url, {
+    providers: [provider("pocas", mock.url, ["m"], { label: "Proveedor P (gratis)", limitScope: "provider", freeLimits: { perDay: 10 } })],
+    enabledProviders: ["pocas"],
+  });
+  let tip = null;
+  for (let i = 0; i < 10 && !tip; i++) {
+    await app.runPrompt({ text: `hola ${i}` }, {});
+    tip = app.lowQuotaTip();
+    // Solo cuando quedan pocas: 3 o menos de 10
+    const left = quotaFor(app.router, app.router.slotFor("pocas/m")).remaining;
+    assert.equal(tip !== null, left <= 3, `quedan ${left}: ${tip}`);
+  }
+  assert.match(tip, /^Te queda(n \d+ peticiones| 1 petición) gratis hoy en Proveedor P\. Cuando se acaben, vipcode seguirá solo con otro proveedor\./, tip);
+  assert.match(tip, /\/connect cerebras \(14\.400 al día por modelo\) o \/connect groq \(1000 al día por modelo\)/, tip);
+  // Una vez por proveedor
+  await app.runPrompt({ text: "otra" }, {});
+  assert.equal(app.lowQuotaTip(), null);
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("/bug abre GitHub con el informe de /doctor ya puesto, sin claves ni colores", async () => {
+  const mock = await startMock(({ path: url }) => (url.endsWith("/models") ? { json: { data: [{ id: "m" }] } } : { status: 404, json: {} }));
+  const ws = tempWorkspace();
+  const { app } = makeApp(ws, mock.url);
+  // Un «navegador» que apunta el enlace que le llega
+  const file = path.join(ws.dir, "enlace.txt");
+  const script = path.join(ws.dir, "navegador.mjs");
+  fs.writeFileSync(script, `import fs from "node:fs";\nfs.writeFileSync(${JSON.stringify(file)}, process.argv[2]);\n`);
+  process.env.VIPCODE_BROWSER = `"${process.execPath}" "${script}"`;
+  process.env.VIPCODE_UPDATE_URL = `${mock.url}/repos/PabloVip/vipcode`;
+  process.env.VIPCODE_REGISTRY_URL = `${mock.url}/npm`;
+  try {
+    const { out, adapter } = capture();
+    await app.handleCommand("/bug se cuelga con mi clave sk-abcdefghijklmnopqrst", adapter);
+    for (let i = 0; i < 100 && !fs.existsSync(file); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.match(out.info.join("\n"), /He abierto GitHub en tu navegador/);
+    const url = new URL(fs.readFileSync(file, "utf8"));
+    assert.equal(`${url.origin}${url.pathname}`, "https://github.com/PabloVip/vipcode/issues/new");
+    assert.equal(url.searchParams.get("title"), "se cuelga con mi clave [clave oculta]");
+    const body = url.searchParams.get("body");
+    assert.match(body, /### Qué ha pasado\n\nse cuelga con mi clave \[clave oculta\]/);
+    assert.match(body, /### Informe de vipcode doctor[\s\S]*vipcode \d+\.\d+\.\d+/);
+    assert.match(body, /p: clave correcta/);
+    assert.ok(!url.href.includes("abcdefghijklmnopqrst") && !body.includes("\x1b"), body);
+  } finally {
+    delete process.env.VIPCODE_BROWSER;
+    delete process.env.VIPCODE_UPDATE_URL;
+    delete process.env.VIPCODE_REGISTRY_URL;
+    await app.shutdown();
+    await mock.close();
+    ws.cleanup();
+  }
+});
+

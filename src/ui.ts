@@ -1,13 +1,14 @@
 import type { Interface } from "node:readline/promises";
 import pc from "picocolors";
 import type { AgentEvents } from "./agent.js";
-import type { UiAdapter } from "./app.js";
+import type { Progress, UiAdapter } from "./app.js";
 import { toolLabel } from "./labels.js";
 import { renderMarkdown } from "./markdown.js";
 import { type PermissionReply, type PermissionRequest, type SessionGrants, suggestPattern } from "./permissions.js";
 import { showControl, stripControl, stripUnsafe } from "./sanitize.js";
 import { type Session, sessionMarkdownPath } from "./session.js";
 import { formatTodos } from "./tools.js";
+import { type UpdateStep, stepProgress } from "./update.js";
 
 export const ui = {
   text(chunk: string) {
@@ -209,10 +210,62 @@ export function printLog(session: Session, max = 300) {
   console.log(pc.dim("\n── Sigues desde aquí (/new empieza otra conversación) ──"));
 }
 
+// Barra de carga en una línea que se redibuja (en una terminal; si no, cada paso en su línea): /update en el modo de
+// texto y «vipcode update»
+export function progressLine() {
+  if (!process.stdout.isTTY) {
+    return { step: (step: UpdateStep) => ui.info(`${step.text}…`), done: () => {} };
+  }
+  let current: UpdateStep | null = null;
+  let stepSince = 0;
+  const since = Date.now();
+  const draw = () => {
+    if (!current) {
+      return;
+    }
+    const value = stepProgress(current, Date.now() - stepSince);
+    const cells = 24;
+    const filled = Math.round(value * cells);
+    const percent = `${String(Math.floor(value * 100)).padStart(3)} %`;
+    const tail = ` · ${Math.floor((Date.now() - since) / 1000)} s`;
+    // Sin pasar del ancho: si la línea saltara a la siguiente, el \r ya no la podría redibujar
+    const room = Math.max(0, (process.stdout.columns || 80) - 1 - cells - percent.length - 4 - tail.length - 1);
+    const text = stripControl(current.text);
+    const shown = text.length > room ? `${text.slice(0, Math.max(0, room - 1))}…` : `${text}…`;
+    process.stdout.write(`\r\x1b[2K${pc.green("█".repeat(filled))}${pc.dim("░".repeat(cells - filled))} ${percent}${pc.dim(` · ${shown}${tail}`)}`);
+  };
+  const timer = setInterval(draw, 100);
+  return {
+    step(step: UpdateStep) {
+      current = step;
+      stepSince = Date.now();
+      draw();
+    },
+    // Quita la barra: lo siguiente se escribe en su sitio
+    done() {
+      clearInterval(timer);
+      if (current) {
+        process.stdout.write("\r\x1b[2K");
+      }
+    },
+  };
+}
+
+let progress: ReturnType<typeof progressLine> | null = null;
+
 // Interfaz mínima para los comandos / en el modo de texto
 export const plainAdapter: UiAdapter = {
   info: (text) => ui.info(text),
   notice: (text) => ui.notice(text),
   error: (text) => ui.error(text),
   block: (text) => console.log(stripUnsafe(text)),
+  progress: (state: Progress | null) => {
+    if (state) {
+      progress ||= progressLine();
+      progress.step(state);
+    } else {
+      progress?.done();
+      progress = null;
+    }
+  },
 };

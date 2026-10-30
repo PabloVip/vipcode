@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -213,10 +214,34 @@ function isInstalledIn(dir: string, parent: string): boolean {
 export interface UpdateResult {
   status: "updated" | "current" | "manual" | "error";
   message: string;
+  // La versión que se ha instalado (con «updated»)
+  version?: string;
+}
+
+// En qué va la actualización, para la barra de carga: el paso que está haciendo y entre qué puntos de la barra (de 0 a
+// 1) va mientras tanto
+export interface UpdateStep {
+  text: string;
+  from: number;
+  to: number;
+}
+
+// Hasta dónde llega la barra a los «ms» de empezar un paso: avanza deprisa y cada vez más despacio, y no llega al final
+// del paso hasta que termina (npm no dice cuánto le falta)
+export function stepProgress(step: UpdateStep, ms: number): number {
+  return step.from + (step.to - step.from) * (1 - Math.exp(-Math.max(0, ms) / 15000));
+}
+
+function installedVersion(root: string): string | null {
+  try {
+    return String(JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version || "") || null;
+  } catch {
+    return null;
+  }
 }
 
 // Instalado desde el código (con .git): se trae lo último del repositorio y se compila
-async function updateFromGit(root: string, log: (text: string) => void): Promise<UpdateResult> {
+async function updateFromGit(root: string, step: (step: UpdateStep) => void): Promise<UpdateResult> {
   const status = await run("git", ["status", "--porcelain"], root);
   if (status.code !== 0) {
     return { status: "error", message: `No he podido usar git en ${root}: ${lastLines(status.output, 2)}` };
@@ -224,7 +249,7 @@ async function updateFromGit(root: string, log: (text: string) => void): Promise
   if (status.output.trim() !== "") {
     return { status: "error", message: `Tienes cambios sin guardar en ${root}: haz commit o descártalos y vuelve a probar. No he tocado nada.` };
   }
-  log("Buscando cambios en el repositorio…");
+  step({ text: "Buscando cambios en el repositorio", from: 0, to: 0.2 });
   const before = (await run("git", ["rev-parse", "HEAD"], root)).output.trim();
   const pull = await run("git", ["pull", "--ff-only"], root);
   if (pull.code !== 0) {
@@ -236,27 +261,30 @@ async function updateFromGit(root: string, log: (text: string) => void): Promise
   }
   const count = (await run("git", ["rev-list", "--count", `${before}..${after}`], root)).output.trim();
   const changes = count === "1" ? "1 cambio nuevo" : `${count} cambios nuevos`;
-  log(`${changes.replace(/^./, (letter) => letter.toUpperCase())}. Instalando dependencias y compilando…`);
   // npm ci no reescribe package-lock.json (si lo cambiara, la próxima vez habría «cambios sin guardar»)
   const install = fs.existsSync(path.join(root, "package-lock.json")) ? ["ci"] : ["install"];
-  for (const args of [install, ["run", "build"]]) {
-    const step = await run(NPM, args, root);
-    if (step.code !== 0) {
-      return { status: "error", message: `npm ${args.join(" ")} ha fallado:\n${lastLines(step.output)}` };
+  const steps: [string[], UpdateStep][] = [
+    [install, { text: `${changes.replace(/^./, (letter) => letter.toUpperCase())}: instalando dependencias`, from: 0.2, to: 0.7 }],
+    [["run", "build"], { text: "Compilando", from: 0.7, to: 1 }],
+  ];
+  for (const [args, info] of steps) {
+    step(info);
+    const done = await run(NPM, args, root);
+    if (done.code !== 0) {
+      return { status: "error", message: `npm ${args.join(" ")} ha fallado:\n${lastLines(done.output)}` };
     }
   }
-  let version = VERSION;
-  try {
-    version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version || VERSION;
-  } catch {
-    // se queda la que había
-  }
-  return { status: "updated", message: `Actualizado desde el repositorio (${changes}): vipcode ${version}. Cierra y vuelve a abrir vipcode para usarlo.` };
+  const version = installedVersion(root) || VERSION;
+  return {
+    status: "updated",
+    version,
+    message: `Actualizado desde el repositorio (${changes}): vipcode ${version}. Si tienes vipcode abierto, ciérralo y vuelve a abrirlo para usarlo.`,
+  };
 }
 
 // Instalado con npm: se instala el paquete de la última versión publicada en GitHub
-async function updateFromRelease(root: string, log: (text: string) => void): Promise<UpdateResult> {
-  log("Buscando la última versión publicada en npm y en GitHub…");
+async function updateFromRelease(root: string, step: (step: UpdateStep) => void): Promise<UpdateResult> {
+  step({ text: "Buscando la última versión", from: 0, to: 0.1 });
   let release: Release | null;
   try {
     release = await latestRelease();
@@ -269,6 +297,11 @@ async function updateFromRelease(root: string, log: (text: string) => void): Pro
   if (compareVersions(release.version, VERSION) <= 0) {
     return { status: "current", message: `Ya tienes la última versión (${VERSION}).` };
   }
+  // Ya la instaló un /update de antes, pero sigue abierta la de antes: basta con reiniciar
+  const onDisk = installedVersion(root);
+  if (onDisk && compareVersions(onDisk, VERSION) > 0 && compareVersions(release.version, onDisk) <= 0) {
+    return { status: "updated", version: onDisk, message: `vipcode ${onDisk} ya está instalado: ciérralo y vuelve a abrirlo para usarlo.` };
+  }
   const prefix = (await run(NPM, ["prefix", "-g"], os.tmpdir())).output.trim();
   const globalDir = process.platform === "win32" ? path.join(prefix, "node_modules") : path.join(prefix, "lib", "node_modules");
   if (!prefix || !isInstalledIn(root, globalDir)) {
@@ -280,19 +313,61 @@ async function updateFromRelease(root: string, log: (text: string) => void): Pro
   if (!/^[\w@.:/+~-]+$/.test(release.spec) || release.spec.startsWith("-")) {
     return { status: "error", message: `La última versión publicada tiene un nombre de paquete raro (${release.spec}): no la instalo.` };
   }
-  log(`Instalando vipcode ${release.version} desde ${release.source}…`);
+  step({ text: `Descargando e instalando vipcode ${release.version} desde ${release.source}`, from: 0.1, to: 0.9 });
   // Desde la carpeta temporal, para que no se mezcle con la configuración de npm del proyecto en el que estás
   const install = await run(NPM, ["install", "-g", release.spec], os.tmpdir());
   if (install.code !== 0) {
     return { status: "error", message: `npm install ha fallado:\n${lastLines(install.output)}` };
   }
-  return { status: "updated", message: `vipcode ${release.version} instalado (tenías la ${VERSION}). Cierra y vuelve a abrir vipcode para usarlo.` };
+  // Que de verdad esté la nueva (npm puede terminar bien y dejar otra, por ejemplo si el paquete no es el que dice ser)
+  step({ text: "Comprobando la instalación", from: 0.9, to: 1 });
+  const installed = installedVersion(root);
+  if (installed !== release.version) {
+    return { status: "error", message: `npm ha terminado, pero la versión instalada es la ${installed || "?"} y no la ${release.version}. Prueba a mano: npm install -g ${release.spec}` };
+  }
+  return {
+    status: "updated",
+    version: release.version,
+    message: `vipcode ${release.version} instalado (tenías la ${VERSION}). Si tienes vipcode abierto, ciérralo y vuelve a abrirlo para usarlo.`,
+  };
 }
 
-export async function updateVipcode(log: (text: string) => void): Promise<UpdateResult> {
+// Abre la versión instalada (la nueva, tras /update) en esta misma terminal y carpeta, y espera a que se cierre para
+// salir con su código. Este proceso solo espera: lo que escribas y Ctrl+C son para el nuevo
+export function restartVipcode(args: string[]): Promise<number> {
+  const root = packageRoot();
+  let entry = path.join(root, "dist", "index.js");
+  try {
+    const bin = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).bin;
+    const file = path.resolve(root, String(typeof bin === "string" ? bin : bin?.vipcode || ""));
+    // Solo un fichero de dentro del paquete
+    if (file !== path.resolve(root) && isInside(file, path.resolve(root))) {
+      entry = file;
+    }
+  } catch {
+    // el de siempre
+  }
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(false);
+  }
+  process.stdin.pause();
+  return new Promise((resolve) => {
+    // Con el mismo Node (por su ruta completa) y sin shell
+    const child = spawn(process.execPath, [entry, ...args], { stdio: "inherit" });
+    process.on("SIGINT", () => {});
+    for (const signal of ["SIGTERM", "SIGHUP"] as const) {
+      process.on(signal, () => child.kill(signal));
+    }
+    child.on("error", () => resolve(1));
+    child.on("exit", (code) => resolve(code ?? 1));
+  });
+}
+
+// «step» dice en qué paso va, para la barra de carga
+export async function updateVipcode(step: (step: UpdateStep) => void = () => {}): Promise<UpdateResult> {
   const root = packageRoot();
   if (fs.existsSync(path.join(root, ".git"))) {
-    return updateFromGit(root, log);
+    return updateFromGit(root, step);
   }
-  return updateFromRelease(root, log);
+  return updateFromRelease(root, step);
 }

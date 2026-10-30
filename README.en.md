@@ -19,9 +19,9 @@ Requires Node.js 22 or later. Works on macOS, Linux and Windows.
 npm install -g vipcode
 ```
 
-On Windows, also install [Git for Windows](https://git-scm.com/download/win) (`winget install Git.Git`): vipcode runs commands with its bash and uses git for `/undo`. Without it, it uses PowerShell. If something doesn't work, run `vipcode doctor`: it checks programs, keys and providers and tells you how to fix what's missing.
+On Windows, also install [Git for Windows](https://git-scm.com/download/win) (`winget install Git.Git`): vipcode runs commands with its bash and uses git for `/undo`. Without it, it uses PowerShell. If something doesn't work, run `vipcode doctor`: it checks programs, keys and providers and tells you how to fix what's missing. To report a bug, type `/bug` (or run `vipcode bug`): it opens a GitHub issue with that report already filled in, without your keys.
 
-To update, type `/update` inside vipcode or run `vipcode update`. vipcode tells you when a new version is out; what each version brings is in [CHANGELOG.md](CHANGELOG.md) (in Spanish).
+To update, type `/update` inside vipcode or run `vipcode update`: a progress bar shows how it goes, and when it finishes it offers to restart vipcode on the new version without leaving the conversation. vipcode tells you when a new version is out; what each version brings is in [CHANGELOG.md](CHANGELOG.md) (in Spanish).
 
 ## Quick start
 

@@ -28,6 +28,11 @@ function quota(remaining: number, limit: number | null, period: string, estimate
   };
 }
 
+// El nombre corto de un proveedor, para la barra de abajo («OpenRouter», sin «(modelos :free)»)
+export function providerName(provider: ProviderConfig): string {
+  return (provider.label || provider.name).replace(/\s*\([^)]*\)\s*$/, "") || provider.name;
+}
+
 function number(n: number): string {
   return n.toLocaleString("es-ES");
 }
@@ -101,13 +106,13 @@ export function quotaFor(router: Router, slot: Slot, now = Date.now()): Quota | 
     const used = slot.provider.limitScope === "provider" ? usage?.requests || 0 : usage?.models[slot.model.id] || 0;
     // Si ya llevas más de las que dice el plan, es que tu límite es mayor (por ejemplo OpenRouter con créditos)
     if (used <= limits.perDay) {
-      return quota(limits.perDay - used, limits.perDay, PERIOD.day, true);
+      return { ...quota(limits.perDay - used, limits.perDay, PERIOD.day, true), period: "day" };
     }
   }
   if (limits.perHour) {
     const used = (router.recent[slot.provider.name] || []).filter((time) => now - time < HOUR_MS).length;
     if (used <= limits.perHour) {
-      return quota(limits.perHour - used, limits.perHour, PERIOD.hour, true);
+      return { ...quota(limits.perHour - used, limits.perHour, PERIOD.hour, true), period: "hour" };
     }
   }
   return header;
