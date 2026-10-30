@@ -11,10 +11,14 @@ proc falla {motivo} {
 spawn -noecho node $cli
 stty rows 40 columns 120 < $spawn_out(slave,name)
 
-# 1. Recuadro de versión nueva
+# 1. Novedades de esta versión y recuadro de versión nueva con arreglos de seguridad
 expect {
-  "nueva de vipcode" {}
-  timeout { falla "no aparece el recuadro de versión nueva" }
+  "Novedades de vipcode" {}
+  timeout { falla "no aparecen las novedades de esta versión" }
+}
+expect {
+  "nueva de vipcode con arreglos de seguridad" {}
+  timeout { falla "el recuadro de versión nueva no avisa de los arreglos de seguridad" }
 }
 
 # 2. Bienvenida: se acepta con Enter («Empezar»)
@@ -30,8 +34,8 @@ expect {
 
 # 3. La barra de abajo sigue recordando la versión nueva
 expect {
-  "99.0.0 disponible" {}
-  timeout { falla "la barra de abajo no recuerda la versión nueva" }
+  "99.0.0 trae arreglos de seguridad" {}
+  timeout { falla "la barra de abajo no recuerda la versión nueva con arreglos de seguridad" }
 }
 
 send "/exit\r"

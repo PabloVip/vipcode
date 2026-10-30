@@ -4,6 +4,16 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- Al abrir una versión nueva, un recuadro con lo que trae.
+- El aviso de versión nueva dice si trae arreglos de seguridad, en rojo, para que no lo dejes para luego.
+- `/copiar` copia la última respuesta al portapapeles y `/copiar código`, su último bloque de código, en macOS, Linux y Windows (por SSH, si tu terminal lo permite). Lo copiado no lleva caracteres invisibles que puedan ejecutar algo al pegarlo en una terminal.
+
+### Cambiado
+
+- `/help` y el README explican cómo copiar texto, y `/help` llama a los agentes por su nombre nuevo.
+
 ## [0.2.7] - 2026-10-30
 
 ### Seguridad

@@ -33,7 +33,9 @@ type Item =
   | { id: number; kind: "answer"; slot: string; score: number | null; ms: number; tokens: number }
   | { id: number; kind: "shell"; command: string; output: string; code: number | null }
   // Recuadro de versión nueva de vipcode
-  | { id: number; kind: "update"; version: string }
+  | { id: number; kind: "update"; version: string; security: boolean }
+  // Lo que trae esta versión, la primera vez que la abres
+  | { id: number; kind: "news"; version: string; markdown: string; security: boolean }
   | { id: number; kind: "info" | "notice" | "error" | "block"; text: string };
 
 type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never;
@@ -357,21 +359,39 @@ function ItemView(props: { item: Item; app: App; width: number }) {
         </Box>
       );
     }
-    case "update":
+    case "update": {
+      // Si trae arreglos de seguridad, en rojo y diciéndolo: que no se deje para luego
+      const tone = item.security ? "red" : "green";
       return (
-        <Box marginY={1} alignSelf="flex-start" flexDirection="column" borderStyle="round" borderColor="green" paddingX={2}>
-          <Text bold color="green">
-            ↑ ¡Hay una versión nueva de vipcode!
+        <Box marginY={1} alignSelf="flex-start" flexDirection="column" borderStyle="round" borderColor={tone} paddingX={2}>
+          <Text bold color={tone}>
+            {item.security ? "↑ ¡Hay una versión nueva de vipcode con arreglos de seguridad!" : "↑ ¡Hay una versión nueva de vipcode!"}
           </Text>
           <Text>
-            {VERSION} → <Text bold color="green">{stripControl(item.version)}</Text> · escribe{" "}
+            {VERSION} → <Text bold color={tone}>{stripControl(item.version)}</Text> · escribe{" "}
             <Text bold color="cyan">
               /update
             </Text>{" "}
-            para instalarla
+            para instalarla{item.security ? " cuanto antes" : ""}
           </Text>
         </Box>
       );
+    }
+    case "news": {
+      const lines = renderMarkdown(item.markdown, Math.max(20, width - 8)).split("\n");
+      const shown = lines.slice(0, 18);
+      const tone = item.security ? "yellow" : "cyan";
+      return (
+        <Box marginY={1} flexDirection="column" borderStyle="round" borderColor={tone} paddingX={2}>
+          <Text bold color={tone}>
+            ◆ Novedades de vipcode {item.version}
+            {item.security ? " · trae arreglos de seguridad" : ""}
+          </Text>
+          <Text>{shown.join("\n")}</Text>
+          {lines.length > shown.length ? <Text dimColor>… y más en CHANGELOG.md</Text> : null}
+        </Box>
+      );
+    }
     // Avisos y bloques pueden llevar mensajes de los proveedores o datos de fuera: solo se dejan los colores
     case "info":
       return <Text dimColor>{stripUnsafe(item.text)}</Text>;
@@ -539,6 +559,9 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
     hint = { text: "esc interrumpe · escribe para añadir instrucciones", short: "esc interrumpe", color: undefined, bold: false };
   } else if (app.updateInstalled) {
     hint = { text: "✓ vipcode actualizado · ciérralo y vuelve a abrirlo para usarlo", short: "✓ reinicia vipcode", color: "green", bold: false };
+  } else if (app.newVersion && app.newVersionSecurity) {
+    const version = stripControl(app.newVersion);
+    hint = { text: `↑ vipcode ${version} trae arreglos de seguridad · escribe /update`, short: `↑ ${version} seguridad · /update`, color: "red", bold: true };
   } else if (app.newVersion) {
     const version = stripControl(app.newVersion);
     hint = { text: `↑ vipcode ${version} disponible · escribe /update`, short: `↑ ${version} · /update`, color: "green", bold: true };
@@ -1049,12 +1072,18 @@ function Main(props: { app: App; initial: string }) {
       }
       refresh();
     });
+    // La primera vez que abres una versión nueva, lo que trae
+    const news = app.takeNews();
+    if (news) {
+      push({ kind: "news", ...news });
+    }
     // Una vez al día mira en GitHub si hay una versión nueva de vipcode
     if (app.config.checkUpdates !== false) {
-      void checkForUpdate().then((version) => {
-        if (version) {
-          app.newVersion = version;
-          push({ kind: "update", version });
+      void checkForUpdate().then((update) => {
+        if (update) {
+          app.newVersion = update.version;
+          app.newVersionSecurity = update.security;
+          push({ kind: "update", version: update.version, security: update.security });
         }
       });
     }

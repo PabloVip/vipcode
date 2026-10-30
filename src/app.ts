@@ -12,15 +12,18 @@ import { isRemoteSession, loginOpenRouter, openBrowser } from "./login.js";
 import { limitsReport } from "./limits.js";
 import { LspManager } from "./lsp.js";
 import { McpManager } from "./mcp.js";
+import { VERSION } from "./meta.js";
 import { AUTH_PATH, HOME_DIR, NOTICES_PATH, STATE_PATH, ensureHomeDir } from "./paths.js";
 import { type PermissionReply, type PermissionRequest, SessionGrants, createAsker, permissionsFor, riskyGitConfig } from "./permissions.js";
 import { Ranking, loadRankingData, rankingKey, refreshRanking } from "./ranking.js";
 import { Router } from "./router.js";
 import { type SkillDefinition, loadSkills, skillContent } from "./skills.js";
+import { hasSecurity, localChangelog, sectionsBetween } from "./changelog.js";
+import { cleanForClipboard, copyToClipboard, lastCodeBlock } from "./clipboard.js";
 import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession, sessionMarkdownPath } from "./session.js";
 import { Snapshots } from "./snapshot.js";
 import { commandShell, findProgram, killTree } from "./shell.js";
-import { updateVipcode } from "./update.js";
+import { compareVersions, updateVipcode } from "./update.js";
 import { formatTodos, truncate } from "./tools.js";
 import { type ProjectTrust, projectTrust } from "./trust.js";
 
@@ -68,6 +71,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "planear", description: "agente de solo lectura: investiga y propone un plan (antes /plan)" },
   { name: "programar", description: "agente que puede modificar ficheros (antes /build)" },
   { name: "limites", description: "cuánto te queda hoy de cada plan gratis" },
+  { name: "copiar", args: "[código]", description: "copia la última respuesta (o su último bloque de código) al portapapeles" },
   { name: "undo", description: "deshacer el último mensaje (ficheros y conversación)" },
   { name: "redo", description: "rehacer lo deshecho" },
   { name: "diff", args: "[all]", description: "cambios del último mensaje (o de toda la sesión)" },
@@ -167,6 +171,8 @@ export class App {
   lastSessions: Session[] = [];
   // Versión nueva de vipcode publicada: la interfaz la recuerda abajo hasta que la instalas con /update
   newVersion: string | null = null;
+  // Alguna de las versiones nuevas trae arreglos de seguridad (el aviso lo destaca)
+  newVersionSecurity = false;
   // /update ya la ha instalado: se usa al cerrar y volver a abrir vipcode
   updateInstalled = false;
   // La interfaz pone aquí cómo preguntar los permisos
@@ -271,6 +277,44 @@ export class App {
       "Como son gratis, pueden guardar lo que les escribes para mejorar sus modelos, así que mejor no compartas contraseñas, claves ni datos privados.",
       "Cuando quieras, conecta una cuenta gratuita con /connect y tendrás más mensajes y más modelos.",
     ].join("\n");
+  }
+
+  // Lo que traen las versiones nuevas desde la última que abriste, para enseñarlo una vez. Si ya usabas vipcode antes
+  // de que se apuntara la versión, se enseña lo de esta; a quien lo abre por primera vez, nada
+  takeNews(): { version: string; markdown: string; security: boolean } | null {
+    let data: Record<string, unknown> = {};
+    let existed = false;
+    try {
+      data = JSON.parse(fs.readFileSync(NOTICES_PATH, "utf8"));
+      existed = true;
+    } catch {
+      // primera vez
+    }
+    let last = typeof data.lastVersion === "string" ? data.lastVersion : null;
+    if (last !== VERSION) {
+      data.lastVersion = VERSION;
+      try {
+        ensureHomeDir();
+        fs.writeFileSync(NOTICES_PATH, JSON.stringify(data, null, 2));
+      } catch {
+        // no es grave
+      }
+    }
+    if (!last && existed && data.privacy) {
+      last = "0.0.0";
+    }
+    if (!last || compareVersions(VERSION, last) <= 0) {
+      return null;
+    }
+    const sections = sectionsBetween(localChangelog(), last, VERSION).slice(0, last === "0.0.0" ? 1 : 5);
+    if (sections.length === 0) {
+      return null;
+    }
+    return {
+      version: VERSION,
+      markdown: sections.map((section) => `**${section.version}**\n\n${section.body}`).join("\n\n"),
+      security: hasSecurity(sections),
+    };
   }
 
   acceptPrivacyNotice() {
@@ -454,13 +498,14 @@ export class App {
       "",
       title("Atajos"),
       row("Enter", "envía · Alt+Enter, Ctrl+J o \\ al final: línea nueva"),
-      row("Tab · Shift+Tab", "cambia de agente (build, plan y los tuyos)"),
+      row("Tab · Shift+Tab", "cambia de agente (programar, planear y los tuyos)"),
       row("Ctrl+P", "paleta con todos los comandos y skills"),
       row("↑ ↓", "historial de lo que has escrito"),
       row("@ruta", "adjunta un fichero, una carpeta o una imagen · Ctrl+V pega una imagen"),
       row("!comando", "lo ejecuta en la terminal; la salida le llega al agente con tu siguiente mensaje"),
       row("Esc", "interrumpe al agente (mientras trabaja puedes seguir escribiendo)"),
       row("Ctrl+C", "interrumpe o borra lo escrito; dos veces seguidas sale"),
+      row("Copiar", "selecciona con el ratón y Cmd+C (Mac), Ctrl+Shift+C (Linux) o Ctrl+C (Windows Terminal) · /copiar"),
     );
     return lines.join("\n");
   }
@@ -940,6 +985,31 @@ export class App {
           ui.info("La conversación está vacía.");
         } else {
           ui.info(`Conversación guardada en ${saveExport(this.agent.session)} (además se guarda sola en ${sessionMarkdownPath(this.agent.session)})`);
+        }
+        return {};
+      }
+      case "/copiar":
+      case "/copy": {
+        const answers = this.agent.session.log.filter((entry) => entry.role === "assistant").map((entry) => entry.text);
+        if (answers.length === 0) {
+          ui.error("Todavía no hay ninguna respuesta que copiar.");
+          return {};
+        }
+        const code = /^(c[oó]digo|code)\b/i.test(arg.trim());
+        const text = code ? lastCodeBlock(answers) : answers[answers.length - 1];
+        if (text === null) {
+          ui.error("Las últimas respuestas no tienen ningún bloque de código. Usa /copiar para copiar la respuesta entera.");
+          return {};
+        }
+        const how = await copyToClipboard(text);
+        const what = code ? "el último bloque de código" : "la última respuesta";
+        const size = `${cleanForClipboard(text).length.toLocaleString("es-ES")} caracteres`;
+        if (how === "portapapeles") {
+          ui.info(`Copiado ${what} al portapapeles (${size}).`);
+        } else if (how === "terminal") {
+          ui.info(`Le he pedido a tu terminal que copie ${what} (${size}). Si no se ha copiado, tu terminal no lo permite: selecciónalo con el ratón.`);
+        } else {
+          ui.error("No he podido copiar: en Linux instala wl-clipboard (Wayland) o xclip, o pon en VIPCODE_CLIPBOARD el programa que copie lo que le llega.");
         }
         return {};
       }

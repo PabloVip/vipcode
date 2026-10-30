@@ -22,7 +22,7 @@ npm install -g vipcode
 
 **En Windows** instala también [Git para Windows](https://git-scm.com/download/win): vipcode usa su bash para los comandos y git para `/undo`. Sin él usa PowerShell.
 
-Para actualizar, escribe `/update` dentro de vipcode o `vipcode update` en la terminal. Cuando sale una versión nueva, vipcode te avisa al abrirlo; lo que trae cada versión está en [CHANGELOG.md](CHANGELOG.md).
+Para actualizar, escribe `/update` dentro de vipcode o `vipcode update` en la terminal. Cuando sale una versión nueva, vipcode te avisa al abrirlo (y te dice si trae arreglos de seguridad), y al abrir la nueva te enseña lo que trae. Todas las novedades están en [CHANGELOG.md](CHANGELOG.md).
 
 Si algo falla, [abre un issue](https://github.com/PabloVip/vipcode/issues). Con `VIPCODE_DEBUG=1 vipcode` se guarda en `~/.vipcode/debug.log` un registro que ayuda a encontrar el problema.
 
@@ -86,10 +86,19 @@ vipcode limites              # cuánto te queda hoy de cada plan gratis
 - **!comando** lo ejecuta en la terminal sin salir de vipcode (por ejemplo `!git status`). El agente verá la salida con tu siguiente mensaje.
 - **Esc** interrumpe al agente. Mientras trabaja puedes seguir escribiendo: el mensaje se le entrega al acabar el paso.
 - **Ctrl+C** interrumpe, cierra el diálogo o borra lo escrito; dos veces seguidas sale.
+- **Copiar**: selecciona con el ratón y pulsa Cmd+C (Mac), Ctrl+Shift+C (Linux) o Ctrl+C (Windows Terminal). `/copiar` copia la última respuesta y `/copiar código`, su último bloque de código.
 
 Antes de editar un fichero, ejecutar un comando o salir a internet, vipcode te enseña el cambio o el comando y pregunta. Puedes contestar que sí una vez, que sí a todo lo de ese tipo durante la sesión, que sí siempre a ese comando (por ejemplo `npm test*`), que no, o que no y decirle qué hacer.
 
 La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan gratis y cuánto contexto llevas gastado.
+
+Si quieres que lo que seleccionas se copie solo, actívalo en tu terminal (vipcode no puede hacerlo por ella):
+
+- **iTerm2**: viene activado (Ajustes → General → Selection).
+- **Windows Terminal**: Configuración → Interacción → «Copiar automáticamente la selección al portapapeles».
+- **Terminal de VS Code**: el ajuste `terminal.integrated.copyOnSelection`.
+- **kitty**, **Ghostty** y **Alacritty**: `copy_on_select clipboard`, `copy-on-select = clipboard` y `selection.save_to_clipboard = true`.
+- **Terminal de macOS** y **GNOME Terminal** no tienen esa opción: selecciona y pulsa Cmd+C o Ctrl+Shift+C.
 
 ### Comandos
 
@@ -105,6 +114,7 @@ La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan grat
 | `/compact` | Resumir la conversación |
 | `/new`, `/sessions`, `/load <n>`, `/delete <n>`, `/export` | Conversaciones |
 | `/limites` | Cuánto te queda hoy de cada plan gratis |
+| `/copiar [código]` | Copia la última respuesta (o su último bloque de código) al portapapeles |
 | `/usage` | Tokens usados |
 | `/mcp`, `/lsp` | Estado de los servidores MCP y de lenguaje |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión |
@@ -165,7 +175,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 - **mcp**: servidores MCP locales (`command`) o remotos (`url`); los que piden iniciar sesión con OAuth todavía no funcionan. Un servidor local no recibe tus variables de entorno (ni tus claves), solo lo imprescindible para arrancar: lo que necesite, ponlo en `environment`. Ahí y en `headers`, `{env:NOMBRE}` se cambia por esa variable tuya.
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
 
-Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash) y `VIPCODE_BROWSER` (otro navegador).
+Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash), `VIPCODE_BROWSER` (otro navegador) y `VIPCODE_CLIPBOARD` (otro programa para copiar, que reciba el texto por su entrada).
 
 ### Agentes y comandos propios
 

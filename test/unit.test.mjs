@@ -607,15 +607,33 @@ test("actualizaciones: comparar versiones y mirar en GitHub como mucho una vez a
   let github = { status: 404, json: {} };
   const tarball = (version) => ({ json: { tag_name: `v${version}`, assets: [{ name: "vipcode.tgz", browser_download_url: `https://descargas/${version}/vipcode.tgz` }] } });
   const ours = (version) => ({ json: { name: "vipcode", version, repository: { url: "git+https://github.com/PabloVip/vipcode.git" } } });
-  const mock = await startMock(({ path: url }) => (url === "/npm/vipcode/latest" ? npm : url.endsWith("/releases/latest") ? github : { status: 404, json: {} }));
+  // El CHANGELOG.md de la versión nueva dice si trae arreglos de seguridad
+  let changelog = "## [Sin publicar]\n\n## [9.9.9] - 2030-01-01\n\n### Seguridad\n\n- Un arreglo importante.\n\n## [0.0.1] - 2026-01-01\n\n### Añadido\n\n- Algo.\n";
+  const mock = await startMock(({ path: url }) => {
+    if (url === "/npm/vipcode/latest") {
+      return npm;
+    }
+    if (url.endsWith("/releases/latest")) {
+      return github;
+    }
+    if (url === "/cambios/v9.9.9/CHANGELOG.md") {
+      return { body: Buffer.from(changelog), contentType: "text/markdown" };
+    }
+    return { status: 404, json: {} };
+  });
   process.env.VIPCODE_UPDATE_URL = `${mock.url}/repos/PabloVip/vipcode`;
   process.env.VIPCODE_REGISTRY_URL = `${mock.url}/npm`;
+  process.env.VIPCODE_CHANGELOG_URL = `${mock.url}/cambios/v{version}/CHANGELOG.md`;
   try {
     github = tarball("9.9.9");
-    assert.equal(await update.checkForUpdate(), "9.9.9");
+    assert.deepEqual(await update.checkForUpdate(), { version: "9.9.9", security: true });
     // La segunda vez sale de la caché, sin preguntar a nadie
-    assert.equal(await update.checkForUpdate(), "9.9.9");
-    assert.equal(mock.requests.length, 2);
+    assert.deepEqual(await update.checkForUpdate(), { version: "9.9.9", security: true });
+    assert.equal(mock.requests.length, 3);
+    // Sin «### Seguridad» en lo que te falta, el aviso es el normal
+    changelog = changelog.replace("### Seguridad", "### Añadido");
+    fs.rmSync(path.join(HOME, "update.json"), { force: true });
+    assert.deepEqual(await update.checkForUpdate(), { version: "9.9.9", security: false });
 
     // Con la misma versión en los dos sitios se instala la de npm; si GitHub va por delante, la de GitHub
     npm = ours("9.9.9");
@@ -634,6 +652,7 @@ test("actualizaciones: comparar versiones y mirar en GitHub como mucho una vez a
   } finally {
     delete process.env.VIPCODE_UPDATE_URL;
     delete process.env.VIPCODE_REGISTRY_URL;
+    delete process.env.VIPCODE_CHANGELOG_URL;
     fs.rmSync(path.join(HOME, "update.json"), { force: true });
     await mock.close();
   }
@@ -1001,4 +1020,18 @@ test("seguridad (auditoría): webfetch pregunta siempre por las direcciones inte
   const { redactSecrets } = await import("../dist/debug.js");
   assert.equal(redactSecrets("error 401 sk-or-v1-abc123def456ghi789"), "error 401 [clave oculta]");
   assert.equal(redactSecrets("Authorization: Bearer gsk_ABCDEFGH12345678"), "Authorization: Bearer [clave oculta]");
+});
+
+test("novedades: las secciones del CHANGELOG.md y si traen arreglos de seguridad", async () => {
+  const changelog = await import("../dist/changelog.js");
+  const text = fs.readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
+  const sections = changelog.parseChangelog(text);
+  assert.ok(sections.some((section) => section.version === "0.2.0"));
+  assert.ok(!sections.some((section) => section.body.includes("## [")), "una sección se come a la siguiente");
+  // «Sin publicar» no cuenta como versión
+  assert.ok(sections.every((section) => /^\d+\.\d+\.\d+$/.test(section.version)));
+  const between = changelog.sectionsBetween(sections, "0.2.5", "0.2.7");
+  assert.deepEqual(between.map((section) => section.version), ["0.2.7", "0.2.6"]);
+  assert.ok(changelog.hasSecurity(between));
+  assert.ok(!changelog.hasSecurity(changelog.sectionsBetween(sections, "0.2.4", "0.2.5")));
 });

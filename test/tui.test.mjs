@@ -77,7 +77,9 @@ test("interfaz: versión nueva destacada y bienvenida la primera vez", { skip: !
     enabledProviders: ["anon"],
     autoUpdateModels: false,
   });
-  fs.writeFileSync(path.join(ws.home, "update.json"), JSON.stringify({ checked: Date.now(), latest: "99.0.0" }));
+  // …con arreglos de seguridad, y vienes de una versión anterior (se enseñan las novedades)
+  fs.writeFileSync(path.join(ws.home, "update.json"), JSON.stringify({ checked: Date.now(), latest: "99.0.0", security: true }));
+  fs.writeFileSync(path.join(ws.home, "notices.json"), JSON.stringify({ lastVersion: "0.0.1" }));
 
   const result = await runExpect("tui-avisos.exp", ws);
   assert.equal(result.code, 0, result.plain.slice(-3000));

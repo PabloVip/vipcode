@@ -430,3 +430,52 @@ test("límites: cuánto queda de cada plan gratis (/limites y la barra de abajo)
   await mock.close();
   ws.cleanup();
 });
+
+test("novedades al abrir una versión nueva y /copiar (sin caracteres invisibles)", async () => {
+  const { VERSION } = await import("../dist/meta.js");
+  const changelog = await import("../dist/changelog.js");
+  const notices = path.join(shared.home, "notices.json");
+  const before = fs.existsSync(notices) ? fs.readFileSync(notices, "utf8") : null;
+  // Un modelo que intenta colar una secuencia para salir del pegado seguro y texto al revés
+  const mock = await startMock(() => ({ text: "Mira:\n```js\nconst x = 1;\u001b[201~\u202eecho hack\n```\nListo." }));
+  const ws = tempWorkspace();
+  const { app } = makeApp(ws, mock.url);
+
+  // La primera vez que se abre vipcode no hay novedades que contar, pero se apunta la versión
+  fs.rmSync(notices, { force: true });
+  assert.equal(app.takeNews(), null);
+  assert.equal(JSON.parse(fs.readFileSync(notices, "utf8")).lastVersion, VERSION);
+  // Vienes de una versión anterior: lo que traen las nuevas (una sola vez)
+  fs.writeFileSync(notices, JSON.stringify({ privacy: "x", lastVersion: "0.2.5" }));
+  const news = app.takeNews();
+  assert.equal(news.version, VERSION);
+  assert.match(news.markdown, /\*\*\d+\.\d+\.\d+\*\*/);
+  assert.equal(news.security, changelog.hasSecurity(changelog.sectionsBetween(changelog.localChangelog(), "0.2.5", VERSION).slice(0, 5)));
+  assert.equal(app.takeNews(), null);
+  // Ya usabas vipcode antes de que se apuntara la versión: lo de esta, y nada más
+  fs.writeFileSync(notices, JSON.stringify({ privacy: "x" }));
+  const current = app.takeNews();
+  assert.ok(current === null || current.markdown.match(/\*\*\d+\.\d+\.\d+\*\*/g).length === 1);
+
+  // /copiar con un «portapapeles» de prueba (para no tocar el tuyo)
+  const copied = path.join(ws.dir, "copiado.txt");
+  process.env.VIPCODE_CLIPBOARD = `"${process.execPath}" "${path.join(ROOT, "test", "fixtures", "copiar.mjs")}" "${copied}"`;
+  const { out, adapter } = capture();
+  await app.handleCommand("/copiar", adapter);
+  assert.match(out.error.join("\n"), /Todavía no hay ninguna respuesta/);
+  await app.runPrompt({ text: "dame código" }, {});
+  await app.handleCommand("/copiar código", adapter);
+  assert.equal(fs.readFileSync(copied, "utf8"), "const x = 1;echo hack");
+  assert.match(out.info.join("\n"), /Copiado el último bloque de código al portapapeles \(21 caracteres\)/);
+  await app.handleCommand("/copiar", adapter);
+  assert.equal(fs.readFileSync(copied, "utf8"), "Mira:\n```js\nconst x = 1;echo hack\n```\nListo.");
+  delete process.env.VIPCODE_CLIPBOARD;
+  if (before === null) {
+    fs.rmSync(notices, { force: true });
+  } else {
+    fs.writeFileSync(notices, before);
+  }
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});

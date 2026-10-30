@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { hasSecurity, parseChangelog, sectionsBetween } from "./changelog.js";
 import { PACKAGE_NAME, REPO_URL, VERSION } from "./meta.js";
 import { INSTALL_DIR, UPDATE_PATH, ensureHomeDir, isInside } from "./paths.js";
 import { findProgram, spawnProgram } from "./shell.js";
@@ -112,18 +113,48 @@ export async function latestRelease(): Promise<Release | null> {
   return found.reduce((best, release) => (compareVersions(release.version, best.version) > 0 ? release : best));
 }
 
-// Una vez al día, en segundo plano: devuelve la versión nueva si la hay (y nunca falla)
-export async function checkForUpdate(): Promise<string | null> {
-  let cache: { checked?: number; latest?: string } = {};
+// CHANGELOG.md de una versión publicada (VIPCODE_CHANGELOG_URL permite usar otro, por ejemplo en las pruebas;
+// {version} se cambia por el número)
+function changelogUrl(version: string): string {
+  const template = process.env.VIPCODE_CHANGELOG_URL || `${REPO_URL.replace("https://github.com/", "https://raw.githubusercontent.com/")}/v{version}/CHANGELOG.md`;
+  return template.replace("{version}", encodeURIComponent(version));
+}
+
+// ¿Trae arreglos de seguridad alguna de las versiones entre la tuya y la nueva? (si no se puede saber, false)
+async function bringsSecurity(latest: string): Promise<boolean> {
+  try {
+    const response = await fetch(changelogUrl(latest), { headers: { "user-agent": `vipcode/${VERSION}` }, signal: AbortSignal.timeout(10000) });
+    if (!response.ok) {
+      return false;
+    }
+    const text = (await response.text()).slice(0, 500000);
+    return hasSecurity(sectionsBetween(parseChangelog(text), VERSION, latest));
+  } catch {
+    return false;
+  }
+}
+
+export interface UpdateNotice {
+  version: string;
+  // Alguna de las versiones nuevas trae arreglos de seguridad: el aviso lo destaca para que no se deje para luego
+  security: boolean;
+}
+
+// Una vez al día, en segundo plano: la versión nueva si la hay (y nunca falla)
+export async function checkForUpdate(): Promise<UpdateNotice | null> {
+  let cache: { checked?: number; latest?: string; security?: boolean; from?: string } = {};
   try {
     cache = JSON.parse(fs.readFileSync(UPDATE_PATH, "utf8"));
   } catch {
     // primera vez
   }
-  if (!cache.checked || Date.now() - cache.checked > DAY_MS || !cache.latest) {
+  // Se vuelve a mirar cada día, y también si has actualizado desde la última vez (cambia lo que te falta)
+  if (!cache.checked || Date.now() - cache.checked > DAY_MS || !cache.latest || (cache.from && cache.from !== VERSION)) {
     try {
       const release = await latestRelease();
-      cache = { checked: Date.now(), latest: release?.version || VERSION };
+      const latest = release?.version || VERSION;
+      const security = compareVersions(latest, VERSION) > 0 ? await bringsSecurity(latest) : false;
+      cache = { checked: Date.now(), latest, security, from: VERSION };
       ensureHomeDir();
       fs.writeFileSync(UPDATE_PATH, JSON.stringify(cache, null, 2));
     } catch {
@@ -131,7 +162,7 @@ export async function checkForUpdate(): Promise<string | null> {
     }
   }
   if (cache.latest && compareVersions(cache.latest, VERSION) > 0) {
-    return cache.latest;
+    return { version: cache.latest, security: cache.security === true };
   }
   return null;
 }
