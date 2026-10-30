@@ -66,9 +66,9 @@ export function useConversation(props: {
   dialog: { kind: string } | null;
   // La interfaz con la que se pinta: si cambia (/interfaz), se vuelve a pintar todo
   interfaceId: string;
-  // Un panel a la derecha de la conversación (el de la interfaz Criaturas), que le quita ese ancho, y qué hacer si lo
-  // pinchas
-  side?: { width: number; view: ReactNode; onClick: () => void } | null;
+  // Un panel a la derecha de la conversación (el de la interfaz Criaturas), que le quita ese ancho: cómo se pinta con el
+  // alto que tiene y qué hacer si lo pinchas
+  side?: { width: number; render: (height: number) => ReactNode; onClick: () => void } | null;
 }): Conversation {
   const { app, items, rows, fullscreen, dialog, interfaceId, side } = props;
   // El ancho de la conversación, con su barra de desplazamiento
@@ -419,7 +419,7 @@ export function useConversation(props: {
       ) : side ? (
         <Box width={1} />
       ) : null}
-      {side?.view}
+      {side?.render(viewHeight)}
     </Box>
   );
 

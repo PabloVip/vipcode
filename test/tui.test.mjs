@@ -8,9 +8,9 @@ import { CLI, ROOT, contentText, lastMessage, provider, startMock, systemEnv, te
 const hasExpect = spawnSync("expect", ["-v"], { stdio: "ignore" }).status === 0;
 
 // Lanza un guion de expect de test/fixtures contra la interfaz y devuelve lo que se vio (sin colores)
-function runExpect(script, ws, env = {}) {
+function runExpect(script, ws, env = {}, args = []) {
   return new Promise((resolve) => {
-    const child = spawn("expect", [path.join(ROOT, "test", "fixtures", script), CLI], {
+    const child = spawn("expect", [path.join(ROOT, "test", "fixtures", script), CLI, ...args], {
       cwd: ws.proj,
       env: { ...systemEnv(ws.home), VIPCODE_HOME: ws.home, TERM: "xterm-256color", ...env },
     });
@@ -243,19 +243,26 @@ test("interfaz: /interfaz cambia a la compacta al momento, y a la clásica y de 
 
 test("interfaz: la de criaturas pone un monstruito a la derecha que cambia con cada respuesta y al pincharlo", { skip: !hasExpect && "falta el programa expect" }, async () => {
   const mock = await startMock(() => ({ text: "HOLA" }));
-  const ws = tempWorkspace();
-  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
   try {
-    const result = await runExpect("tui-criaturas.exp", ws);
-    assert.equal(result.code, 0, result.plain.slice(-3000));
-    assert.match(result.plain, /TUI-CRIATURAS-OK/);
-    // Al elegirla, la que había; otra al terminar la respuesta y otra al pincharla: sus nombres, entre los bordes del panel
-    const names = new Set([...result.plain.matchAll(/│ +(?:★ )?([A-Z][a-zñáéíóú]+) +│/g)].map((match) => match[1]));
-    assert.ok(names.size >= 3, `criaturas vistas: ${[...names].join(", ")}`);
-    // Se guarda para la próxima vez
-    assert.equal(JSON.parse(fs.readFileSync(path.join(ws.home, "config.json"), "utf8")).interfaz, "criaturas");
+    // La pequeña, la grande (terminal ancha y alta) y la pintada con fondos (la del Terminal del Mac)
+    for (const [size, env] of [[["100", "30"], {}], [["130", "36"], {}], [["100", "34"], { TERM_PROGRAM: "Apple_Terminal" }]]) {
+      const ws = tempWorkspace();
+      ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+      try {
+        const result = await runExpect("tui-criaturas.exp", ws, env, size);
+        const where = `${size.join("×")} ${env.TERM_PROGRAM || ""}`;
+        assert.equal(result.code, 0, `${where}\n${result.plain.slice(-3000)}`);
+        assert.match(result.plain, /TUI-CRIATURAS-OK/);
+        // Al elegirla, la que había; otra al terminar la respuesta y otra al pincharla: sus nombres, entre los bordes
+        const names = new Set([...result.plain.matchAll(/│ +(?:★ )?([A-Z][a-zñáéíóú]+) +│/g)].map((match) => match[1]));
+        assert.ok(names.size >= 3, `${where}: criaturas vistas: ${[...names].join(", ")}`);
+        // Se guarda para la próxima vez
+        assert.equal(JSON.parse(fs.readFileSync(path.join(ws.home, "config.json"), "utf8")).interfaz, "criaturas");
+      } finally {
+        ws.cleanup();
+      }
+    }
   } finally {
     await mock.close();
-    ws.cleanup();
   }
 });

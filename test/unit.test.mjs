@@ -1257,26 +1257,34 @@ test("interfaces: cuál sale de la configuración y cómo pinta cada una", async
 });
 
 test("criaturas: monstruitos al azar, repetibles con la misma semilla, y su panel", async () => {
-  const { makeCreature, CreaturePanel, CreatureView, panelWidth, wrapWords, PANEL_WIDTH } = await import("../dist/tui/creatures.js");
+  const { makeCreature, CreaturePanel, CreatureView, creatureLayout, pixelMode, spriteRows, wrapWords } = await import("../dist/tui/creatures.js");
   const { INTERFACES } = await import("../dist/interfaces.js");
   const { setLook } = await import("../dist/tui/theme.js");
   const { renderToString } = await import("ink");
   const { createElement } = await import("react");
   const { default: stringWidth } = await import("string-width");
+  const isColor = (cell) => cell === null || /^#[0-9a-f]{6}$/.test(cell);
   // La misma semilla, la misma criatura; con otras, casi siempre otro nombre y siempre otro dibujo
   assert.deepEqual(makeCreature(42), makeCreature(42));
   const many = Array.from({ length: 400 }, (_, seed) => makeCreature(seed));
   assert.ok(new Set(many.map((creature) => creature.name)).size > 250);
   assert.equal(new Set(many.map((creature) => JSON.stringify(creature.pixels))).size, many.length);
   for (const creature of many) {
-    // 16 × 16 píxeles, de un color o vacíos, y simétrica salvo el brillo y hacia dónde miran los ojos
+    // 16 × 16 píxeles, de un color o vacíos, y simétrica salvo el brillo y hacia dónde miran los ojos; la grande, 32 × 32
     assert.equal(creature.pixels.length, 16);
-    assert.ok(creature.pixels.every((row) => row.length === 16 && row.every((cell) => cell === null || /^#[0-9a-f]{6}$/.test(cell))));
+    assert.ok(creature.pixels.every((row) => row.length === 16 && row.every(isColor)));
     const uneven = creature.pixels.reduce((count, row) => count + row.slice(0, 8).filter((cell, x) => cell !== row[15 - x]).length, 0);
     assert.ok(uneven <= 5, `${creature.name}: ${uneven} píxeles sin su reflejo`);
+    assert.equal(creature.big.length, 32);
+    assert.ok(creature.big.every((row) => row.length === 32 && row.every(isColor)));
     assert.match(creature.name, /^[A-Z][a-zñáéíóú]+$/);
     assert.ok(creature.message.includes(creature.name));
     assert.equal(creature.rare, creature.message.includes("dorado"));
+  }
+  // La grande no es la pequeña ampliada sin más: esquinas redondeadas, borde fino, luces, sombras y brillo en los ojos
+  for (const creature of many) {
+    const changed = creature.big.flat().filter((cell, index) => cell !== creature.pixels[Math.floor(index / 64)][Math.floor((index % 32) / 2)]).length;
+    assert.ok(changed > 50, `${creature.name}: solo ${changed} píxeles distintos`);
   }
   // Una de cada veinte, más o menos, es dorada
   const rare = many.filter((creature) => creature.rare).length;
@@ -1284,25 +1292,45 @@ test("criaturas: monstruitos al azar, repetibles con la misma semilla, y su pane
   // Los mensajes se parten por los espacios, para centrar cada línea
   assert.deepEqual(wrapWords("¡Un Zumbalo salvaje!", 16), ["¡Un Zumbalo", "salvaje!"]);
   assert.deepEqual(wrapWords("  ", 16), []);
+  // En el Terminal del Mac, con fondos (sus bloques dejan rayas entre las filas); en las demás, con medios bloques
+  assert.equal(pixelMode({ TERM_PROGRAM: "Apple_Terminal" }), "fondos");
+  assert.equal(pixelMode({ TERM_PROGRAM: "iTerm.app" }), "bloques");
+  assert.equal(pixelMode({}), "bloques");
   const byId = (id) => INTERFACES.find((item) => item.id === id);
+  const plain = (node) => renderToString(node, { columns: 200 }).split("\n").map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
   try {
-    // El panel, solo en la interfaz de criaturas y si cabe
+    // El panel, solo en la interfaz de criaturas y según quepa: grande en terminales anchas y altas, pequeño en las demás
     setLook(byId("criaturas"));
-    assert.equal(panelWidth(100), PANEL_WIDTH);
-    assert.equal(panelWidth(69), 0);
+    assert.deepEqual(creatureLayout(100, 30, "bloques"), { width: 20, big: false, mode: "bloques" });
+    assert.deepEqual(creatureLayout(130, 40, "bloques"), { width: 36, big: true, mode: "bloques" });
+    assert.deepEqual(creatureLayout(130, 30, "bloques"), { width: 20, big: false, mode: "bloques" });
+    assert.equal(creatureLayout(69, 40, "bloques"), null);
+    // Con fondos, cada píxel ocupa dos columnas: necesita más sitio
+    assert.deepEqual(creatureLayout(100, 30, "fondos"), { width: 36, big: false, mode: "fondos" });
+    assert.equal(creatureLayout(89, 40, "fondos"), null);
+    assert.equal(creatureLayout(120, 27, "fondos"), null);
     const creature = makeCreature(7);
-    const lines = renderToString(createElement(CreaturePanel, { creature, busy: false }), { columns: 100 })
-      .split("\n")
-      .map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
-    assert.ok(lines.every((line) => stringWidth(line) <= PANEL_WIDTH), lines.join("\n"));
-    assert.ok(lines.some((line) => line.includes(creature.name)));
-    assert.ok(lines.some((line) => line.includes("clic: otra")));
-    // Al saltar mide lo mismo: no mueve lo que tiene debajo
-    const height = (lift) => renderToString(createElement(CreatureView, { creature, lift })).split("\n").length;
-    assert.equal(height(1), height(0));
-    assert.equal(height(2), height(0));
+    for (const layout of [creatureLayout(100, 30, "bloques"), creatureLayout(130, 40, "bloques"), creatureLayout(100, 30, "fondos")]) {
+      const lines = plain(createElement(CreaturePanel, { creature, busy: false, layout, height: 40 }));
+      assert.ok(lines.every((line) => stringWidth(line) <= layout.width), lines.join("\n"));
+      assert.ok(lines.some((line) => line.includes(creature.name)));
+      assert.ok(lines.some((line) => line.includes("clic: otra")));
+      // El dibujo, con fondos, sin bloques (solo espacios con color); con medios bloques, con «▀»
+      const drawing = plain(createElement(CreatureView, { creature, layout, colors: true })).join("");
+      assert.equal(/[▀▄█]/.test(drawing), layout.mode === "bloques");
+      // Al saltar mide lo mismo (no mueve lo que tiene debajo) y ocupa las filas que dice spriteRows
+      const height = (lift) => plain(createElement(CreatureView, { creature, layout, lift })).length;
+      assert.equal(height(0), spriteRows(creature, layout));
+      assert.equal(height(1), height(0));
+      assert.equal(height(2), height(0));
+      // Si no cabe todo, primero se quita lo de debajo del dibujo y, si ni el dibujo cabe, no se enseña
+      const tight = plain(createElement(CreaturePanel, { creature, busy: false, layout, height: spriteRows(creature, layout) + 3 }));
+      assert.ok(tight.some((line) => line.includes(creature.name)));
+      assert.ok(!tight.some((line) => line.includes("clic: otra")));
+      assert.deepEqual(plain(createElement(CreaturePanel, { creature, busy: false, layout, height: spriteRows(creature, layout) + 1 })), [""]);
+    }
     setLook(byId("completa"));
-    assert.equal(panelWidth(200), 0);
+    assert.equal(creatureLayout(200, 60, "bloques"), null);
   } finally {
     setLook(byId("completa"));
   }

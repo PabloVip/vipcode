@@ -20,7 +20,7 @@ import { colorPreview } from "../ui.js";
 import { CHECK_MS, checkForUpdate, stepProgress } from "../update.js";
 import { INTERFACES, interfaceFor } from "../interfaces.js";
 import { useConversation } from "./conversation.js";
-import { CreaturePanel, makeCreature, panelWidth } from "./creatures.js";
+import { CreaturePanel, creatureLayout, makeCreature } from "./creatures.js";
 import { type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
 import * as E from "./editor.js";
 import { Bullet, type Item, ItemView, type NewItem, ToolHeader, formatDuration, oneLine, shortTokens, tildify } from "./items.js";
@@ -361,13 +361,15 @@ function Main(props: { app: App; initial: string; fullscreen: boolean; switched:
   // despliegan; en la de criaturas, con el panel de la criatura a la derecha (un clic saca otra)
   const [interfaceId, setInterfaceId] = useState(look.interface.id);
   const [creature, setCreature] = useState(() => makeCreature());
-  const sideWidth = props.fullscreen ? panelWidth(columns) : 0;
+  const layout = props.fullscreen ? creatureLayout(columns, rows) : null;
   // Al pincharla sale otra, que se presenta (salvo si es dorada: entonces lo dice)
   const pokeCreature = () => {
     const next = makeCreature();
     setCreature(next.rare ? next : { ...next, message: `¡Hola! Soy ${next.name}` });
   };
-  const side = sideWidth > 0 ? { width: sideWidth, view: <CreaturePanel creature={creature} busy={busy} />, onClick: pokeCreature } : null;
+  const side = layout
+    ? { width: layout.width, render: (height: number) => <CreaturePanel creature={creature} busy={busy} layout={layout} height={height} />, onClick: pokeCreature }
+    : null;
   const conversation = useConversation({ app, items, columns, rows, fullscreen: props.fullscreen, dialog, interfaceId, side });
   const [attachments, setAttachments] = useState<string[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);

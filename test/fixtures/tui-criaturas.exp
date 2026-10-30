@@ -1,8 +1,10 @@
 # La interfaz de criaturas: se elige con /interfaz, sale un monstruito a la derecha, cambia con cada respuesta y, al
-# pincharlo, sale otro que se presenta (lo lanza test/tui.test.mjs)
+# pincharlo, sale otro que se presenta (lo lanza test/tui.test.mjs, con el tamaño de la terminal: columnas y filas)
 set timeout 30
 log_user 1
 set cli [lindex $argv 0]
+set columnas [lindex $argv 1]
+set filas [lindex $argv 2]
 # Con la pantalla completa cada repintado ocupa varios KB: con el búfer de serie (2.000 bytes), expect tiraría lo de
 # arriba de la pantalla antes de buscar en ello
 match_max -d 200000
@@ -34,7 +36,7 @@ proc libre {} {
 }
 
 spawn -noecho node $cli
-stty rows 30 columns 100 < $spawn_out(slave,name)
+stty rows $filas columns $columnas < $spawn_out(slave,name)
 libre
 
 # 1. Se elige con /interfaz (escribiendo un trozo de su descripción): sale el panel de la criatura
@@ -62,10 +64,11 @@ expect {
 libre
 pausa 0.5
 
-# 3. Un clic en el panel (columnas 81 a 100): sale otra, que se presenta (o avisa de que es dorada)
-send "\033\[<0;90;5M"
+# 3. Un clic en el panel (las últimas columnas): sale otra, que se presenta (o avisa de que es dorada)
+set x [expr {$columnas - 10}]
+send "\033\[<0;$x;5M"
 pausa 0.1
-send "\033\[<0;90;5m"
+send "\033\[<0;$x;5m"
 expect {
   -re {Soy|dorado} {}
   timeout { falla "al pinchar la criatura no sale otra" }

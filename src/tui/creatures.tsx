@@ -8,20 +8,50 @@ import { look } from "./theme.js";
 // con su nombre, en un panel a la derecha. Sale otro al terminar cada respuesta o con un clic, y da saltitos mientras
 // vipcode trabaja. Son originales: se inventan aquí, no se descarga ni se copia ningún dibujo
 
+// Filas de píxeles de arriba abajo: un color (#rrggbb) o null si está vacío
+type Pixels = (string | null)[][];
+
+// 16 × 16 píxeles: se dibuja la mitad izquierda y se copia en espejo
+const SIZE = 16;
+const HALF = SIZE / 2;
+
 export interface Creature {
   name: string;
   message: string;
   // El color de su nombre, y si es de las raras (dorada, una de cada veinte)
   color: string;
   rare: boolean;
-  // Filas de píxeles de arriba abajo: un color (#rrggbb) o null si está vacío
-  pixels: (string | null)[][];
+  // De 16 × 16, y la grande de 32 × 32 con más detalle (bordes redondeados, luces y sombras y brillo en los ojos)
+  pixels: Pixels;
+  big: Pixels;
 }
 
-// El ancho del panel (lo que se le quita a la conversación); en terminales estrechas no hay panel
-export const PANEL_WIDTH = 20;
-export function panelWidth(columns: number): number {
-  return look.interface.pets && columns >= 70 ? PANEL_WIDTH : 0;
+// Cómo se pintan los píxeles: con medios bloques («▀», dos píxeles por carácter) o con el fondo de los caracteres (dos
+// caracteres por píxel). El Terminal del Mac pinta los bloques sin llenar todo el alto de la línea y salen rayas entre
+// las filas; los fondos sí los pinta enteros
+export type PixelMode = "bloques" | "fondos";
+export function pixelMode(env: NodeJS.ProcessEnv = process.env): PixelMode {
+  return env.TERM_PROGRAM === "Apple_Terminal" ? "fondos" : "bloques";
+}
+
+// El panel según lo que quepa: la criatura grande en terminales anchas y altas, la pequeña en las demás y nada si no
+// cabe. Con fondos solo hay una: la de 16 × 16, que ya ocupa 32 columnas. «width»: lo que se le quita a la conversación
+export interface CreatureLayout {
+  width: number;
+  big: boolean;
+  mode: PixelMode;
+}
+export function creatureLayout(columns: number, rows: number, mode: PixelMode = pixelMode()): CreatureLayout | null {
+  if (!look.interface.pets) {
+    return null;
+  }
+  if (mode === "fondos") {
+    return columns >= 90 && rows >= 28 ? { width: SIZE * 2 + 4, big: false, mode } : null;
+  }
+  if (columns >= 120 && rows >= 32) {
+    return { width: SIZE * 2 + 4, big: true, mode };
+  }
+  return columns >= 70 ? { width: SIZE + 4, big: false, mode } : null;
 }
 
 // Números al azar repetibles a partir de una semilla (mulberry32)
@@ -60,10 +90,10 @@ const MESSAGES = [
   "{name} aplaude",
 ];
 
-const SIZE = 16;
-const HALF = SIZE / 2;
 const WHITE = "#ffffff";
 const DARK = "#1c1a2b";
+// Las pupilas, de otro tono que la boca: en la grande llevan brillo
+const PUPIL = "#1a1830";
 const PINK = "#ff8fb1";
 const IVORY = "#f2e7cf";
 
@@ -179,26 +209,26 @@ export function makeCreature(seed = Math.floor(Math.random() * 4294967296)): Cre
     // Las pupilas: abajo, o las dos hacia el mismo lado
     const gaze = pick(["abajo", "izquierda", "derecha"] as const);
     if (gaze === "abajo") {
-      put(eyeY + 1, eyeX, DARK);
-      put(eyeY + 1, eyeX + 1, DARK);
+      put(eyeY + 1, eyeX, PUPIL);
+      put(eyeY + 1, eyeX + 1, PUPIL);
     } else {
       const shift = gaze === "izquierda" ? 0 : 1;
-      grid[eyeY][eyeX + shift] = DARK;
-      grid[eyeY + 1][eyeX + shift] = DARK;
-      grid[eyeY][SIZE - 2 - eyeX + shift] = DARK;
-      grid[eyeY + 1][SIZE - 2 - eyeX + shift] = DARK;
+      grid[eyeY][eyeX + shift] = PUPIL;
+      grid[eyeY + 1][eyeX + shift] = PUPIL;
+      grid[eyeY][SIZE - 2 - eyeX + shift] = PUPIL;
+      grid[eyeY + 1][SIZE - 2 - eyeX + shift] = PUPIL;
     }
   } else if (eyes === "punto") {
     put(eyeY, eyeX + 1, WHITE);
-    put(eyeY + 1, eyeX + 1, DARK);
+    put(eyeY + 1, eyeX + 1, PUPIL);
   } else if (eyes === "cíclope") {
     eyeX = HALF - 2;
     for (let y = eyeY; y <= eyeY + 2; y++) {
       put(y, HALF - 2, WHITE);
       put(y, HALF - 1, WHITE);
     }
-    put(eyeY + 1, HALF - 1, DARK);
-    put(eyeY + 2, HALF - 1, DARK);
+    put(eyeY + 1, HALF - 1, PUPIL);
+    put(eyeY + 2, HALF - 1, PUPIL);
     eyeY++;
   } else if (eyes === "contentos") {
     put(eyeY + 1, eyeX, DARK);
@@ -242,8 +272,9 @@ export function makeCreature(seed = Math.floor(Math.random() * 4294967296)): Cre
       put(earTop - dy, earX + dx, body);
     }
   } else if (crown === "cuernos") {
-    put(topAt(earX) - 1, earX, IVORY);
-    put(topAt(earX) - 2, earX - 1, IVORY);
+    const base = topAt(earX);
+    put(base - 1, earX, IVORY);
+    put(base - 2, earX - 1, IVORY);
   } else if (crown === "mechón") {
     put(top - 1, HALF - 2, accent);
     put(top - 1, HALF - 1, accent);
@@ -292,46 +323,144 @@ export function makeCreature(seed = Math.floor(Math.random() * 4294967296)): Cre
 
   const name = pick(FIRST) + (chance(0.35) ? pick(MIDDLE) : "") + pick(LAST);
   const message = rare ? `¡Un ${name} dorado! Qué suerte` : pick(MESSAGES).replace("{name}", name);
-  return { name, message, color: body, rare, pixels: grid };
+  return { name, message, color: body, rare, pixels: grid, big: detailed(grid, { body, light, shade, outline }) };
 }
 
-// Dos píxeles por carácter: ▀ con el de arriba como letra y el de abajo como fondo. Sin colores, la silueta con bloques.
-// Sin las filas vacías de arriba y abajo, y con 2 píxeles de hueco encima para saltar («lift»: cuánto se levanta)
-export function CreatureView(props: { creature: Creature; lift?: number }) {
-  const lift = Math.max(0, Math.min(2, props.lift ?? 0));
-  const empty = Array<string | null>(SIZE).fill(null);
-  const used = props.creature.pixels.map((row) => row.some((cell) => cell !== null));
-  const sprite = props.creature.pixels.slice(Math.max(0, used.indexOf(true)), used.lastIndexOf(true) + 1);
-  const pixels = [...Array(2 - lift).fill(empty), ...sprite, ...Array(lift).fill(empty)];
-  const rows: ReactNode[] = [];
-  for (let y = 0; y < pixels.length; y += 2) {
-    rows.push(
-      <Text key={y}>
-        {pixels[y].map((up: string | null, x: number) => {
+// Al doble de tamaño redondeando las esquinas (Scale2x: cada píxel pasa a cuatro y, en las diagonales, toma el color de
+// los vecinos que coinciden)
+function scale2x(grid: Pixels): Pixels {
+  const height = grid.length;
+  const width = grid[0].length;
+  const out: Pixels = Array.from({ length: height * 2 }, () => Array<string | null>(width * 2).fill(null));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const p = grid[y][x];
+      const a = y > 0 ? grid[y - 1][x] : p;
+      const b = x < width - 1 ? grid[y][x + 1] : p;
+      const c = x > 0 ? grid[y][x - 1] : p;
+      const d = y < height - 1 ? grid[y + 1][x] : p;
+      out[y * 2][x * 2] = c === a && c !== d && a !== b ? a : p;
+      out[y * 2][x * 2 + 1] = a === b && a !== c && b !== d ? b : p;
+      out[y * 2 + 1][x * 2] = d === c && d !== b && c !== a ? c : p;
+      out[y * 2 + 1][x * 2 + 1] = b === d && b !== a && d !== c ? d : p;
+    }
+  }
+  return out;
+}
+
+// La grande: al doble, con el borde fino, luz de arriba a la izquierda (más claro por arriba y por la izquierda, más
+// oscuro abajo a la derecha) y un brillo blanco en cada pupila
+function detailed(grid: Pixels, colors: { body: string; light: string; shade: string; outline: string }): Pixels {
+  const big = scale2x(grid);
+  const size = big.length;
+  const before = big.map((row) => [...row]);
+  const at = (y: number, x: number) => before[y]?.[x] ?? null;
+  const outside = (y: number, x: number) => at(y, x) === null || at(y, x) === colors.outline;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const cell = before[y][x];
+      const around = [at(y - 1, x), at(y + 1, x), at(y, x - 1), at(y, x + 1)];
+      if (cell === colors.outline && around.every((near) => near === null || near === colors.outline)) {
+        big[y][x] = null;
+      } else if (cell === colors.body && (outside(y - 1, x) || (outside(y, x - 1) && y < size / 2))) {
+        big[y][x] = colors.light;
+      } else if (cell === colors.body && outside(y, x + 1) && y >= size / 2) {
+        big[y][x] = colors.shade;
+      } else if (cell === PUPIL && at(y - 1, x) !== PUPIL && at(y, x - 1) !== PUPIL && at(y + 1, x) === PUPIL && at(y, x + 1) === PUPIL) {
+        big[y][x] = WHITE;
+      }
+    }
+  }
+  return big;
+}
+
+// Las filas de píxeles vacías que se dejan encima para saltar: con medios bloques, dos (media fila de la terminal cada
+// una); con fondos, una (una fila)
+function hopRoom(mode: PixelMode): number {
+  return mode === "fondos" ? 1 : 2;
+}
+
+// El dibujo sin las filas vacías de arriba y de abajo
+function trimmed(grid: Pixels): Pixels {
+  const used = grid.map((row) => row.some((cell) => cell !== null));
+  return grid.slice(Math.max(0, used.indexOf(true)), used.lastIndexOf(true) + 1);
+}
+
+// Las filas de la terminal que ocupa el dibujo, con el hueco para saltar
+export function spriteRows(creature: Creature, layout: CreatureLayout): number {
+  const pixels = trimmed(layout.big ? creature.big : creature.pixels).length + hopRoom(layout.mode);
+  return layout.mode === "fondos" ? pixels : Math.ceil(pixels / 2);
+}
+
+interface Cell {
+  text: string;
+  color?: string;
+  background?: string;
+}
+
+// Los trozos seguidos con los mismos colores, juntos: menos cosas que pintar en cada saltito
+function merge(cells: Cell[]): Cell[] {
+  const runs: Cell[] = [];
+  for (const cell of cells) {
+    const last = runs.at(-1);
+    if (last && last.color === cell.color && last.background === cell.background) {
+      last.text += cell.text;
+    } else {
+      runs.push({ ...cell });
+    }
+  }
+  return runs;
+}
+
+// El dibujo. Con medios bloques, dos píxeles por carácter: ▀ con el de arriba como letra y el de abajo como fondo; con
+// fondos, cada píxel son dos espacios con su color de fondo. Sin colores, la silueta con bloques. «lift»: cuánto se
+// levanta del suelo al saltar
+export function CreatureView(props: { creature: Creature; layout: CreatureLayout; lift?: number; colors?: boolean }) {
+  const { layout } = props;
+  const colors = props.colors ?? pc.isColorSupported;
+  const room = hopRoom(layout.mode);
+  const lift = Math.max(0, Math.min(room, props.lift ?? 0));
+  const sprite = trimmed(layout.big ? props.creature.big : props.creature.pixels);
+  const empty = Array<string | null>(sprite[0].length).fill(null);
+  const pixels: Pixels = [...Array(room - lift).fill(empty), ...sprite, ...Array(lift).fill(empty)];
+  const lines: Cell[][] = [];
+  if (layout.mode === "fondos") {
+    for (const row of pixels) {
+      lines.push(row.map((cell) => (cell === null ? { text: "  " } : colors ? { text: "  ", background: cell } : { text: "██" })));
+    }
+  } else {
+    for (let y = 0; y < pixels.length; y += 2) {
+      lines.push(
+        pixels[y].map((up, x) => {
           const down = pixels[y + 1]?.[x] ?? null;
-          if (!pc.isColorSupported) {
-            return up && down ? "█" : up ? "▀" : down ? "▄" : " ";
+          if (!colors) {
+            return { text: up && down ? "█" : up ? "▀" : down ? "▄" : " " };
           }
           if (up && down) {
-            return (
-              <Text key={x} color={up} backgroundColor={down}>
-                ▀
-              </Text>
-            );
+            return { text: "▀", color: up, background: down };
           }
-          if (up || down) {
-            return (
-              <Text key={x} color={(up || down)!}>
-                {up ? "▀" : "▄"}
-              </Text>
-            );
-          }
-          return " ";
-        })}
-      </Text>,
-    );
+          return up || down ? { text: up ? "▀" : "▄", color: (up || down)! } : { text: " " };
+        }),
+      );
+    }
   }
-  return <Box flexDirection="column">{rows}</Box>;
+  return (
+    <Box flexDirection="column">
+      {lines.map((cells, y) => (
+        <Text key={y}>
+          {merge(cells).map((run, index) =>
+            run.color || run.background ? (
+              <Text key={index} color={run.color} backgroundColor={run.background}>
+                {run.text}
+              </Text>
+            ) : (
+              run.text
+            ),
+          )}
+        </Text>
+      ))}
+    </Box>
+  );
 }
 
 // Parte un texto en líneas de como mucho «width» columnas, por los espacios
@@ -349,15 +478,36 @@ export function wrapWords(text: string, width: number): string[] {
   return line ? [...lines, line] : lines;
 }
 
-// El panel de la derecha: la criatura (que salta mientras vipcode trabaja), su nombre y lo que dice
-export function CreaturePanel(props: { creature: Creature; busy: boolean }) {
-  const { creature } = props;
+// El panel de la derecha: la criatura (que salta mientras vipcode trabaja) y, si caben debajo, su nombre, lo que dice y
+// «clic: otra». «height»: el alto que tiene; si ni el dibujo cabe, no se enseña
+export function CreaturePanel(props: { creature: Creature; busy: boolean; layout: CreatureLayout; height: number }) {
+  const { creature, layout } = props;
+  const room = hopRoom(layout.mode);
   const { frame } = useAnimation({ interval: 160, isActive: props.busy });
-  const lift = props.busy ? [0, 1, 2, 1][frame % 4] : 0;
+  const lift = props.busy ? (room === 2 ? [0, 1, 2, 1] : [0, 0, 1, 1])[frame % 4] : 0;
+  const free = props.height - 2 - spriteRows(creature, layout);
+  if (free < 0) {
+    return null;
+  }
+  // Cada línea de lo que dice por separado, para que salgan centradas
+  const lines: ReactNode[] = [
+    <Text key="nombre" bold color={creature.color} wrap="truncate-end">
+      {creature.rare ? "★ " : ""}
+      {creature.name}
+    </Text>,
+    ...wrapWords(creature.message, layout.width - 4).map((line, index) => (
+      <Text key={`dice-${index}`} dimColor={look.dim}>
+        {line}
+      </Text>
+    )),
+    <Text key="clic" dimColor={look.dim}>
+      clic: otra
+    </Text>,
+  ];
   return (
     <Box
       flexDirection="column"
-      width={PANEL_WIDTH}
+      width={layout.width}
       flexShrink={0}
       alignSelf="flex-start"
       alignItems="center"
@@ -366,18 +516,8 @@ export function CreaturePanel(props: { creature: Creature; busy: boolean }) {
       borderDimColor={look.dim}
       paddingX={1}
     >
-      <CreatureView creature={creature} lift={lift} />
-      <Text bold color={creature.color} wrap="truncate-end">
-        {creature.rare ? "★ " : ""}
-        {creature.name}
-      </Text>
-      {/* Cada línea por separado, para que salgan centradas */}
-      {wrapWords(creature.message, PANEL_WIDTH - 4).map((line, index) => (
-        <Text key={index} dimColor={look.dim}>
-          {line}
-        </Text>
-      ))}
-      <Text dimColor={look.dim}>clic: otra</Text>
+      <CreatureView creature={creature} layout={layout} lift={lift} />
+      {lines.slice(0, free)}
     </Box>
   );
 }

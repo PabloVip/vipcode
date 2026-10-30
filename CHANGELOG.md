@@ -4,6 +4,14 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Cambiado
+
+- Interfaz «Criaturas»: en terminales anchas (120 columnas y 32 filas o más) la criatura sale grande y con más detalle: esquinas redondeadas, luces y sombras y un brillo en los ojos. Si el panel no cabe entero, se quita primero el texto de debajo del dibujo.
+
+### Arreglado
+
+- Interfaz «Criaturas»: en el Terminal del Mac salían rayas entre las filas del dibujo, porque pinta los medios bloques sin llenar todo el alto de la línea. Allí ahora cada píxel se pinta con color de fondo, sin rayas (necesita una ventana de 90 columnas y 28 filas o más).
+
 ## [0.2.16] - 2026-10-30
 
 ### Añadido

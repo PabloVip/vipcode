@@ -109,7 +109,7 @@ Con **`/interfaz`** eliges cómo se ve, y se guarda para la próxima vez:
 - **Compacta**: sin espacios ni bordes de más, para que quepa más conversación.
 - **Alto contraste**: sin texto atenuado y con colores vivos; se lee mejor, también con fondo claro.
 - **Zen**: lo justo, sin bienvenida ni bordes y con la barra de abajo mínima.
-- **Criaturas**: como la pantalla completa, con un monstruito de píxeles a la derecha que se inventa al azar. Sale otro con cada respuesta o si lo pinchas, y da saltitos mientras vipcode trabaja (a veces sale uno dorado).
+- **Criaturas**: como la pantalla completa, con un monstruito de píxeles a la derecha que se inventa al azar. Sale otro con cada respuesta o si lo pinchas, y da saltitos mientras vipcode trabaja (a veces sale uno dorado). En terminales anchas (120 columnas y 32 filas) sale grande y con más detalle. En el Terminal del Mac se pinta con colores de fondo para que no salgan rayas entre las filas, y necesita una ventana de 90 columnas y 28 filas o más.
 
 Con `"fullscreen": false`, lo que seleccionas se copia solo si lo activas en tu terminal:
 
