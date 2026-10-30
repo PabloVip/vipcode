@@ -1425,7 +1425,8 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
       return;
     }
     process.stdout.write(MOUSE_ON);
-    // Cada trozo que lee Ink también llega aquí, sin quitárselo
+    // Lo que lee Ink de la terminal pasa también por aquí (envolviendo stdin.read), sin quitárselo. No vale escuchar
+    // «data»: cuando Ink cambia su oyente de «readable», Node puede ponerse a dar las teclas solo a ese oyente
     const onData = (chunk: Buffer | string) => {
       for (const event of mouseEvents(String(chunk))) {
         if (event.kind === "wheel") {
@@ -1462,7 +1463,15 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
         }
       }
     };
-    process.stdin.on("data", onData);
+    const stdin = process.stdin;
+    const read = stdin.read;
+    stdin.read = ((size?: number) => {
+      const chunk = read.call(stdin, size);
+      if (chunk !== null && chunk !== undefined) {
+        onData(chunk);
+      }
+      return chunk;
+    }) as typeof stdin.read;
     const off = () => {
       try {
         fs.writeSync(process.stdout.fd, MOUSE_OFF);
@@ -1472,7 +1481,7 @@ function Main(props: { app: App; initial: string; fullscreen: boolean }) {
     };
     process.on("exit", off);
     return () => {
-      process.stdin.off("data", onData);
+      stdin.read = read;
       off();
       process.off("exit", off);
     };
