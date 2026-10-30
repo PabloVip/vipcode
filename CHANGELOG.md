@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.2.12] - 2026-10-30
+
 ### Añadido
 
 - `/tutorial` (y `vipcode tutorial`): aprende lo básico en 5 pasos (pedir cosas, señalar ficheros con `@`, ejecutar comandos con `!`, deshacer con `/undo` y preguntar al profe) en una carpeta de prácticas, sin tocar tus ficheros. Cada paso avanza solo cuando lo haces. La primera vez que abres vipcode, te lo sugiere.
@@ -164,7 +166,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.11...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.12...HEAD
+[0.2.12]: https://github.com/PabloVip/vipcode/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/PabloVip/vipcode/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/PabloVip/vipcode/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/PabloVip/vipcode/compare/v0.2.8...v0.2.9
