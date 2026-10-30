@@ -60,6 +60,8 @@ expect {
   "justo encima" {}
   timeout { falla "el diálogo no avisa de que el comando entero está encima" }
 }
+# El diálogo se ve un instante antes de escuchar el teclado
+sleep 0.3
 send "n"
 expect {
   "Escribe tu mensaje" {}
@@ -76,6 +78,7 @@ expect {
   "+ adios" {}
   timeout { falla "el diálogo no enseña el diff" }
 }
+sleep 0.3
 send "s"
 expect {
   "RESPUESTA-DOS" {}

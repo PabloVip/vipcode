@@ -37,7 +37,9 @@ expect {
   timeout { falla "no pregunta si reiniciar" }
 }
 
-# 3. «Más tarde»: sigue abierta la de antes, y al salir se recuerda abrir la nueva
+# 3. «Más tarde»: sigue abierta la de antes, y al salir se recuerda abrir la nueva (el diálogo se ve un instante antes
+# de escuchar el teclado)
+sleep 0.3
 send "\033\[B"
 sleep 0.3
 send "\r"
