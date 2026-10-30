@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.2.10] - 2026-10-30
+
 ### Seguridad
 
 - La pregunta de si confías en una carpeta enseña enteros los comandos y las direcciones que trae su configuración (antes se cortaban los largos), y un nombre con saltos de línea ya no puede fingir otra línea.
@@ -134,7 +136,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.9...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/PabloVip/vipcode/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/PabloVip/vipcode/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/PabloVip/vipcode/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/PabloVip/vipcode/compare/v0.2.6...v0.2.7
