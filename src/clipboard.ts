@@ -38,6 +38,15 @@ function copier(): string[] | null {
   return xsel ? [xsel, "--clipboard", "--input"] : null;
 }
 
+// Nombre del programa con el que copia /copiar (null si se lo tendría que pedir a la terminal)
+export function clipboardProgram(): string | null {
+  const command = copier();
+  if (!command) {
+    return null;
+  }
+  return process.platform === "win32" && !process.env.VIPCODE_CLIPBOARD ? "PowerShell" : path.basename(command[0]);
+}
+
 // OSC 52: se lo pide a la terminal, que copia aunque vipcode esté en otra máquina (por SSH). Lo entienden iTerm2,
 // Windows Terminal, kitty, WezTerm, Ghostty… pero no la Terminal de macOS
 function askTerminal(text: string): boolean {

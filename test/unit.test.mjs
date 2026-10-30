@@ -111,7 +111,7 @@ test("frontmatter y agentes en .md", () => {
   assert.equal(list.find((a) => a.name === "planear").model, "groq/*");
   assert.deepEqual(
     agents.primaryAgents(list).map((a) => a.name),
-    ["programar", "planear", "docs"],
+    ["programar", "planear", "profe", "docs"],
   );
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -1034,4 +1034,23 @@ test("novedades: las secciones del CHANGELOG.md y si traen arreglos de seguridad
   assert.deepEqual(between.map((section) => section.version), ["0.2.7", "0.2.6"]);
   assert.ok(changelog.hasSecurity(between));
   assert.ok(!changelog.hasSecurity(changelog.sectionsBetween(sections, "0.2.4", "0.2.5")));
+});
+
+test("profe: enseña paso a paso y no puede cambiar nada; el consejo de Git en Windows", async () => {
+  const list = agents.loadAgents(os.tmpdir(), config.DEFAULT_CONFIG);
+  const profe = list.find((agent) => agent.name === "profe");
+  assert.equal(profe.mode, "primary");
+  assert.equal(profe.readOnly, true);
+  assert.deepEqual(profe.permission, { edit: "deny", bash: "deny" });
+  const { systemPrompt } = await import("../dist/prompt.js");
+  const text = systemPrompt(os.tmpdir(), { agent: profe, toolNames: [], instructions: [] });
+  assert.match(text, /TEACHER mode/);
+  assert.ok(!/BUILD mode/.test(text));
+  // Git para Windows: solo en Windows, y solo si falta git o los comandos irían por PowerShell
+  const { gitAdvice } = await import("../dist/doctor.js");
+  assert.equal(gitAdvice("darwin", false, "bash", false), null);
+  assert.equal(gitAdvice("win32", true, "Git Bash", false), null);
+  assert.equal(gitAdvice("win32", true, "PowerShell", true), null);
+  assert.match(gitAdvice("win32", false, "PowerShell", false), /winget install Git\.Git/);
+  assert.match(gitAdvice("win32", true, "PowerShell", false), /winget install Git\.Git/);
 });

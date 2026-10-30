@@ -20,6 +20,7 @@ import { Router } from "./router.js";
 import { type SkillDefinition, loadSkills, skillContent } from "./skills.js";
 import { hasSecurity, localChangelog, sectionsBetween } from "./changelog.js";
 import { cleanForClipboard, copyToClipboard, lastCodeBlock } from "./clipboard.js";
+import { doctorReport, gitAdvice } from "./doctor.js";
 import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession, sessionMarkdownPath } from "./session.js";
 import { Snapshots } from "./snapshot.js";
 import { commandShell, findProgram, killTree } from "./shell.js";
@@ -70,8 +71,10 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "agent", args: "<nombre>", description: "cambiar de agente" },
   { name: "planear", description: "agente de solo lectura: investiga y propone un plan (antes /plan)" },
   { name: "programar", description: "agente que puede modificar ficheros (antes /build)" },
+  { name: "profe", description: "agente que te enseña paso a paso; no cambia nada, lo haces tú" },
   { name: "limites", description: "cuánto te queda hoy de cada plan gratis" },
   { name: "copiar", args: "[código]", description: "copia la última respuesta (o su último bloque de código) al portapapeles" },
+  { name: "doctor", description: "comprueba que todo funciona (programas, claves, proveedores) y dice cómo arreglar lo que falte" },
   { name: "undo", description: "deshacer el último mensaje (ficheros y conversación)" },
   { name: "redo", description: "rehacer lo deshecho" },
   { name: "diff", args: "[all]", description: "cambios del último mensaje (o de toda la sesión)" },
@@ -315,6 +318,33 @@ export class App {
       markdown: sections.map((section) => `**${section.version}**\n\n${section.body}`).join("\n\n"),
       security: hasSecurity(sections),
     };
+  }
+
+  // En Windows sin Git para Windows: el consejo de instalarlo, como mucho una vez al día
+  gitNotice(): string | null {
+    const shell = commandShell();
+    const advice = gitAdvice(process.platform, findProgram("git") !== null, shell.name, Boolean(process.env.VIPCODE_SHELL));
+    if (!advice) {
+      return null;
+    }
+    let data: Record<string, unknown> = {};
+    try {
+      data = JSON.parse(fs.readFileSync(NOTICES_PATH, "utf8"));
+    } catch {
+      // primera vez
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    if (data.gitAdvice === today) {
+      return null;
+    }
+    data.gitAdvice = today;
+    try {
+      ensureHomeDir();
+      fs.writeFileSync(NOTICES_PATH, JSON.stringify(data, null, 2));
+    } catch {
+      // no es grave
+    }
+    return advice;
   }
 
   acceptPrivacyNotice() {
@@ -1013,6 +1043,10 @@ export class App {
         }
         return {};
       }
+      case "/doctor":
+        ui.info("Comprobando…");
+        ui.block(await doctorReport(this));
+        return {};
       case "/limites":
       case "/limits":
         ui.block(limitsReport(this.router));

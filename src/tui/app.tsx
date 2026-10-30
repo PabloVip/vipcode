@@ -1072,6 +1072,11 @@ function Main(props: { app: App; initial: string }) {
       }
       refresh();
     });
+    // En Windows sin Git para Windows, el consejo de instalarlo (una vez al día)
+    const gitNotice = app.gitNotice();
+    if (gitNotice) {
+      push({ kind: "notice", text: gitNotice });
+    }
     // La primera vez que abres una versión nueva, lo que trae
     const news = app.takeNews();
     if (news) {

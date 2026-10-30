@@ -19,7 +19,7 @@ Requires Node.js 22 or later. Works on macOS, Linux and Windows.
 npm install -g vipcode
 ```
 
-On Windows, also install [Git for Windows](https://git-scm.com/download/win): vipcode runs commands with its bash and uses git for `/undo`. Without it, it uses PowerShell.
+On Windows, also install [Git for Windows](https://git-scm.com/download/win) (`winget install Git.Git`): vipcode runs commands with its bash and uses git for `/undo`. Without it, it uses PowerShell. If something doesn't work, run `vipcode doctor`: it checks programs, keys and providers and tells you how to fix what's missing.
 
 To update, type `/update` inside vipcode or run `vipcode update`. vipcode tells you when a new version is out; what each version brings is in [CHANGELOG.md](CHANGELOG.md) (in Spanish).
 
@@ -35,7 +35,7 @@ vipcode auth login                     # add a free key (or /connect inside vipc
 vipcode limites                        # how much of each free plan is left today
 ```
 
-Inside vipcode: Enter sends, Tab switches between the `programar` and `planear` (read-only) agents, Ctrl+P opens the command palette, `@path` attaches files, `!command` runs a shell command, Esc interrupts and `/help` lists everything. Every conversation is saved in `~/.vipcode/sessions/`, also as Markdown.
+Inside vipcode: Enter sends, Tab switches between the `programar`, `planear` (read-only) and `profe` (it teaches you step by step and lets you make the changes) agents, Ctrl+P opens the command palette, `@path` attaches files, `!command` runs a shell command, Esc interrupts and `/help` lists everything. Every conversation is saved in `~/.vipcode/sessions/`, also as Markdown.
 
 ## Security and privacy
 

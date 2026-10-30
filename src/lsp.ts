@@ -93,6 +93,18 @@ function which(command: string): string | null {
   return findProgram(command);
 }
 
+// Servidores de lenguaje que vipcode puede usar en este ordenador (TypeScript viene incluido)
+export function installedLanguageServers(): string[] {
+  const found: string[] = [];
+  for (const spec of BUILTIN_SERVERS) {
+    const name = spec.id === "typescript" ? "TypeScript y JavaScript (incluido)" : spec.id;
+    if ((spec.id === "typescript" || (spec.command[0] && findProgram(spec.command[0]))) && !found.includes(name)) {
+      found.push(name);
+    }
+  }
+  return found;
+}
+
 function uriKey(uri: string): string {
   // macOS y Windows no distinguen mayúsculas en las rutas, y algunos servidores las cambian
   if (process.platform === "darwin" || process.platform === "win32") {

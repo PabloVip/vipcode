@@ -114,6 +114,12 @@ expect {
 sleep 0.3
 send "\t"
 expect {
+  -re {profe(\x1b\[[0-9;]*m)*\s*·} {}
+  timeout { falla "Tab no pasa al agente profe" }
+}
+sleep 0.3
+send "\t"
+expect {
   -re {programar(\x1b\[[0-9;]*m)*\s*·} {}
   timeout { falla "Tab no vuelve al agente programar" }
 }

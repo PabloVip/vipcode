@@ -4,6 +4,12 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- `vipcode doctor` (y `/doctor`): comprueba los programas que usa vipcode, tus claves y los proveedores, y dice cómo arreglar lo que falte. Su informe no lleva tus claves, así que se puede pegar en un issue.
+- Agente `profe`, para aprender: te explica paso a paso y en palabras sencillas, y te propone los cambios para que los hagas tú (no toca nada).
+- En Windows, si falta Git para Windows, vipcode te lo recuerda al abrirlo (una vez al día) con el comando para instalarlo: `winget install Git.Git`.
+
 ## [0.2.8] - 2026-10-30
 
 ### Añadido

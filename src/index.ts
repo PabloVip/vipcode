@@ -8,6 +8,7 @@ import { App, BUILTIN_COMMANDS, type RunOptions, type UiAdapter } from "./app.js
 import { removeAuth } from "./auth.js";
 import { configNotices, loadConfig } from "./config.js";
 import { isImagePath, toDataUrl } from "./images.js";
+import { doctorReport } from "./doctor.js";
 import { limitsReport } from "./limits.js";
 import { REPO_URL, VERSION } from "./meta.js";
 import { NoSlotError } from "./router.js";
@@ -30,6 +31,7 @@ Uso:
   vipcode auth logout <proveedor>  borra una clave guardada
   vipcode models [refresh]         modelos disponibles (refresh busca modelos gratis nuevos)
   vipcode limites                  cuánto te queda hoy de cada plan gratis
+  vipcode doctor                   comprueba que todo funciona y dice cómo arreglar lo que falte
   vipcode skills                   skills instaladas (instrucciones que el agente carga cuando las necesita)
   vipcode skills add <origen>      instala skills de una carpeta o de un repositorio git (p. ej. anthropics/skills)
   vipcode skills new <nombre>      crea una skill vacía para rellenar
@@ -101,7 +103,7 @@ function parseArgs(argv: string[]): Options {
     project: false,
     force: false,
   };
-  const commands = ["run", "auth", "models", "limites", "limits", "skills", "sessions", "export", "update", "trust", "untrust", "help"];
+  const commands = ["run", "auth", "models", "limites", "limits", "doctor", "skills", "sessions", "export", "update", "trust", "untrust", "help"];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "-c" || arg === "--continue") {
@@ -600,6 +602,11 @@ async function main() {
       }
     }
     console.log(app.modelsTable());
+    return;
+  }
+
+  if (options.command === "doctor") {
+    console.log(await doctorReport(app));
     return;
   }
 

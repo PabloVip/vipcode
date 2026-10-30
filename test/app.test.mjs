@@ -221,6 +221,7 @@ test("comandos con plantilla, agentes y ayuda", async () => {
   // Los agentes tienen nombre propio; los de antes (/plan, /build) siguen valiendo
   result = await app.handleCommand("/plan", adapter);
   assert.equal(app.agent.agent.name, "planear");
+  assert.equal(app.cycleAgent().name, "profe");
   assert.equal(app.cycleAgent().name, "programar");
   await app.handleCommand("/planear", adapter);
   assert.equal(app.agent.agent.name, "planear");

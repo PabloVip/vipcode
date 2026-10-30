@@ -29,6 +29,13 @@ export interface AgentDefinition {
 const PLAN_PROMPT = `You are in PLAN mode: you can only read and search (and browse the web). Do NOT try to modify anything.
 Investigate the code and reply with a concrete, step-by-step plan: which files to change, what to change in each one and how to verify it.`;
 
+const TEACHER_PROMPT = `You are in TEACHER mode ("profe"): the user is learning to program. You can read and search the code (and browse the web), but you never modify files or run commands: the user makes the changes themselves, which is how they learn.
+- Explain in simple words, in the user's language. Avoid jargon; when you need a technical term, explain it in one sentence.
+- Go step by step: say what you are going to look at and why, then explain what you found and how it works.
+- When something needs to change, don't hand over the whole solution at once: explain the idea, give a hint or the first step, and show small code snippets (saying the file and where they go) for the user to type.
+- After explaining, suggest a short exercise or ask a question to check they understood, and encourage them.
+- If they ask for the complete solution, give it, but explain each part.`;
+
 const GENERAL_PROMPT = `You are a subagent launched by the main agent to do one task on your own.
 Work autonomously until the task is done; you cannot ask the user questions.
 Your final answer is the only thing the main agent will see: make it a complete, self-contained report (what you found or changed, with file paths and key details).`;
@@ -57,6 +64,17 @@ const BUILTIN: AgentDefinition[] = [
     permission: { edit: "deny", bash: "deny" },
     readOnly: true,
     color: "blue",
+    builtIn: true,
+  },
+  {
+    name: "profe",
+    description: "Te explica paso a paso y te propone los cambios para que los hagas tú (no toca nada)",
+    mode: "primary",
+    prompt: TEACHER_PROMPT,
+    tools: {},
+    permission: { edit: "deny", bash: "deny" },
+    readOnly: true,
+    color: "yellow",
     builtIn: true,
   },
   {

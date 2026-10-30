@@ -20,11 +20,11 @@ Requiere Node.js 22 o superior. Funciona en macOS, Linux y Windows.
 npm install -g vipcode
 ```
 
-**En Windows** instala también [Git para Windows](https://git-scm.com/download/win): vipcode usa su bash para los comandos y git para `/undo`. Sin él usa PowerShell.
+**En Windows** instala también [Git para Windows](https://git-scm.com/download/win) (`winget install Git.Git`): vipcode usa su bash para los comandos y git para `/undo`. Sin él usa PowerShell, y te lo recuerda al abrirlo.
 
 Para actualizar, escribe `/update` dentro de vipcode o `vipcode update` en la terminal. Cuando sale una versión nueva, vipcode te avisa al abrirlo (y te dice si trae arreglos de seguridad), y al abrir la nueva te enseña lo que trae. Todas las novedades están en [CHANGELOG.md](CHANGELOG.md).
 
-Si algo falla, [abre un issue](https://github.com/PabloVip/vipcode/issues). Con `VIPCODE_DEBUG=1 vipcode` se guarda en `~/.vipcode/debug.log` un registro que ayuda a encontrar el problema.
+Si algo falla, ejecuta `vipcode doctor` (o `/doctor` dentro de vipcode): comprueba los programas, tus claves y los proveedores, y dice cómo arreglar lo que falte. Si no se arregla, [abre un issue](https://github.com/PabloVip/vipcode/issues) y pega su informe, que no lleva tus claves. Con `VIPCODE_DEBUG=1 vipcode` se guarda además en `~/.vipcode/debug.log` un registro que ayuda a encontrar el problema.
 
 ## Primeros pasos
 
@@ -75,6 +75,7 @@ vipcode -c                   # sigue con la última conversación de esta carpet
 vipcode --plan               # empieza con el agente planear (solo lectura)
 vipcode run "tarea"          # hace la tarea sin interfaz y termina
 vipcode limites              # cuánto te queda hoy de cada plan gratis
+vipcode doctor               # comprueba que todo funciona
 ```
 
 ### En la interfaz
@@ -107,7 +108,7 @@ Si quieres que lo que seleccionas se copie solo, actívalo en tu terminal (vipco
 | `/models` | Lista de modelos y su estado; elige uno preferido. `/models refresh` busca modelos gratis nuevos |
 | `/model <p/m>` | Fija un modelo (`/model auto` vuelve a la rotación) |
 | `/connect`, `/disconnect`, `/providers` | Añadir, quitar y ver las claves de los proveedores |
-| `/agents`, `/agent <nombre>`, `/planear`, `/programar` | Cambiar de agente |
+| `/agents`, `/agent <nombre>`, `/planear`, `/programar`, `/profe` | Cambiar de agente |
 | `/undo`, `/redo`, `/diff [all]` | Deshacer y rehacer el último mensaje (ficheros y conversación); ver los cambios |
 | `/todos` | Lista de tareas del agente |
 | `/skills` | Skills instaladas; elige una para usarla (o escribe `/nombre-de-la-skill tarea`) |
@@ -115,6 +116,7 @@ Si quieres que lo que seleccionas se copie solo, actívalo en tu terminal (vipco
 | `/new`, `/sessions`, `/load <n>`, `/delete <n>`, `/export` | Conversaciones |
 | `/limites` | Cuánto te queda hoy de cada plan gratis |
 | `/copiar [código]` | Copia la última respuesta (o su último bloque de código) al portapapeles |
+| `/doctor` | Comprueba que todo funciona y dice cómo arreglar lo que falte |
 | `/usage` | Tokens usados |
 | `/mcp`, `/lsp` | Estado de los servidores MCP y de lenguaje |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión |
@@ -128,6 +130,7 @@ Si quieres que lo que seleccionas se copie solo, actívalo en tu terminal (vipco
 
 - **programar**: el principal; puede editar y ejecutar.
 - **planear**: solo lee; investiga y propone un plan.
+- **profe**: para aprender. Te explica paso a paso, en palabras sencillas, y te propone los cambios para que los hagas tú (no toca nada).
 - **ayudante** y **explorar**: subagentes que el principal lanza para subtareas (ayudante puede editar; explorar solo busca y lee). Si lanza varios, trabajan a la vez.
 
 ### Conversaciones

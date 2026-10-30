@@ -680,3 +680,34 @@ test("sesiones: queda guardada en .md y al continuar con -c se ve la conversaci�
   ws.cleanup();
 });
 
+
+test("vipcode doctor: qué funciona y qué falta, sin enseñar las claves", async () => {
+  const mock = await startMock(({ path: url, headers }) => {
+    if (url === "/bien/v1/models") {
+      return headers.authorization === "Bearer clave-buena-123456" ? { json: { data: [] } } : { status: 401, json: {} };
+    }
+    if (url === "/mal/v1/models") {
+      return { status: 401, json: { error: { message: "invalid key" } } };
+    }
+    return { status: 404, json: {} };
+  });
+  const ws = tempWorkspace();
+  ws.writeConfig({
+    providers: [
+      { name: "bien", baseURL: `${mock.url}/bien/v1`, apiKey: "clave-buena-123456", models: [{ id: "m", context: 100000 }] },
+      { name: "mal", baseURL: `${mock.url}/mal/v1`, apiKey: "clave-mala-654321", models: [{ id: "m", context: 100000 }] },
+    ],
+    enabledProviders: ["bien", "mal"],
+    autoUpdateModels: false,
+  });
+  // npm y GitHub simulados (sin nada publicado): no se consulta internet
+  const result = await runVip(["doctor"], { cwd: ws.proj, home: ws.home, env: { VIPCODE_UPDATE_URL: `${mock.url}/gh`, VIPCODE_REGISTRY_URL: `${mock.url}/npm` } });
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /✓ Node\.js v\d+/);
+  assert.match(result.output, /✓ bien: clave correcta/);
+  assert.match(result.output, /✗ mal: la clave no funciona \(HTTP 401\)\. Cámbiala con \/connect mal/);
+  assert.match(result.output, /Esta carpeta/);
+  assert.ok(!result.output.includes("clave-buena-123456") && !result.output.includes("clave-mala-654321"));
+  await mock.close();
+  ws.cleanup();
+});
