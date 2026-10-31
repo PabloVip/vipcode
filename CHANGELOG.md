@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.3.1] - 2026-10-31
+
 ### Arreglado
 
 - Gemini: de su lista de modelos solo se usan los del plan gratis (Flash, Flash-Lite y Gemma). Antes se añadían también los de pago (Pro, Gemini 4 Argon, Omni), las versiones preview y modelos de imágenes, y cuando los Flash se quedaban sin peticiones por minuto vipcode los probaba todos, con un aviso de «no incluido en el plan gratis» o de error por cada uno.
@@ -246,7 +248,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.3.0...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/PabloVip/vipcode/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/PabloVip/vipcode/compare/v0.2.17...v0.3.0
 [0.2.17]: https://github.com/PabloVip/vipcode/compare/v0.2.16...v0.2.17
 [0.2.16]: https://github.com/PabloVip/vipcode/compare/v0.2.15...v0.2.16
