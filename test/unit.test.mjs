@@ -147,7 +147,9 @@ test("edit_file: exacto, aproximado (sangría) y protección de leer antes", asy
   assert.ok(result.isError);
   assert.match(result.output, /lee a\.js con read_file/);
 
-  await tools.runTool(list, "read_file", JSON.stringify({ path: "a.js" }), ctx, false);
+  // 3 líneas: el salto de línea del final no cuenta como una cuarta vacía
+  const lines = await tools.runTool(list, "read_file", JSON.stringify({ path: "a.js" }), ctx, false);
+  assert.equal(lines.output, "1\tfunction f() {\n2\t    return 1;\n3\t}");
   result = await tools.runTool(list, "edit_file", JSON.stringify({ path: "a.js", old_string: "return 1;", new_string: "return 2;" }), ctx, false);
   assert.ok(!result.isError, result.output);
   assert.match(result.display, /- {5}return 1;\n\+ {5}return 2;/);
@@ -426,6 +428,30 @@ test("editor del cuadro de texto", () => {
   assert.deepEqual(editor.splitEnter("", true), { text: "", enter: true });
   assert.deepEqual(editor.splitEnter("dos\nlíneas\n", false), { text: "dos\nlíneas\n", enter: false });
   assert.deepEqual(editor.splitEnter("abc", false), { text: "abc", enter: false });
+  // Un emoji (también con tono de piel), una bandera o una letra con la tilde aparte son una sola letra: el cursor y el
+  // borrado no las parten (quedaría medio carácter, roto en pantalla y en lo que se manda al modelo)
+  let text = editor.insert(editor.EMPTY, "a😀👍🏽🇪🇸é");
+  const stops = [];
+  while (text.cursor > 0) {
+    text = editor.moveLeft(text);
+    stops.push(text.cursor);
+  }
+  assert.deepEqual(stops, [11, 7, 3, 1, 0]);
+  text = editor.moveRight(editor.moveRight(text));
+  assert.equal(text.cursor, 3);
+  assert.equal(editor.deleteForward(text).value, "a😀🇪🇸é");
+  text = { ...text, cursor: text.value.length };
+  const left = [];
+  while (text.value !== "a") {
+    text = editor.backspace(text);
+    left.push(text.value);
+  }
+  assert.deepEqual(left, ["a😀👍🏽🇪🇸", "a😀👍🏽", "a😀", "a"]);
+  assert.ok(left.every((value) => !/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(value)));
+  // Al pintar, la letra del cursor entera; y al subir o bajar de línea no se cae en medio de un emoji
+  assert.deepEqual(editor.splitAtCursor("a😀b", 1), { before: "a", under: "😀", after: "b" });
+  assert.deepEqual(editor.splitAtCursor("ab", 2), { before: "ab", under: " ", after: "" });
+  assert.equal(editor.moveVertical({ value: "ab\n😀😀", cursor: 1 }, 1).cursor, 3);
 });
 
 test("ranking de LLM Stats: empareja los nombres de cada proveedor", () => {
@@ -504,6 +530,42 @@ test("markdown en la terminal", () => {
   assert.match(plain, /const a = 1;/);
   assert.match(plain, /• uno/);
   assert.match(plain, /1 │ 2/);
+});
+
+test("markdown: lo que no cabe se parte sin perder la sangría de las listas, las citas, el código y las tablas", async () => {
+  const { default: stringWidth } = await import("string-width");
+  const text = [
+    "palabra ".repeat(12),
+    "- Un elemento de lista bastante largo que no cabe en una sola línea y tiene que partirse\n- [x] Una tarea hecha que también es larga y se parte\n  1. anidada larga que también se tiene que partir por aquí",
+    "> Una cita también bastante larga que no cabe en una sola línea y tiene que partirse",
+    "```js\nconst muyLarga = " + JSON.stringify("x".repeat(50)) + ";\n  sangrado();\n```",
+    "| columna a | columna b con texto larguísimo |\n|---|---|\n| uno | dos tres cuatro cinco seis siete ocho nueve diez once |\n| 中文字 | 😀 emoji |",
+  ].join("\n\n");
+  const lines = renderMarkdown(text, 30).replace(/\x1b\[[0-9;]*m/g, "").split("\n");
+  // Nada pasa del ancho (Ink ya no tiene que partir nada) y ninguna línea partida empieza con un espacio de más
+  for (const line of lines) {
+    assert.ok(stringWidth(line) <= 30, `«${line}» no cabe en 30`);
+  }
+  const at = (start) => lines.findIndex((line) => line.startsWith(start));
+  // Lo que baja de una lista va debajo del texto, no del punto; en las tareas, la casilla es el punto
+  assert.match(lines[at("• Un elemento") + 1], /^ {2}\S/);
+  assert.match(lines[at("☑ Una tarea") + 1], /^ {2}\S/);
+  assert.ok(!lines.some((line) => line.includes("[x]")));
+  assert.match(lines[at("  1. anidada") + 1], /^ {5}\S/);
+  // La cita lleva su raya en todas sus líneas, hasta la última
+  const quote = lines.slice(at("│ Una cita"), lines.indexOf("", at("│ Una cita")));
+  assert.ok(quote.length > 1 && quote.every((line) => line.startsWith("│ ")) && quote.at(-1).includes("partirse"), quote.join("\n"));
+  // El código se parte justo en el ancho y lo que baja lleva su sangría; la suya se respeta
+  assert.match(lines[at("  const muyLarga") + 1], /^ {2}x/);
+  assert.ok(lines.includes("    sangrado();"));
+  // La tabla se reparte el ancho: el texto largo sigue en la misma columna en varias líneas
+  const separator = lines.find((line) => line.includes("┼"));
+  const column = separator.indexOf("┼");
+  const rows = lines.filter((line) => line.includes("│") && !line.startsWith("│"));
+  assert.ok(rows.length >= 5);
+  for (const row of rows.filter((line) => !/[中😀]/.test(line))) {
+    assert.equal(row.indexOf("│"), column);
+  }
 });
 
 function writeFile(file, text) {
@@ -1221,38 +1283,65 @@ test("pantalla completa: la palabra del doble clic, lo que encuentra Ctrl+F y la
   assert.deepEqual(view.scrollThumb(100, 20, 40), { start: 8, size: 4 });
 });
 
-test("interfaces: cuál sale de la configuración y cómo pinta cada una", async () => {
-  const { INTERFACES, interfaceFor } = await import("../dist/interfaces.js");
+test("interfaces: cuál sale de la configuración, cómo pinta cada una y las que se han quitado", async () => {
+  const { INTERFACES, interfaceFor, retiredInterface } = await import("../dist/interfaces.js");
   const { look, setLook } = await import("../dist/tui/theme.js");
-  assert.deepEqual(INTERFACES.map((item) => item.id), ["completa", "clasica", "compacta", "contraste", "zen", "criaturas"]);
-  // Solo la de criaturas lleva el monstruito, y en pantalla completa
-  assert.deepEqual(INTERFACES.filter((item) => item.pets).map((item) => [item.id, item.fullscreen]), [["criaturas", true]]);
-  // La de serie es la pantalla completa; con el «"fullscreen": false» de antes, la clásica; lo que elijas manda
+  // Solo las que funcionan bien en todas las terminales; la clásica y la de alto contraste ya no están
+  assert.deepEqual(INTERFACES.map((item) => item.id), ["completa", "compacta", "zen", "criaturas"]);
+  assert.deepEqual(INTERFACES.filter((item) => item.pets).map((item) => item.id), ["criaturas"]);
+  // La de serie es la pantalla completa; lo que elijas manda, y lo que ya no existe es la de serie
   assert.equal(interfaceFor({}).id, "completa");
-  assert.equal(interfaceFor({ interfaz: "", fullscreen: false }).id, "clasica");
-  assert.equal(interfaceFor({ interfaz: "zen", fullscreen: false }).id, "zen");
-  assert.equal(interfaceFor({ interfaz: "no-existe" }).id, "completa");
+  assert.equal(interfaceFor({ interfaz: "zen" }).id, "zen");
+  for (const gone of ["clasica", "contraste", "no-existe"]) {
+    assert.equal(interfaceFor({ interfaz: gone }).id, "completa");
+  }
+  // De cuál se avisa: la clásica (también el «"fullscreen": false» de antes) y la de alto contraste
+  assert.equal(retiredInterface({ interfaz: "clasica" }), "Clásica");
+  assert.equal(retiredInterface({ interfaz: "contraste" }), "Alto contraste");
+  assert.equal(retiredInterface({ fullscreen: false }), "Clásica");
+  assert.equal(retiredInterface({ interfaz: "zen", fullscreen: false }), null);
+  assert.equal(retiredInterface({ interfaz: "completa" }), null);
+  assert.equal(retiredInterface({}), null);
   const byId = (id) => INTERFACES.find((item) => item.id === id);
   try {
     setLook(byId("completa"));
-    assert.equal(look.dim, true);
     assert.equal(look.gap, 1);
-    assert.equal(look.tone("magenta"), "magenta");
+    assert.equal(look.bare, false);
     setLook(byId("compacta"));
     assert.equal(look.gap, 0);
     assert.equal(look.bare, true);
-    // Alto contraste: nada atenuado y colores vivos
-    setLook(byId("contraste"));
-    assert.equal(look.dim, false);
-    assert.equal(look.faint("hola"), "hola");
-    assert.equal(look.tone("magenta"), "magentaBright");
-    assert.equal(look.tone("#ff0000"), "#ff0000");
     setLook(byId("zen"));
     assert.equal(look.minimal, true);
     assert.equal(look.bare, true);
     assert.equal(look.gap, 1);
   } finally {
     setLook(byId("completa"));
+  }
+
+  // Si tu configuración tenía una de las que se han quitado, se avisa una vez y se quita de ella (lo demás se queda)
+  const file = path.join(HOME, "config.json");
+  const before = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+  try {
+    for (const [saved, label] of [[{ interfaz: "contraste" }, "Alto contraste"], [{ fullscreen: false }, "Clásica"]]) {
+      fs.writeFileSync(file, JSON.stringify({ ...saved, maxSteps: 9 }));
+      config.configNotices.length = 0;
+      const loaded = config.loadConfig(os.tmpdir(), { trusted: false });
+      assert.equal(interfaceFor(loaded).id, "completa");
+      assert.equal(loaded.maxSteps, 9);
+      assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { maxSteps: 9 });
+      assert.equal(config.configNotices.filter((notice) => notice.includes(`«${label}» ya no está`)).length, 1);
+      // La segunda vez ya no hay nada de qué avisar
+      config.configNotices.length = 0;
+      config.loadConfig(os.tmpdir(), { trusted: false });
+      assert.deepEqual(config.configNotices, []);
+    }
+  } finally {
+    if (before === null) {
+      fs.rmSync(file, { force: true });
+    } else {
+      fs.writeFileSync(file, before);
+    }
+    config.configNotices.length = 0;
   }
 });
 

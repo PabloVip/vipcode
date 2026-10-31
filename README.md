@@ -102,22 +102,12 @@ La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan grat
 
 vipcode ocupa la pantalla completa mientras lo usas; al salir, la terminal vuelve a estar como antes y la conversación queda guardada (`vipcode -c` sigue con ella).
 
-Con **`/interfaz`** eliges cómo se ve, y se guarda para la próxima vez:
+Con **`/interfaz`** eliges cómo se ve, y se guarda para la próxima vez. Todas ocupan la pantalla completa, con el scroll, el ratón y Ctrl+F de arriba:
 
-- **Pantalla completa** (la de serie): la conversación con su propio scroll, ratón y Ctrl+F.
-- **Clásica**: la conversación se queda en la terminal y seleccionas como siempre.
+- **Pantalla completa** (la de serie).
 - **Compacta**: sin espacios ni bordes de más, para que quepa más conversación.
-- **Alto contraste**: sin texto atenuado y con colores vivos; se lee mejor, también con fondo claro.
 - **Zen**: lo justo, sin bienvenida ni bordes y con la barra de abajo mínima.
 - **Criaturas**: como la pantalla completa, con un monstruito de píxeles a la derecha que se inventa al azar. Sale otro con cada respuesta o si lo pinchas, y da saltitos mientras vipcode trabaja (a veces sale uno dorado). En terminales anchas (120 columnas y 32 filas) sale grande y con más detalle. En el Terminal del Mac se pinta con colores de fondo para que no salgan rayas entre las filas, y necesita una ventana de 90 columnas y 28 filas o más.
-
-Con `"fullscreen": false`, lo que seleccionas se copia solo si lo activas en tu terminal:
-
-- **iTerm2**: viene activado (Ajustes → General → Selection).
-- **Windows Terminal**: Configuración → Interacción → «Copiar automáticamente la selección al portapapeles».
-- **Terminal de VS Code**: el ajuste `terminal.integrated.copyOnSelection`.
-- **kitty**, **Ghostty** y **Alacritty**: `copy_on_select clipboard`, `copy-on-select = clipboard` y `selection.save_to_clipboard = true`.
-- **Terminal de macOS** y **GNOME Terminal** no tienen esa opción: selecciona y pulsa Cmd+C o Ctrl+Shift+C.
 
 ### Comandos
 
@@ -137,7 +127,7 @@ Con `"fullscreen": false`, lo que seleccionas se copia solo si lo activas en tu 
 | `/doctor` | Comprueba que todo funciona y dice cómo arreglar lo que falte |
 | `/bug [qué ha pasado]` | Avisa de un fallo: abre un issue en GitHub con el informe de `/doctor` ya puesto (sin tus claves) |
 | `/tutorial` | Aprende lo básico en 5 pasos, en una carpeta de prácticas |
-| `/interfaz` | Elige cómo se ve vipcode: pantalla completa, clásica, compacta, alto contraste, zen o criaturas |
+| `/interfaz` | Elige cómo se ve vipcode: pantalla completa, compacta, zen o criaturas |
 | `/usage` | Tokens usados |
 | `/mcp`, `/lsp` | Estado de los servidores MCP y de lenguaje |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión |
@@ -198,7 +188,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 - **permission**: `allow`, `ask` o `deny` para `edit`, `bash`, `webfetch` y `mcp`; en `bash` y `mcp` gana el patrón más concreto. Las reglas `deny` se respetan incluso con `--yolo`. Piénsatelo antes de poner `webfetch` en `allow`: un texto malicioso podría hacer que el modelo mande tus datos a una web sin preguntarte.
 - **mcp**: servidores MCP locales (`command`) o remotos (`url`); los que piden iniciar sesión con OAuth todavía no funcionan. Un servidor local no recibe tus variables de entorno (ni tus claves), solo lo imprescindible para arrancar: lo que necesite, ponlo en `environment`. Ahí y en `headers`, `{env:NOMBRE}` se cambia por esa variable tuya.
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
-- **interfaz**: la que eliges con `/interfaz` (`completa`, `clasica`, `compacta`, `contraste`, `zen` o `criaturas`). El `"fullscreen": false` de antes sigue valiendo y es la clásica.
+- **interfaz**: la que eliges con `/interfaz` (`completa`, `compacta`, `zen` o `criaturas`). La clásica y la de alto contraste (y el `"fullscreen": false` de antes) ya no existen: si las tenías, vipcode te avisa una vez y usa la pantalla completa.
 - **firstResponseMs**: cuánto se espera a que una IA empiece a contestar antes de probar otra (40000, unos 40 s; algo más con conversaciones largas). No cuenta para los modelos de tu ordenador.
 
 Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash), `VIPCODE_BROWSER` (otro navegador) y `VIPCODE_CLIPBOARD` (otro programa para copiar, que reciba el texto por su entrada).

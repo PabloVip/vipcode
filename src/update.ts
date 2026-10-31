@@ -190,8 +190,11 @@ function run(command: string, args: string[], cwd: string): Promise<{ code: numb
       env: { ...cleanEnv(), GIT_TERMINAL_PROMPT: "0" },
     });
     let output = "";
-    child.stdout?.on("data", (data) => (output += data.toString()));
-    child.stderr?.on("data", (data) => (output += data.toString()));
+    // Como texto: así una letra de varios bytes no se rompe si llega partida entre dos trozos
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (text: string) => (output += text));
+    child.stderr?.on("data", (text: string) => (output += text));
     child.on("error", (err) => resolve({ code: null, output: err.message }));
     child.on("close", (code) => resolve({ code, output }));
   });

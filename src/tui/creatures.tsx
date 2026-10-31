@@ -496,11 +496,11 @@ export function CreaturePanel(props: { creature: Creature; busy: boolean; layout
       {creature.name}
     </Text>,
     ...wrapWords(creature.message, layout.width - 4).map((line, index) => (
-      <Text key={`dice-${index}`} dimColor={look.dim}>
+      <Text key={`dice-${index}`} dimColor>
         {line}
       </Text>
     )),
-    <Text key="clic" dimColor={look.dim}>
+    <Text key="clic" dimColor>
       clic: otra
     </Text>,
   ];
@@ -513,7 +513,7 @@ export function CreaturePanel(props: { creature: Creature; busy: boolean; layout
       alignItems="center"
       borderStyle="round"
       borderColor="gray"
-      borderDimColor={look.dim}
+      borderDimColor
       paddingX={1}
     >
       <CreatureView creature={creature} layout={layout} lift={lift} />

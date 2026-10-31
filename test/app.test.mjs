@@ -583,3 +583,60 @@ test("velocidad: si una IA no empieza a contestar a tiempo se prueba otra, y las
   ws.cleanup();
 });
 
+
+test("si todos los modelos fallan no se dice que la conversación es demasiado larga (solo si de verdad no cabe)", async () => {
+  // Los dos contestan siempre con un error raro (ni de límites ni de contexto)
+  const mock = await startMock(() => ({ status: 400, json: { error: { message: "algo raro ha pasado" } } }));
+  const ws = tempWorkspace();
+  const { app, events } = makeApp(ws, mock.url, {
+    providers: [provider("uno", mock.url, ["m"]), provider("dos", mock.url, [{ id: "m", context: 100 }])],
+    enabledProviders: ["uno", "dos"],
+  });
+  await assert.rejects(app.runPrompt({ text: "hola" }, {}), (err) => {
+    assert.match(err.message, /Ningún modelo ha podido contestar/);
+    assert.doesNotMatch(err.message, /compact/);
+    return true;
+  });
+  assert.ok(events.notices.some((notice) => /uno\/m: 400 algo raro/.test(notice)), events.notices.join("\n"));
+  // Una conversación que no cabe en ninguno sí lo dice
+  await assert.rejects(app.runPrompt({ text: "x".repeat(2000000) }, {}), /Ningún modelo admite una conversación de ~\d+ tokens\. Usa \/compact o \/new\./);
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("los datos se guardan de golpe (sin ficheros a medias) y la salida de los comandos no rompe las tildes", async () => {
+  const { writeFileAtomic } = await import("../dist/paths.js");
+  const ws = tempWorkspace();
+  const file = path.join(ws.dir, "datos.json");
+  writeFileAtomic(file, "uno", { mode: 0o600 });
+  writeFileAtomic(file, "dos", { mode: 0o600 });
+  assert.equal(fs.readFileSync(file, "utf8"), "dos");
+  assert.deepEqual(fs.readdirSync(ws.dir).filter((name) => name.endsWith(".tmp")), []);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    // Si es un enlace (por ejemplo a tu repositorio de configuración), se escribe en el fichero de verdad y el enlace sigue
+    const real = path.join(ws.dir, "real.json");
+    fs.writeFileSync(real, "antes");
+    const link = path.join(ws.dir, "enlace.json");
+    fs.symlinkSync(real, link);
+    writeFileAtomic(link, "después");
+    assert.ok(fs.lstatSync(link).isSymbolicLink());
+    assert.equal(fs.readFileSync(real, "utf8"), "después");
+  }
+
+  // Una «a» y muchas letras de dos bytes: alguna cae partida entre dos trozos de la salida y tiene que llegar entera (la
+  // ñ va escrita como \u00f1: en Windows, una letra así en la línea de órdenes depende de la página de códigos)
+  const enes = "node -e \"process.stdout.write('a' + '\\u00f1'.repeat(200000))\"";
+  const mock = await startMock(({ body }) => (lastMessage(body).role === "tool" ? { text: "listo" } : { tools: [{ name: "bash", args: { command: enes } }] }));
+  const { app, events } = makeApp(ws, mock.url);
+  await app.runPrompt({ text: "tildes" }, {});
+  const output = events.tools.find((event) => event.name === "bash").output;
+  assert.ok(!output.includes("\ufffd"), "hay letras rotas en la salida");
+  assert.match(output, /ññññ/);
+  const shell = await app.runShell(enes);
+  assert.ok(!shell.output.includes("\ufffd") && shell.output.length === 200001);
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});

@@ -1,4 +1,5 @@
-# Avisos al abrir vipcode: la versión nueva y la bienvenida de la primera vez (lo lanza test/tui.test.mjs)
+# Avisos al abrir vipcode: una interfaz que ya no existe, la versión nueva y la bienvenida de la primera vez (lo lanza
+# test/tui.test.mjs)
 set timeout 20
 log_user 1
 set cli [lindex $argv 0]
@@ -14,11 +15,7 @@ proc falla {motivo} {
 spawn -noecho node $cli
 stty rows 40 columns 120 < $spawn_out(slave,name)
 
-# 1. Novedades de esta versión y recuadro de versión nueva con arreglos de seguridad
-expect {
-  "Novedades de vipcode" {}
-  timeout { falla "no aparecen las novedades de esta versión" }
-}
+# 1. Recuadro de versión nueva con arreglos de seguridad (abajo de la conversación, que es lo que se ve)
 expect {
   "nueva de vipcode con arreglos de seguridad" {}
   timeout { falla "el recuadro de versión nueva no avisa de los arreglos de seguridad" }
@@ -39,6 +36,18 @@ expect {
 expect {
   "99.0.0 trae arreglos de seguridad" {}
   timeout { falla "la barra de abajo no recuerda la versión nueva con arreglos de seguridad" }
+}
+
+# 4. Arriba del todo (Ctrl+Inicio): el aviso de que la interfaz de la configuración ya no existe (se usa la de serie) y
+# las novedades de esta versión
+send "\033\[1;5H"
+expect {
+  -re {Alto contraste\S* ya no est} {}
+  timeout { falla "no avisa de que la interfaz de alto contraste ya no está" }
+}
+expect {
+  "Novedades de vipcode" {}
+  timeout { falla "no aparecen las novedades de esta versión" }
 }
 
 send "/exit\r"

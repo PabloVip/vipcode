@@ -9,7 +9,7 @@ import { readAuth, resolveCredentials } from "./auth.js";
 import type { Config, ModelConfig, ProviderConfig } from "./config.js";
 import { debugLog } from "./debug.js";
 import { wildcardMatch } from "./match.js";
-import { STATE_PATH } from "./paths.js";
+import { STATE_PATH, writeFileAtomic } from "./paths.js";
 import type { Ranking } from "./ranking.js";
 
 // Una combinación proveedor + modelo
@@ -249,6 +249,8 @@ function retryFromMessage(message: string): number {
 // Decide qué hacer con un error del proveedor
 function classify(err: unknown): Classified {
   let message = String((err as Error)?.message || err);
+  // Lo que se enseña: el mensaje tal cual (el de abajo lleva además el cuerpo del error, para reconocerlo)
+  const original = message;
   let status = 0;
   let retryAfterMs = 0;
 
@@ -321,7 +323,9 @@ function classify(err: unknown): Classified {
   if (/respuesta vacía/.test(lower)) {
     return { kind: "other", retryAfterMs: 0, detail: "respuesta vacía" };
   }
-  return { kind: "other", retryAfterMs: 0, detail: `${status || ""} ${message.slice(0, 160)}`.trim() };
+  // Sin repetir el código si el mensaje ya empieza por él («400 400 …»)
+  const shown = status && !original.startsWith(String(status)) ? `${status} ${original}` : original;
+  return { kind: "other", retryAfterMs: 0, detail: shown.trim().slice(0, 160) };
 }
 
 // Cada proveedor quiere el historial un poco distinto
@@ -603,7 +607,7 @@ export class Router {
         recent: this.recent,
         speed: this.speed,
       };
-      fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+      writeFileAtomic(STATE_PATH, JSON.stringify(state, null, 2));
     } catch {
       // no es grave si no se puede guardar
     }
@@ -821,9 +825,14 @@ export class Router {
           handlers.onNotice?.("Los modelos que aceptan imágenes no están disponibles; sigo sin las imágenes.");
           continue;
         }
+        // Solo es que la conversación es demasiado larga si no cabe en ninguno; si cabe, es que todos han fallado (cada
+        // uno ha dicho por qué en su aviso)
+        const fits = this.slots.some((slot) => slot.model.context >= estTokens && !(needsTools && slot.model.tools === false));
         let reason = "Todos los proveedores están agotados o en pausa.";
-        if (wait === Infinity) {
-          reason = `Ningún modelo disponible admite una conversación de ~${estTokens} tokens. Usa /compact o /new.`;
+        if (!fits) {
+          reason = `Ningún modelo admite una conversación de ~${estTokens} tokens. Usa /compact o /new.`;
+        } else if (wait === Infinity) {
+          reason = "Ningún modelo ha podido contestar: arriba está lo que ha fallado en cada uno (/models dice cómo está cada uno).";
         } else if (wait > 0) {
           reason += ` El primero vuelve a las ${new Date(Date.now() + wait).toLocaleTimeString()}.`;
         }

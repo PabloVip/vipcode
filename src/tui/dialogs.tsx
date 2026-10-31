@@ -4,7 +4,7 @@ import type { SelectItem } from "../app.js";
 import { type PermissionReply, type PermissionRequest, suggestPattern } from "../permissions.js";
 import { showControl, stripControl } from "../sanitize.js";
 import { colorPreview } from "../ui.js";
-import { type EditorState, EMPTY, backspace, deleteWordBack, insert, moveLeft, moveRight, splitEnter } from "./editor.js";
+import { type EditorState, EMPTY, backspace, deleteWordBack, insert, moveLeft, moveRight, previousBoundary, splitAtCursor, splitEnter } from "./editor.js";
 import { look } from "./theme.js";
 
 const KIND_LABEL: Record<string, string> = {
@@ -100,25 +100,26 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
   const limit = request.kind === "bash" ? lines.length : 30;
   const shown = lines.slice(0, limit).join("\n");
   const hidden = lines.length - limit;
+  const typed = splitAtCursor(feedback.value, feedback.cursor);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={look.tone("yellow")} paddingX={1}>
-      <Text bold color={look.tone("yellow")}>
+    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+      <Text bold color="yellow">
         ? {showControl(request.title)}
-        {props.agent !== "programar" ? <Text dimColor={look.dim}> ({props.agent})</Text> : null}
+        {props.agent !== "programar" ? <Text dimColor> ({props.agent})</Text> : null}
       </Text>
       <Box marginY={look.gap} flexDirection="column">
-        <Text>{colorPreview(shown, look.faint)}</Text>
-        {hidden > 0 ? <Text dimColor={look.dim}>… {hidden} líneas más</Text> : null}
+        <Text>{colorPreview(shown)}</Text>
+        {hidden > 0 ? <Text dimColor>… {hidden} líneas más</Text> : null}
       </Box>
       {explaining ? (
         <Box flexDirection="column">
           <Text>¿Qué debería hacer en su lugar? (Enter envía, Esc vuelve)</Text>
           <Text>
-            <Text color={look.tone("yellow")}>❯ </Text>
-            {feedback.value.slice(0, feedback.cursor)}
-            <Text inverse>{feedback.value[feedback.cursor] || " "}</Text>
-            {feedback.value.slice(feedback.cursor + 1)}
+            <Text color="yellow">❯ </Text>
+            {typed.before}
+            <Text inverse>{typed.under}</Text>
+            {typed.after}
           </Text>
         </Box>
       ) : (
@@ -126,10 +127,10 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
           {options.map((option, index) => (
             <Text key={option.key} color={index === selected ? "cyan" : undefined}>
               {index === selected ? "❯ " : "  "}
-              <Text dimColor={look.dim}>[{option.key}]</Text> {option.label}
+              <Text dimColor>[{option.key}]</Text> {option.label}
             </Text>
           ))}
-          <Text dimColor={look.dim}>↑↓ elige · Enter acepta · la letra es un atajo · Esc = no</Text>
+          <Text dimColor>↑↓ elige · Enter acepta · la letra es un atajo · Esc = no</Text>
         </>
       )}
     </Box>
@@ -176,7 +177,7 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
     } else if (key.pageDown) {
       setSelected(Math.min(filtered.length - 1, selected + 10));
     } else if (key.backspace) {
-      setFilter(filter.slice(0, -1));
+      setFilter(filter.slice(0, previousBoundary(filter, filter.length)));
       setSelected(0);
     } else if (input && !key.ctrl && !key.meta) {
       setFilter(filter + input);
@@ -191,8 +192,8 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
   const [heading, ...body] = props.title.split("\n");
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={look.tone("cyan")} paddingX={1}>
-      <Text bold color={look.tone("cyan")}>
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Text bold color="cyan">
         {heading}
       </Text>
       {body.length > 0 ? (
@@ -200,22 +201,22 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
           <Text>{body.join("\n")}</Text>
         </Box>
       ) : null}
-      <Text dimColor={look.dim}>
+      <Text dimColor>
         {filter ? `Filtro: ${filter}` : "Escribe para filtrar · ↑↓ elegir · Enter aceptar · Esc salir"}
       </Text>
-      {visible.length === 0 ? <Text dimColor={look.dim}>(nada coincide)</Text> : null}
+      {visible.length === 0 ? <Text dimColor>(nada coincide)</Text> : null}
       {visible.map((item, index) => {
         const active = start + index === selected;
         return (
           <Text key={`${start + index}-${item.label}`} color={active ? "cyan" : undefined} wrap="truncate-end">
             {active ? "❯ " : "  "}
             {stripControl(item.label)}
-            {item.description ? <Text dimColor={look.dim}> {stripControl(item.description)}</Text> : null}
+            {item.description ? <Text dimColor> {stripControl(item.description)}</Text> : null}
           </Text>
         );
       })}
       {filtered.length > windowSize ? (
-        <Text dimColor={look.dim}>
+        <Text dimColor>
           {selected + 1}/{filtered.length}
         </Text>
       ) : null}
@@ -254,20 +255,21 @@ export function PromptDialog(props: { title: string; mask?: boolean; placeholder
   if (props.mask) {
     shown = "•".repeat(state.value.length);
   }
+  const cursor = splitAtCursor(shown, state.cursor);
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={look.tone("magenta")} paddingX={1}>
-      <Text bold color={look.tone("magenta")}>
+    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
+      <Text bold color="magenta">
         {props.title}
       </Text>
       <Text>
-        <Text color={look.tone("magenta")}>❯ </Text>
-        {shown.length === 0 && props.placeholder ? <Text dimColor={look.dim}>{props.placeholder}</Text> : null}
-        {shown.slice(0, state.cursor)}
-        <Text inverse>{shown[state.cursor] || " "}</Text>
-        {shown.slice(state.cursor + 1)}
+        <Text color="magenta">❯ </Text>
+        {shown.length === 0 && props.placeholder ? <Text dimColor>{props.placeholder}</Text> : null}
+        {cursor.before}
+        <Text inverse>{cursor.under}</Text>
+        {cursor.after}
       </Text>
-      <Text dimColor={look.dim}>Enter acepta · Esc cancela{props.mask ? " · pega la clave con Cmd+V" : ""}</Text>
+      <Text dimColor>Enter acepta · Esc cancela{props.mask ? " · pega la clave con Cmd+V" : ""}</Text>
     </Box>
   );
 }

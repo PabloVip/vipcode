@@ -1,18 +1,15 @@
-// Las interfaces que se pueden elegir con /interfaz (se guarda en "interfaz" en tu configuración)
+// Las interfaces que se pueden elegir con /interfaz (se guarda en "interfaz" en tu configuración). Todas son de pantalla
+// completa: la conversación con su propio scroll y la caja de escribir fija abajo
 
 export interface Interface {
   id: string;
   label: string;
   description: string;
-  // Pantalla completa (la conversación con su propio scroll) o la clásica (en la terminal normal)
-  fullscreen: boolean;
   // Sin líneas en blanco entre mensajes, la bienvenida en una línea y la caja de escribir sin borde
   compact: boolean;
-  // Sin texto atenuado y con colores vivos
-  contrast: boolean;
   // Lo justo: sin bienvenida, la caja sin borde y la barra de abajo con lo mínimo
   minimal: boolean;
-  // Un monstruito de píxeles a la derecha que cambia con cada respuesta (solo en pantalla completa)
+  // Un monstruito de píxeles a la derecha que cambia con cada respuesta
   pets: boolean;
 }
 
@@ -21,19 +18,7 @@ export const INTERFACES: Interface[] = [
     id: "completa",
     label: "Pantalla completa",
     description: "la conversación con su propio scroll, ratón y Ctrl+F (la de serie)",
-    fullscreen: true,
     compact: false,
-    contrast: false,
-    minimal: false,
-    pets: false,
-  },
-  {
-    id: "clasica",
-    label: "Clásica",
-    description: "la conversación se queda en la terminal y seleccionas como siempre",
-    fullscreen: false,
-    compact: false,
-    contrast: false,
     minimal: false,
     pets: false,
   },
@@ -41,19 +26,7 @@ export const INTERFACES: Interface[] = [
     id: "compacta",
     label: "Compacta",
     description: "sin espacios ni bordes de más: cabe más conversación en la pantalla",
-    fullscreen: true,
     compact: true,
-    contrast: false,
-    minimal: false,
-    pets: false,
-  },
-  {
-    id: "contraste",
-    label: "Alto contraste",
-    description: "sin texto atenuado y con colores vivos: se lee mejor (también con fondo claro)",
-    fullscreen: true,
-    compact: false,
-    contrast: true,
     minimal: false,
     pets: false,
   },
@@ -61,9 +34,7 @@ export const INTERFACES: Interface[] = [
     id: "zen",
     label: "Zen",
     description: "lo justo: sin bienvenida, sin bordes y con la barra de abajo mínima",
-    fullscreen: true,
     compact: false,
-    contrast: false,
     minimal: true,
     pets: false,
   },
@@ -71,19 +42,32 @@ export const INTERFACES: Interface[] = [
     id: "criaturas",
     label: "Criaturas",
     description: "como la completa, con un monstruito de píxeles a la derecha: sale otro con cada respuesta",
-    fullscreen: true,
     compact: false,
-    contrast: false,
     minimal: false,
     pets: true,
   },
 ];
 
-// La interfaz de tu configuración ("fullscreen": false, de antes, es la clásica)
-export function interfaceFor(config: { interfaz?: string; fullscreen?: boolean }): Interface {
-  const chosen = INTERFACES.find((item) => item.id === config.interfaz);
-  if (chosen) {
-    return chosen;
+// Las que había antes y se han quitado porque no funcionaban bien en todas las terminales: la clásica (al cambiar el
+// tamaño de la ventana dejaba trozos repetidos en la pantalla) y la de alto contraste (con fondo claro se leía peor)
+export const RETIRED_INTERFACES: Record<string, string> = {
+  clasica: "Clásica",
+  contraste: "Alto contraste",
+};
+
+// La interfaz de tu configuración (si no existe, la de serie)
+export function interfaceFor(config: { interfaz?: string }): Interface {
+  return INTERFACES.find((item) => item.id === config.interfaz) || INTERFACES[0];
+}
+
+// Si tu configuración pedía una interfaz que ya no existe (también el «"fullscreen": false» de antes, que era la
+// clásica), cuál era, para avisarte una vez de que ahora se usa la de serie
+export function retiredInterface(config: { interfaz?: unknown; fullscreen?: unknown }): string | null {
+  if (typeof config.interfaz === "string" && RETIRED_INTERFACES[config.interfaz]) {
+    return RETIRED_INTERFACES[config.interfaz];
   }
-  return config.fullscreen === false ? INTERFACES[1] : INTERFACES[0];
+  if (config.fullscreen === false && !INTERFACES.some((item) => item.id === config.interfaz)) {
+    return RETIRED_INTERFACES.clasica;
+  }
+  return null;
 }

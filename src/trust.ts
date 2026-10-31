@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
-import { HOME_DIR, TRUST_PATH, ensureHomeDir, isDataDir, realInside } from "./paths.js";
+import { HOME_DIR, TRUST_PATH, ensureHomeDir, isDataDir, realInside, writeFileAtomic } from "./paths.js";
 
 // Lo que un proyecto puede traer y que cambia qué ejecuta vipcode o a dónde manda tus claves: servidores MCP y
 // de lenguaje, proveedores, permisos, agentes con permisos propios y comandos que lanzan órdenes. No se usa hasta
@@ -118,7 +118,7 @@ export function trustProject(root: string, seen: ProjectTrust = projectTrust(roo
   const store = readStore();
   store[key(root)] = { fingerprint: seen.fingerprint, date: new Date().toISOString() };
   ensureHomeDir();
-  fs.writeFileSync(TRUST_PATH, JSON.stringify(store, null, 2), { mode: 0o600 });
+  writeFileAtomic(TRUST_PATH, JSON.stringify(store, null, 2), { mode: 0o600 });
   return { ...seen, trusted: true };
 }
 
@@ -129,7 +129,7 @@ export function untrustProject(root: string): boolean {
   }
   delete store[key(root)];
   ensureHomeDir();
-  fs.writeFileSync(TRUST_PATH, JSON.stringify(store, null, 2), { mode: 0o600 });
+  writeFileAtomic(TRUST_PATH, JSON.stringify(store, null, 2), { mode: 0o600 });
   return true;
 }
 

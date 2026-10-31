@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { toolLabel } from "./labels.js";
-import { EXPORTS_DIR, HISTORY_PATH, SESSIONS_DIR, ensureHomeDir } from "./paths.js";
+import { EXPORTS_DIR, HISTORY_PATH, SESSIONS_DIR, ensureHomeDir, writeFileAtomic } from "./paths.js";
 import { type Todo, describeCall } from "./tools.js";
 
 // Un mensaje tuyo y todo lo que hizo el agente después (para /undo y /redo)
@@ -187,10 +187,11 @@ export function saveSession(session: Session) {
       session.title = text.replace(/\s+/g, " ").trim().slice(0, 60);
     }
   }
-  fs.writeFileSync(path.join(SESSIONS_DIR, `${session.id}.json`), JSON.stringify(session));
+  // De golpe: si vipcode se cierra a mitad de guardar, la conversación de antes sigue entera
+  writeFileAtomic(path.join(SESSIONS_DIR, `${session.id}.json`), JSON.stringify(session));
   // Y la conversación entera en Markdown, para leerla cuando quieras
   try {
-    fs.writeFileSync(sessionMarkdownPath(session), exportMarkdown(session));
+    writeFileAtomic(sessionMarkdownPath(session), exportMarkdown(session));
   } catch {
     // no es grave: lo importante es el .json
   }

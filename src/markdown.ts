@@ -1,6 +1,8 @@
 import hljs from "highlight.js/lib/common";
 import { type Token, type Tokens, marked } from "marked";
 import pc from "picocolors";
+import stringWidth from "string-width";
+import wrapAnsi from "wrap-ansi";
 import { stripControl } from "./sanitize.js";
 
 // Colores de resaltado de código por clase de highlight.js
@@ -42,8 +44,25 @@ const CODE_COLORS: Record<string, (text: string) => string> = {
   subst: (text) => text,
 };
 
-// Cómo se atenúa lo secundario (enlaces, rayas, bordes de tablas y citas): la interfaz de alto contraste no atenúa nada
-let faint: (text: string) => string = pc.dim;
+// Lo secundario (enlaces, rayas, bordes de tablas y citas) va atenuado
+const faint = pc.dim;
+
+// Parte el texto (con sus colores) al ancho que hay, por palabras y sin espacios al principio de las líneas partidas. Se
+// parte aquí y no en la pantalla para que cada línea lleve su sangría: la de las listas, la raya de las citas…
+function wrap(text: string, width: number): string {
+  return wrapAnsi(text, Math.max(1, width), { hard: true, trim: true });
+}
+
+// El código se parte justo en el ancho, sin quitarle espacios (la sangría importa), y lo que baja lleva su sangría
+function wrapCode(code: string, width: number, prefix: string): string {
+  return code
+    .split("\n")
+    .map((line) => wrapAnsi(line, Math.max(1, width - stringWidth(prefix)), { hard: true, trim: false, wordWrap: false }))
+    .join("\n")
+    .split("\n")
+    .map((line) => prefix + line)
+    .join("\n");
+}
 
 function decodeHtml(text: string): string {
   return text
@@ -170,9 +189,10 @@ function renderList(list: Tokens.List, width: number, depth: number): string {
     if (item.task) {
       bullet = item.checked ? pc.green("☑") : "☐";
     }
-    const body = blocks(item.tokens, width - 3, depth + 1).replace(/^\n+|\n+$/g, "");
+    // Lo que no cabe en una línea sigue debajo del texto, no debajo del punto
+    const pad = " ".repeat(stringWidth(bullet) + 1);
+    const body = blocks(item.tokens, width - pad.length, depth + 1).replace(/^\n+|\n+$/g, "");
     const [first, ...rest] = body.split("\n");
-    const pad = " ".repeat(bullet.length + 1);
     lines.push(`${pc.yellow(bullet)} ${first || ""}`);
     for (const line of rest) {
       lines.push(pad + line);
@@ -181,16 +201,44 @@ function renderList(list: Tokens.List, width: number, depth: number): string {
   return lines.join("\n");
 }
 
-function renderTable(table: Tokens.Table): string {
+// Cuánto ocupa cada columna de una tabla que no cabe: las que caben en su parte se quedan con su ancho, y las demás se
+// reparten lo que queda (su texto se parte en varias líneas)
+function fitColumns(natural: number[], room: number): number[] {
+  const widths = [...natural];
+  let left = room;
+  let open = natural.map((_, index) => index);
+  while (open.length > 0) {
+    const share = Math.floor(left / open.length);
+    const fits = open.filter((index) => natural[index] <= share);
+    if (fits.length === 0) {
+      const extra = left - share * open.length;
+      open.forEach((index, order) => (widths[index] = share + (order < extra ? 1 : 0)));
+      break;
+    }
+    for (const index of fits) {
+      left -= natural[index];
+    }
+    open = open.filter((index) => !fits.includes(index));
+  }
+  return widths.map((value) => Math.max(3, value));
+}
+
+function renderTable(table: Tokens.Table, width: number): string {
   const header = table.header.map((cell) => inline(cell.tokens));
-  const rows = table.rows.map((row) => row.map((cell) => inline(cell.tokens)));
-  const visible = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "").length;
-  const widths = header.map((cell, i) => Math.max(visible(cell), ...rows.map((row) => visible(row[i] || ""))));
-  const pad = (text: string, width: number) => text + " ".repeat(Math.max(0, width - visible(text)));
-  const line = (cells: string[]) => cells.map((cell, i) => pad(cell, widths[i])).join(faint(" │ "));
-  const out = [pc.bold(line(header)), faint(widths.map((w) => "─".repeat(w)).join("─┼─"))];
+  const rows = table.rows.map((row) => header.map((_, index) => inline(row[index]?.tokens)));
+  const natural = header.map((cell, index) => Math.max(1, stringWidth(cell), ...rows.map((row) => stringWidth(row[index]))));
+  // Entre columna y columna van 3 (« │ »)
+  const room = width - (header.length - 1) * 3;
+  const widths = natural.reduce((total, value) => total + value, 0) > room ? fitColumns(natural, room) : natural;
+  const pad = (text: string, size: number) => text + " ".repeat(Math.max(0, size - stringWidth(text)));
+  const line = (cells: string[]) => {
+    const parts = cells.map((cell, index) => wrap(cell, widths[index]).split("\n"));
+    const height = Math.max(...parts.map((part) => part.length));
+    return Array.from({ length: height }, (_, row) => parts.map((part, index) => pad(part[row] || "", widths[index])).join(faint(" │ ")).trimEnd());
+  };
+  const out = [...line(header).map((text) => pc.bold(text)), faint(widths.map((size) => "─".repeat(size)).join("─┼─"))];
   for (const row of rows) {
-    out.push(line(row));
+    out.push(...line(row));
   }
   return out.join("\n");
 }
@@ -201,7 +249,7 @@ function blocks(tokens: Token[], width: number, depth = 0): string {
     switch (token.type) {
       case "heading": {
         const heading = token as Tokens.Heading;
-        const text = inline(heading.tokens);
+        const text = wrap(inline(heading.tokens), width);
         if (heading.depth === 1) {
           out.push(pc.bold(pc.underline(pc.magenta(text))));
         } else if (heading.depth === 2) {
@@ -212,18 +260,20 @@ function blocks(tokens: Token[], width: number, depth = 0): string {
         break;
       }
       case "paragraph":
-        out.push(inline((token as Tokens.Paragraph).tokens));
+        out.push(wrap(inline((token as Tokens.Paragraph).tokens), width));
         break;
       case "text": {
         const text = token as Tokens.Text;
-        out.push(text.tokens ? inline(text.tokens) : decodeHtml(text.text));
+        out.push(wrap(text.tokens ? inline(text.tokens) : decodeHtml(text.text), width));
         break;
       }
       case "code": {
         const code = token as Tokens.Code;
-        const label = code.lang ? faint(`─ ${code.lang} `) : faint("─");
-        out.push(`${label}${faint("─".repeat(Math.max(0, Math.min(width, 60) - (code.lang || "").length - 3)))}`);
-        out.push(indent(highlightCode(code.text, code.lang), "  "));
+        // El nombre del lenguaje también se corta: con uno larguísimo, la raya no puede pasar del ancho
+        const lang = (code.lang || "").slice(0, Math.max(0, Math.min(width, 60) - 4));
+        const label = lang ? faint(`─ ${lang} `) : faint("─");
+        out.push(`${label}${faint("─".repeat(Math.max(0, Math.min(width, 60) - lang.length - 3)))}`);
+        out.push(wrapCode(highlightCode(code.text, code.lang), width, "  "));
         out.push(faint("─".repeat(Math.min(width, 60))));
         break;
       }
@@ -234,18 +284,20 @@ function blocks(tokens: Token[], width: number, depth = 0): string {
         out.push(renderList(token as Tokens.List, width, depth));
         break;
       case "table":
-        out.push(renderTable(token as Tokens.Table));
+        out.push(renderTable(token as Tokens.Table, width));
         break;
       case "hr":
         out.push(faint("─".repeat(Math.min(width, 60))));
         break;
       case "html":
-        out.push((token as Tokens.HTML).text.trim());
+        out.push(wrap((token as Tokens.HTML).text.trim(), width));
         break;
+      // La casilla de las listas de tareas ya va en el punto (☑ o ☐)
       case "space":
+      case "checkbox":
         break;
       default:
-        out.push((token as any).raw || "");
+        out.push(wrap((token as any).raw || "", width));
     }
   }
   if (depth > 0) {
@@ -254,11 +306,10 @@ function blocks(tokens: Token[], width: number, depth = 0): string {
   return out.join("\n\n");
 }
 
-// Markdown → texto con colores para la terminal
-export function renderMarkdown(text: string, width = 80, options: { faint?: (text: string) => string } = {}): string {
+// Markdown → texto con colores para la terminal, partido para que quepa en «width» columnas
+export function renderMarkdown(text: string, width = 80): string {
   // El texto del modelo no puede llevar secuencias de la terminal: los colores los ponemos nosotros
   const clean = stripControl(text);
-  faint = options.faint || pc.dim;
   try {
     const tokens = marked.lexer(clean, { gfm: true });
     return blocks(tokens, width).replace(/\n{3,}/g, "\n\n");

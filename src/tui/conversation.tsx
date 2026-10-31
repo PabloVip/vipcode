@@ -28,15 +28,15 @@ function SearchBar(props: { query: string; index: number; total: number }) {
   }
   return (
     <Box flexDirection="column">
-      <Box borderStyle="round" borderColor={look.tone("yellow")} paddingX={1} justifyContent="space-between">
+      <Box borderStyle="round" borderColor="yellow" paddingX={1} justifyContent="space-between">
         <Text wrap="truncate-end">
-          <Text color={look.tone("yellow")}>Buscar: </Text>
+          <Text color="yellow">Buscar: </Text>
           {stripControl(props.query)}
-          <Text color={look.tone("yellow")}>▍</Text>
+          <Text color="yellow">▍</Text>
         </Text>
-        <Text dimColor={look.dim}>{count}</Text>
+        <Text dimColor>{count}</Text>
       </Box>
-      <Text dimColor={look.dim} wrap="truncate-end">
+      <Text dimColor wrap="truncate-end">
         {"  "}Enter o ↑ la anterior · ↓ la siguiente · Esc cierra
       </Text>
     </Box>
@@ -62,7 +62,6 @@ export function useConversation(props: {
   items: Item[];
   columns: number;
   rows: number;
-  fullscreen: boolean;
   dialog: { kind: string } | null;
   // La interfaz con la que se pinta: si cambia (/interfaz), se vuelve a pintar todo
   interfaceId: string;
@@ -70,7 +69,7 @@ export function useConversation(props: {
   // alto que tiene y qué hacer si lo pinchas
   side?: { width: number; render: (height: number) => ReactNode; onClick: () => void } | null;
 }): Conversation {
-  const { app, items, rows, fullscreen, dialog, interfaceId, side } = props;
+  const { app, items, rows, dialog, interfaceId, side } = props;
   // El ancho de la conversación, con su barra de desplazamiento
   const columns = props.columns - (side?.width ?? 0);
   const dialogRef = useRef(dialog);
@@ -128,7 +127,7 @@ export function useConversation(props: {
   const [paintedCount, setPaintedCount] = useState(0);
   const paintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!fullscreen || paintTimer.current) {
+    if (paintTimer.current) {
       return;
     }
     paintTimer.current = setTimeout(() => {
@@ -147,7 +146,8 @@ export function useConversation(props: {
           </Box>,
           { columns: width },
         );
-        painted.current.set(item.id, { width, open, look: look.interface.id, lines: text.split("\n") });
+        // Lo que no pinta nada (la bienvenida en la zen) no deja una línea en blanco
+        painted.current.set(item.id, { width, open, look: look.interface.id, lines: text === "" ? [] : text.split("\n") });
         changed = true;
       }
       if (changed) {
@@ -167,7 +167,7 @@ export function useConversation(props: {
   const history = useMemo(() => {
     const lines: string[] = [];
     const owners: { id: number; first: boolean }[] = [];
-    for (const item of fullscreen ? items : []) {
+    for (const item of items) {
       const done = painted.current.get(item.id);
       if (done && done.width === paintWidth(columns) && done.look === interfaceId) {
         done.lines.forEach((line, index) => {
@@ -223,13 +223,12 @@ export function useConversation(props: {
         setScrollTop(key.home && lines > height ? 0 : null);
       }
     },
-    { isActive: fullscreen },
   );
 
   // Con la pantalla completa, la terminal le manda el ratón a vipcode (la rueda mueve la conversación); al salir, también
   // si sale de golpe, deja de hacerlo
   useEffect(() => {
-    if (!fullscreen || !process.stdout.isTTY) {
+    if (!process.stdout.isTTY) {
       return;
     }
     process.stdout.write(MOUSE_ON);
@@ -374,7 +373,6 @@ export function useConversation(props: {
         }
       }
     },
-    { isActive: fullscreen },
   );
 
   // Lo que se ve de la conversación: lo buscado resaltado (lo actual en amarillo) y lo seleccionado en vídeo inverso; si
@@ -398,7 +396,7 @@ export function useConversation(props: {
   });
   const below = historyLines.length - (top + viewHeight);
   if (scrollTop !== null && below > 0) {
-    visible = [...visible.slice(0, -1), look.faint(`↓ ${below} líneas más · rueda del ratón o AvPág para bajar`)];
+    visible = [...visible.slice(0, -1), pc.dim(`↓ ${below} líneas más · rueda del ratón o AvPág para bajar`)];
   }
   const viewport = (
     <Box ref={historyRef} flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
@@ -413,7 +411,7 @@ export function useConversation(props: {
         // La barra de desplazamiento: dónde estás en la conversación (se puede pinchar y arrastrar)
         <Box flexDirection="column" width={1}>
           {Array.from({ length: viewHeight }, (_, row) => (
-            <Text key={row}>{row >= thumb.start && row < thumb.start + thumb.size ? "┃" : look.faint("│")}</Text>
+            <Text key={row}>{row >= thumb.start && row < thumb.start + thumb.size ? "┃" : pc.dim("│")}</Text>
           ))}
         </Box>
       ) : side ? (

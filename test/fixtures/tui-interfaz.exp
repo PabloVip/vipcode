@@ -1,5 +1,4 @@
-# /interfaz: compacta al momento, y a la clásica y de vuelta rehaciendo la pantalla con la misma conversación (lo lanza
-# test/tui.test.mjs)
+# /interfaz: compacta, zen y de vuelta a la de serie, al momento y con la misma conversación (lo lanza test/tui.test.mjs)
 set timeout 30
 log_user 1
 set cli [lindex $argv 0]
@@ -71,31 +70,25 @@ expect {
 }
 libre
 
-# 2. Clásica: se rehace la pantalla y sigue la misma conversación
-interfaz "se queda"
+# 2. Zen, al momento, y se sigue hablando en la misma conversación
+interfaz "lo justo"
 expect {
-  -re {Interfaz \S*Cl} {}
-  timeout { falla "no cambia a la clásica" }
+  -re {Interfaz \S*Zen} {}
+  timeout { falla "no cambia a la zen" }
 }
-expect {
-  "Sigue la misma conversaci" {}
-  timeout { falla "al pasar a la clásica no sigue la conversación" }
-}
+libre
+send "otra\r"
 expect {
   "HOLA" {}
-  timeout { falla "al pasar a la clásica no se ve lo de antes" }
+  timeout { falla "en la zen no contesta" }
 }
 libre
 
-# 3. Y de vuelta a la pantalla completa
+# 3. Y de vuelta a la de serie
 interfaz "de serie"
 expect {
   -re {Interfaz \S*Pantalla completa} {}
   timeout { falla "no vuelve a la pantalla completa" }
-}
-expect {
-  "HOLA" {}
-  timeout { falla "al volver a la pantalla completa no se ve lo de antes" }
 }
 libre
 

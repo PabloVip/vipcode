@@ -355,6 +355,10 @@ function readNumbered(file: string, label: string, offset?: number, maxLines?: n
     return `${label} parece un fichero binario; no se muestra.`;
   }
   const lines = buffer.toString("utf8").split(/\r?\n/);
+  // El salto de línea del final no es otra línea: un fichero «hola\nmundo\n» tiene 2
+  if (lines.length > 1 && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
   let start = 1;
   if (offset && offset > 0) {
     start = Math.floor(offset);
@@ -711,9 +715,11 @@ function ripgrep(args: string[], cwd: string, signal?: AbortSignal): Promise<{ c
     let stdout = "";
     const onAbort = () => child.kill("SIGTERM");
     signal?.addEventListener("abort", onAbort);
-    child.stdout.on("data", (d) => {
+    // Como texto: así una letra de varios bytes (ñ, á, €) no se rompe si llega partida entre dos trozos
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (text: string) => {
       if (stdout.length < 2000000) {
-        stdout += d.toString();
+        stdout += text;
       }
     });
     child.on("error", () => resolve(null));
@@ -908,14 +914,16 @@ const bashTool: Tool = {
 
       ctx.signal?.addEventListener("abort", kill);
 
-      const onData = (d: Buffer) => {
-        const text = d.toString();
+      // Como texto: así una letra de varios bytes (ñ, á, €) no se rompe si llega partida entre dos trozos
+      const onData = (text: string) => {
         output += text;
         if (output.length > 5000000) {
           output = output.slice(-2000000);
         }
         ctx.onProgress?.(text);
       };
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
       child.stdout.on("data", onData);
       child.stderr.on("data", onData);
       child.on("error", (err) => {

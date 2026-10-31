@@ -41,6 +41,33 @@ export function ensureHomeDir() {
   }
 }
 
+// Escribe un fichero de datos de golpe: primero en uno temporal al lado y después lo cambia por el bueno. Si vipcode se
+// cierra a mitad (o se llena el disco), el de antes sigue entero: una conversación, tus claves o tu configuración no se
+// quedan cortadas. Si es un enlace (por ejemplo a tu repositorio de configuración), se escribe en el fichero de verdad
+export function writeFileAtomic(file: string, data: string, options: { mode?: number } = {}) {
+  let target = file;
+  try {
+    target = fs.realpathSync.native(file);
+  } catch {
+    // todavía no existe
+  }
+  const temp = `${target}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(temp, data, options);
+    fs.renameSync(temp, target);
+  } catch (err) {
+    fs.rmSync(temp, { force: true });
+    // En Windows no se puede cambiar un fichero que otro programa tiene abierto (un antivirus, por ejemplo): entonces
+    // se escribe directamente, como antes
+    const code = (err as NodeJS.ErrnoException).code;
+    if (process.platform === "win32" && (code === "EPERM" || code === "EACCES" || code === "EBUSY")) {
+      fs.writeFileSync(target, data, options);
+      return;
+    }
+    throw err;
+  }
+}
+
 // Carpeta donde está instalado vipcode (la que contiene dist/)
 export const INSTALL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

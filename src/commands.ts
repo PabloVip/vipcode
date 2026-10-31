@@ -100,8 +100,11 @@ function runShell(command: string, cwd: string): Promise<string> {
     });
     let output = "";
     const timer = setTimeout(() => killTree(child), 30000);
-    child.stdout.on("data", (d) => (output += d.toString()));
-    child.stderr.on("data", (d) => (output += d.toString()));
+    // Como texto: así una letra de varios bytes no se rompe si llega partida entre dos trozos
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (text: string) => (output += text));
+    child.stderr.on("data", (text: string) => (output += text));
     child.on("error", (err) => {
       clearTimeout(timer);
       resolve(`(no se pudo ejecutar: ${err.message})`);

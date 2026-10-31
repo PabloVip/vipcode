@@ -291,7 +291,11 @@ export class Agent {
       signal,
       { onNotice: (t) => this.events.onNotice?.(t) },
     );
-    const summary = result.message.content || "";
+    const summary = (result.message.content || "").trim();
+    // Sin resumen no se cambia nada: se perdería la conversación entera
+    if (summary === "") {
+      throw new Error("No he podido resumir la conversación: el modelo no ha devuelto el resumen. Sigue como estaba; prueba otra vez con /compact o empieza otra con /new.");
+    }
     let todoText = "";
     if (this.session.todos.length > 0) {
       todoText = `\n\nLista de tareas actual:\n${this.session.todos.map((todo) => `- [${todo.status}] ${todo.content}`).join("\n")}`;

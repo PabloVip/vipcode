@@ -99,9 +99,9 @@ function toolDetail(event: ToolEndEvent): string[] {
     return [pc.red(firstLine(output))];
   }
   if (event.display) {
-    const lines = colorPreview(event.display, look.faint).split("\n");
+    const lines = colorPreview(event.display).split("\n");
     if (lines.length > 14) {
-      return [...lines.slice(0, 14), look.faint(`… ${lines.length - 14} líneas más del diff`)];
+      return [...lines.slice(0, 14), pc.dim(`… ${lines.length - 14} líneas más del diff`)];
     }
     return lines;
   }
@@ -109,44 +109,44 @@ function toolDetail(event: ToolEndEvent): string[] {
   switch (event.name) {
     case "read_file":
       if (output.startsWith("Imagen")) {
-        return [look.faint(firstLine(output))];
+        return [pc.dim(firstLine(output))];
       }
-      return [look.faint(`Leídas ${output.split("\n").length} líneas`)];
+      return [pc.dim(`Leídas ${output.split("\n").length} líneas`)];
     case "glob":
     case "grep":
       if (/^Sin (resultados|coincidencias)/.test(output)) {
-        return [look.faint(firstLine(output))];
+        return [pc.dim(firstLine(output))];
       }
-      return [look.faint(`${count} resultados`)];
+      return [pc.dim(`${count} resultados`)];
     case "list_dir":
-      return [look.faint(`${count} entradas`)];
+      return [pc.dim(`${count} entradas`)];
     case "bash": {
       const lines = output.split("\n");
       const header = lines[0] || "";
       const body = lines.slice(1).filter((line) => line.trim() !== "");
-      const tail = body.slice(-4).map((line) => look.faint(line.slice(0, 200)));
+      const tail = body.slice(-4).map((line) => pc.dim(line.slice(0, 200)));
       const ok = header === "Código de salida: 0";
-      return [ok ? look.faint(header) : pc.yellow(header), ...tail];
+      return [ok ? pc.dim(header) : pc.yellow(header), ...tail];
     }
     case "webfetch":
-      return [look.faint(`${output.length} caracteres`)];
+      return [pc.dim(`${output.length} caracteres`)];
     case "websearch":
-      return [look.faint(`${(output.match(/^\d+\. /gm) || []).length} resultados`)];
+      return [pc.dim(`${(output.match(/^\d+\. /gm) || []).length} resultados`)];
     case "todowrite":
       return output
         .split("\n")
         .slice(1)
-        .map((line) => look.faint(line));
+        .map((line) => pc.dim(line));
     case "task":
       return output
         .split("\n")
         .filter((line) => line.trim() !== "")
         .slice(0, 3)
-        .map((line) => look.faint(line.slice(0, 200)));
+        .map((line) => pc.dim(line.slice(0, 200)));
     case "skill":
-      return [look.faint(event.summary.includes("·") ? "fichero leído" : "instrucciones cargadas")];
+      return [pc.dim(event.summary.includes("·") ? "fichero leído" : "instrucciones cargadas")];
     default:
-      return [look.faint(firstLine(output))];
+      return [pc.dim(firstLine(output))];
   }
 }
 
@@ -169,11 +169,11 @@ export function ToolHeader(props: { name: string; summary: string }) {
 
 // Toda la salida de una herramienta, para verla desplegada (hasta 400 líneas)
 function fullOutput(event: ToolEndEvent): string[] {
-  const lines = event.display ? colorPreview(event.display, look.faint).split("\n") : stripControl(event.output || "").replace(/\s+$/, "").split("\n");
+  const lines = event.display ? colorPreview(event.display).split("\n") : stripControl(event.output || "").replace(/\s+$/, "").split("\n");
   if (lines.length === 1 && lines[0] === "") {
     return [];
   }
-  return lines.length > 400 ? [...lines.slice(0, 400), look.faint(`… ${lines.length - 400} líneas más`)] : lines;
+  return lines.length > 400 ? [...lines.slice(0, 400), pc.dim(`… ${lines.length - 400} líneas más`)] : lines;
 }
 
 // En pantalla completa la salida de una herramienta sale resumida y con un clic se despliega entera («fold»); sin él,
@@ -196,16 +196,16 @@ function ToolView(props: { event: ToolEndEvent; ms: number; fold?: "folded" | "o
         {stats ? (
           <Text>
             {"  "}
-            <Text color={look.tone("green")}>+{stats.added}</Text> <Text color={look.tone("red")}>−{stats.removed}</Text>
+            <Text color="green">+{stats.added}</Text> <Text color="red">−{stats.removed}</Text>
           </Text>
         ) : null}
-        {props.ms >= 1000 ? <Text dimColor={look.dim}> ({formatDuration(props.ms)})</Text> : null}
-        {foldable ? <Text dimColor={look.dim}>{open ? "  ▾ plegar" : "  ▸ ver"}</Text> : null}
+        {props.ms >= 1000 ? <Text dimColor> ({formatDuration(props.ms)})</Text> : null}
+        {foldable ? <Text dimColor>{open ? "  ▾ plegar" : "  ▸ ver"}</Text> : null}
       </Text>
       {detail.map((line, index) => (
         <Text key={index}>
           {"  "}
-          {index === 0 ? look.faint("⎿ ") : "  "}
+          {index === 0 ? pc.dim("⎿ ") : "  "}
           {line}
         </Text>
       ))}
@@ -234,10 +234,10 @@ function Banner(props: { app: App }) {
   if (look.bare) {
     return (
       <Text wrap="truncate-end">
-        <Text bold color={look.tone("magenta")}>
+        <Text bold color="magenta">
           ◆ vipcode
         </Text>
-        <Text dimColor={look.dim}>
+        <Text dimColor>
           {" "}
           v{VERSION} · {slots.length} modelo{slots.length === 1 ? "" : "s"} de {providers} proveedor{providers === 1 ? "" : "es"} · /help ayuda
         </Text>
@@ -245,28 +245,28 @@ function Banner(props: { app: App }) {
     );
   }
   return (
-    <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor={look.tone("magenta")} paddingX={2}>
+    <Box flexDirection="column" alignSelf="flex-start" borderStyle="round" borderColor="magenta" paddingX={2}>
       <Text>
-        <Text bold color={look.tone("magenta")}>
+        <Text bold color="magenta">
           ◆ vipcode
         </Text>
-        <Text dimColor={look.dim}> v{VERSION} · programa con IAs gratuitas</Text>
+        <Text dimColor> v{VERSION} · programa con IAs gratuitas</Text>
       </Text>
-      <Text dimColor={look.dim}>{tildify(app.root)}</Text>
+      <Text dimColor>{tildify(app.root)}</Text>
       <Text> </Text>
       <Text>
         <Text color={slots.length > 0 ? "green" : "red"}>●</Text> {slots.length} modelo{slots.length === 1 ? "" : "s"} de {providers} proveedor
         {providers === 1 ? "" : "es"}
-        {extras.length > 0 ? <Text dimColor={look.dim}> · {extras.join(" · ")}</Text> : null}
+        {extras.length > 0 ? <Text dimColor> · {extras.join(" · ")}</Text> : null}
       </Text>
       {first ? (
         <Text wrap="truncate-end">
-          <Text color={look.tone("yellow")}>★</Text> Empieza con <Text bold>{first.key}</Text>
-          {first.score !== null ? <Text dimColor={look.dim}> (nota {first.score} en LLM Stats)</Text> : null}
+          <Text color="yellow">★</Text> Empieza con <Text bold>{first.key}</Text>
+          {first.score !== null ? <Text dimColor> (nota {first.score} en LLM Stats)</Text> : null}
         </Text>
       ) : null}
       <Text> </Text>
-      <Text dimColor={look.dim} wrap="truncate-end">
+      <Text dimColor wrap="truncate-end">
         Ctrl+P comandos · @ adjunta · ! terminal · Tab cambia de agente · /help ayuda
       </Text>
     </Box>
@@ -278,7 +278,7 @@ function Banner(props: { app: App }) {
 export function Bullet(props: { color: string }) {
   return (
     <Box width={2} flexShrink={0}>
-      <Text color={look.tone(props.color)}>●</Text>
+      <Text color={props.color}>●</Text>
     </Box>
   );
 }
@@ -295,11 +295,11 @@ export function ItemView(props: { item: Item; app: App; width: number; fold?: "f
         text = `${lines.slice(0, 20).join("\n")}\n… (${lines.length - 20} líneas más)`;
       }
       return (
-        <Box marginTop={look.gap} borderStyle="bold" borderTop={false} borderRight={false} borderBottom={false} borderColor={look.tone(item.color)} paddingLeft={1}>
+        <Box marginTop={look.gap} borderStyle="bold" borderTop={false} borderRight={false} borderBottom={false} borderColor={item.color} paddingLeft={1}>
           <Text>
             {text}
-            {item.images > 0 ? look.faint(` [${item.images} imagen${item.images > 1 ? "es" : ""}]`) : ""}
-            {item.queued ? look.faint(" (en cola: se le entrega al acabar el paso)") : ""}
+            {item.images > 0 ? pc.dim(` [${item.images} imagen${item.images > 1 ? "es" : ""}]`) : ""}
+            {item.queued ? pc.dim(" (en cola: se le entrega al acabar el paso)") : ""}
           </Text>
         </Box>
       );
@@ -309,7 +309,7 @@ export function ItemView(props: { item: Item; app: App; width: number; fold?: "f
         <Box marginTop={look.gap}>
           <Bullet color={item.color} />
           <Box flexDirection="column" flexGrow={1}>
-            <Text>{renderMarkdown(item.text, Math.max(20, width - 4), { faint: look.faint })}</Text>
+            <Text>{renderMarkdown(item.text, Math.max(20, width - 2))}</Text>
           </Box>
         </Box>
       );
@@ -318,7 +318,7 @@ export function ItemView(props: { item: Item; app: App; width: number; fold?: "f
     case "answer":
       return (
         <Box marginLeft={2}>
-          <Text dimColor={look.dim} wrap="truncate-end">
+          <Text dimColor wrap="truncate-end">
             ◆ {item.slot}
             {item.score !== null ? ` · nota ${item.score}` : ""} · {formatDuration(item.ms)}
             {item.tokens > 0 ? ` · ${shortTokens(item.tokens)} tokens` : ""}
@@ -331,14 +331,14 @@ export function ItemView(props: { item: Item; app: App; width: number; fold?: "f
       return (
         <Box flexDirection="column" marginTop={look.gap}>
           <Text>
-            <Text color={look.tone("yellow")} bold>
+            <Text color="yellow" bold>
               ${" "}
             </Text>
             <Text bold>{showControl(item.command)}</Text>
           </Text>
-          {lines.length > shown.length ? <Text dimColor={look.dim}>  … {lines.length - shown.length} líneas antes</Text> : null}
+          {lines.length > shown.length ? <Text dimColor>  … {lines.length - shown.length} líneas antes</Text> : null}
           {shown.length > 0 ? <Text>{shown.map((line) => `  ${line}`).join("\n")}</Text> : null}
-          <Text dimColor={look.dim}>
+          <Text dimColor>
             {"  "}
             {item.code === 0 ? "✓" : "✗"} código {item.code ?? "?"} · el agente verá la salida con tu siguiente mensaje
           </Text>
@@ -349,13 +349,13 @@ export function ItemView(props: { item: Item; app: App; width: number; fold?: "f
       // Si trae arreglos de seguridad, en rojo y diciéndolo: que no se deje para luego
       const tone = item.security ? "red" : "green";
       return (
-        <Box marginY={look.gap} alignSelf="flex-start" flexDirection="column" borderStyle="round" borderColor={look.tone(tone)} paddingX={2}>
-          <Text bold color={look.tone(tone)}>
+        <Box marginY={look.gap} alignSelf="flex-start" flexDirection="column" borderStyle="round" borderColor={tone} paddingX={2}>
+          <Text bold color={tone}>
             {item.security ? "↑ ¡Hay una versión nueva de vipcode con arreglos de seguridad!" : "↑ ¡Hay una versión nueva de vipcode!"}
           </Text>
           <Text>
-            {VERSION} → <Text bold color={look.tone(tone)}>{stripControl(item.version)}</Text> · escribe{" "}
-            <Text bold color={look.tone("cyan")}>
+            {VERSION} → <Text bold color={tone}>{stripControl(item.version)}</Text> · escribe{" "}
+            <Text bold color="cyan">
               /update
             </Text>{" "}
             para instalarla{item.security ? " cuanto antes" : ""}
@@ -366,17 +366,17 @@ export function ItemView(props: { item: Item; app: App; width: number; fold?: "f
     case "updated":
       // Hasta que no se reinicia sigue funcionando la versión de antes: que no pase desapercibido
       return (
-        <Box marginY={look.gap} alignSelf="flex-start" flexDirection="column" borderStyle="round" borderColor={look.tone("green")} paddingX={2}>
-          <Text bold color={look.tone("green")}>
+        <Box marginY={look.gap} alignSelf="flex-start" flexDirection="column" borderStyle="round" borderColor="green" paddingX={2}>
+          <Text bold color="green">
             ✓ vipcode {stripControl(item.version)} instalado
           </Text>
           <Text>
             Para usar la versión nueva, reinicia vipcode: escribe{" "}
-            <Text bold color={look.tone("cyan")}>
+            <Text bold color="cyan">
               /exit
             </Text>{" "}
             y vuelve a abrirlo con{" "}
-            <Text bold color={look.tone("cyan")}>
+            <Text bold color="cyan">
               vipcode -c
             </Text>{" "}
             para seguir en esta conversación.
@@ -386,37 +386,37 @@ export function ItemView(props: { item: Item; app: App; width: number; fold?: "f
     case "tutorial": {
       const finished = item.step > item.total;
       return (
-        <Box marginY={look.gap} flexDirection="column" borderStyle="round" borderColor={look.tone("magenta")} paddingX={2}>
-          <Text bold color={look.tone("magenta")}>
+        <Box marginY={look.gap} flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={2}>
+          <Text bold color="magenta">
             {finished ? `✓ ${item.title}` : `Tutorial · paso ${item.step} de ${item.total}: ${item.title}`}
           </Text>
           <Text>{item.text}</Text>
-          {finished ? null : <Text dimColor={look.dim}>Cuando lo hagas, pasas solo al siguiente paso (/tutorial lo repite).</Text>}
+          {finished ? null : <Text dimColor>Cuando lo hagas, pasas solo al siguiente paso (/tutorial lo repite).</Text>}
         </Box>
       );
     }
     case "news": {
-      const lines = renderMarkdown(item.markdown, Math.max(20, width - 8), { faint: look.faint }).split("\n");
+      const lines = renderMarkdown(item.markdown, Math.max(20, width - 6)).split("\n");
       const shown = lines.slice(0, 18);
       const tone = item.security ? "yellow" : "cyan";
       return (
-        <Box marginY={look.gap} flexDirection="column" borderStyle="round" borderColor={look.tone(tone)} paddingX={2}>
-          <Text bold color={look.tone(tone)}>
+        <Box marginY={look.gap} flexDirection="column" borderStyle="round" borderColor={tone} paddingX={2}>
+          <Text bold color={tone}>
             ◆ Novedades de vipcode {item.version}
             {item.security ? " · trae arreglos de seguridad" : ""}
           </Text>
           <Text>{shown.join("\n")}</Text>
-          {lines.length > shown.length ? <Text dimColor={look.dim}>… y más en CHANGELOG.md</Text> : null}
+          {lines.length > shown.length ? <Text dimColor>… y más en CHANGELOG.md</Text> : null}
         </Box>
       );
     }
     // Avisos y bloques pueden llevar mensajes de los proveedores o datos de fuera: solo se dejan los colores
     case "info":
-      return <Text dimColor={look.dim}>{stripUnsafe(item.text)}</Text>;
+      return <Text dimColor>{stripUnsafe(item.text)}</Text>;
     case "notice":
-      return <Text color={look.tone("yellow")}>⚠ {stripUnsafe(item.text)}</Text>;
+      return <Text color="yellow">⚠ {stripUnsafe(item.text)}</Text>;
     case "error":
-      return <Text color={look.tone("red")}>✖ {stripUnsafe(item.text)}</Text>;
+      return <Text color="red">✖ {stripUnsafe(item.text)}</Text>;
     case "block":
       return (
         <Box marginY={look.gap}>

@@ -4,6 +4,22 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Quitado
+
+- Las interfaces «Clásica» y «Alto contraste», porque no funcionaban bien en todas las terminales. La clásica dejaba trozos repetidos de la caja de escribir en la pantalla al cambiar el tamaño de la ventana, y la de alto contraste se leía peor con fondo claro (por ejemplo, el título de los permisos en amarillo chillón sobre blanco). Quedan la pantalla completa, la compacta, la zen y la de criaturas. Si tenías elegida una de las que se han quitado (o `"fullscreen": false`), vipcode te avisa una vez y usa la pantalla completa.
+
+### Arreglado
+
+- Las respuestas se parten bien cuando no caben: lo que baja de una lista sigue debajo del texto, las citas llevan su raya en todas las líneas, el código partido conserva su sangría, las tablas anchas se reparten el ancho de la pantalla, y ninguna línea partida empieza con un espacio de más.
+- Las listas de tareas (`- [x]`) salían con «[x]» repetido y el texto en la línea de abajo.
+- Borrar o moverse por un emoji, una bandera o una letra con la tilde aparte la partía por la mitad, dejando un carácter roto en pantalla y en el mensaje.
+- En ventanas estrechas, el texto de ayuda de la caja de escribir ocupaba dos o tres líneas; ahora se corta en una.
+- La salida de los comandos (y de `!comando`, las búsquedas y `/update`) podía romper alguna letra con tilde o «ñ» cuando llegaba partida entre dos trozos.
+- Al leer un fichero, el salto de línea del final contaba como una línea más vacía.
+- Si todos los modelos fallaban por un error que no es de límites, vipcode decía que la conversación era demasiado larga y que usaras /compact. Ahora solo lo dice cuando de verdad no cabe, y si no, avisa de que ninguno ha podido contestar. Los avisos de error ya no repiten el código («400 400 …»).
+- Las conversaciones, tus claves, la configuración y las carpetas de confianza se guardan de golpe: si vipcode se cierra a mitad de guardar, el fichero de antes sigue entero.
+- `/help` con `--plain` enseñaba los atajos del ratón de la pantalla completa.
+
 ## [0.2.17] - 2026-10-30
 
 ### Cambiado

@@ -7,6 +7,47 @@ export interface EditorState {
 
 export const EMPTY: EditorState = { value: "", cursor: 0 };
 
+// Las letras tal como se ven: un emoji, una bandera o una letra con su tilde aparte son una sola, y el cursor y el
+// borrado no las pueden partir por la mitad (quedaría un carácter roto que algunos proveedores rechazan)
+const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+// Ninguna letra ocupa tanto: se mira solo un trozo alrededor del cursor (un texto pegado puede ser enorme)
+const AROUND = 64;
+
+// Dónde empieza la letra que hay justo antes de «index»
+export function previousBoundary(value: string, index: number): number {
+  if (index <= 0) {
+    return 0;
+  }
+  const from = Math.max(0, index - AROUND);
+  let start = from;
+  for (const part of segmenter.segment(value.slice(from, index))) {
+    start = from + part.index;
+  }
+  return start;
+}
+
+// Dónde acaba la letra que empieza en «index»
+export function nextBoundary(value: string, index: number): number {
+  if (index >= value.length) {
+    return value.length;
+  }
+  const first = segmenter.segment(value.slice(index, index + AROUND))[Symbol.iterator]().next();
+  return index + (first.done ? 1 : first.value.segment.length);
+}
+
+// Una posición que no cae entre las dos mitades de un emoji (o de otro carácter que ocupa dos)
+export function safeIndex(value: string, index: number): number {
+  const code = value.charCodeAt(index);
+  return index > 0 && index < value.length && code >= 0xdc00 && code <= 0xdfff ? index - 1 : index;
+}
+
+// Para pintar una línea con el cursor en «at»: lo de antes, la letra del cursor (un espacio si está al final) y lo de
+// después
+export function splitAtCursor(text: string, at: number): { before: string; under: string; after: string } {
+  const end = nextBoundary(text, at);
+  return { before: text.slice(0, at), under: text.slice(at, end) || " ", after: text.slice(end) };
+}
+
 export function insert(state: EditorState, text: string): EditorState {
   const value = state.value.slice(0, state.cursor) + text + state.value.slice(state.cursor);
   return { value, cursor: state.cursor + text.length };
@@ -16,14 +57,15 @@ export function backspace(state: EditorState): EditorState {
   if (state.cursor === 0) {
     return state;
   }
-  return { value: state.value.slice(0, state.cursor - 1) + state.value.slice(state.cursor), cursor: state.cursor - 1 };
+  const start = previousBoundary(state.value, state.cursor);
+  return { value: state.value.slice(0, start) + state.value.slice(state.cursor), cursor: start };
 }
 
 export function deleteForward(state: EditorState): EditorState {
   if (state.cursor >= state.value.length) {
     return state;
   }
-  return { value: state.value.slice(0, state.cursor) + state.value.slice(state.cursor + 1), cursor: state.cursor };
+  return { value: state.value.slice(0, state.cursor) + state.value.slice(nextBoundary(state.value, state.cursor)), cursor: state.cursor };
 }
 
 function isWordChar(char: string): boolean {
@@ -56,14 +98,14 @@ export function moveLeft(state: EditorState, word = false): EditorState {
   if (word) {
     return { ...state, cursor: wordStart(state.value, state.cursor) };
   }
-  return { ...state, cursor: Math.max(0, state.cursor - 1) };
+  return { ...state, cursor: previousBoundary(state.value, state.cursor) };
 }
 
 export function moveRight(state: EditorState, word = false): EditorState {
   if (word) {
     return { ...state, cursor: wordEnd(state.value, state.cursor) };
   }
-  return { ...state, cursor: Math.min(state.value.length, state.cursor + 1) };
+  return { ...state, cursor: nextBoundary(state.value, state.cursor) };
 }
 
 export function deleteWordBack(state: EditorState): EditorState {
@@ -116,7 +158,7 @@ export function moveVertical(state: EditorState, direction: -1 | 1): EditorState
   for (let i = 0; i < target; i++) {
     offset += lines[i].length + 1;
   }
-  return { ...state, cursor: offset + Math.min(column, lines[target].length) };
+  return { ...state, cursor: safeIndex(state.value, offset + Math.min(column, lines[target].length)) };
 }
 
 // La palabra @… que se está escribiendo justo antes del cursor

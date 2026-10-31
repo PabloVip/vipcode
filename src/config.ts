@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CONFIG_PATH, HOME_DIR, ensureHomeDir, isDataDir } from "./paths.js";
+import { retiredInterface } from "./interfaces.js";
+import { CONFIG_PATH, HOME_DIR, ensureHomeDir, isDataDir, writeFileAtomic } from "./paths.js";
 import { projectTrust } from "./trust.js";
 
 export { CONFIG_PATH, HOME_DIR, SESSIONS_DIR, STATE_PATH } from "./paths.js";
@@ -186,10 +187,7 @@ export interface Config {
   skills: SkillsConfig;
   // Mostrar el razonamiento de los modelos que lo envían
   showReasoning: boolean;
-  // Pantalla completa: la conversación tiene su propio scroll (rueda del ratón, AvPág y RePág) y la caja de escribir
-  // queda fija abajo. Con false, la conversación se escribe en la terminal normal (es la interfaz «clasica»)
-  fullscreen: boolean;
-  // La interfaz elegida con /interfaz: completa, clasica, compacta, contraste, zen o criaturas ("" según fullscreen)
+  // La interfaz elegida con /interfaz: completa, compacta, zen o criaturas ("" es la de serie, la completa)
   interfaz: string;
 }
 
@@ -238,7 +236,6 @@ export const DEFAULT_CONFIG: Config = {
   ranking: { enabled: true, metric: "coding", anonymousLast: false },
   skills: { enabled: true, paths: [], disabled: [], external: true },
   showReasoning: true,
-  fullscreen: true,
   interfaz: "",
 };
 
@@ -407,7 +404,7 @@ export function setGlobalConfigValue(key: string, value: unknown) {
   loadConfig();
   const raw = readJson(CONFIG_PATH);
   raw[key] = value;
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2));
+  writeFileAtomic(CONFIG_PATH, JSON.stringify(raw, null, 2));
 }
 
 export function loadConfig(root: string = process.cwd(), options: { trusted?: boolean } = {}): Config {
@@ -424,6 +421,22 @@ export function loadConfig(root: string = process.cwd(), options: { trusted?: bo
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(TEMPLATE, null, 2));
     raw = readJson(CONFIG_PATH);
     configNotices.push(`He actualizado ${CONFIG_PATH} al formato nuevo (copia del antiguo en config.json.bak).`);
+  }
+  // Una interfaz que ya no existe (la clásica o la de alto contraste): se avisa una vez y se quita de tu configuración,
+  // así que se usa la de serie
+  const retired = retiredInterface(raw);
+  if (retired) {
+    delete raw.interfaz;
+    delete raw.fullscreen;
+    const notice = `La interfaz «${retired}» ya no está en vipcode: ahora se usa la pantalla completa (/interfaz para elegir otra).`;
+    try {
+      writeFileAtomic(CONFIG_PATH, JSON.stringify(raw, null, 2));
+    } catch {
+      // si no se puede escribir, se volverá a avisar la próxima vez
+    }
+    if (!configNotices.includes(notice)) {
+      configNotices.push(notice);
+    }
   }
 
   let config = mergeConfig(DEFAULT_CONFIG, raw);

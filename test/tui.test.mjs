@@ -82,12 +82,12 @@ test("interfaz: versión nueva destacada y bienvenida la primera vez", { skip: !
   const mock = await startMock(() => ({ text: "HOLA" }));
   const ws = tempWorkspace();
   // Un proveedor que no pide clave, como los anónimos, y una versión nueva ya comprobada hoy (no se mira internet)
-  // En el modo de antes (sin pantalla completa), que así también queda probado
+  // Con una interfaz que ya no existe: se avisa y se usa la de serie
   ws.writeConfig({
     providers: [{ name: "anon", baseURL: `${mock.url}/anon/v1`, noKey: true, models: [{ id: "m", context: 100000 }] }],
     enabledProviders: ["anon"],
     autoUpdateModels: false,
-    fullscreen: false,
+    interfaz: "contraste",
   });
   // …con arreglos de seguridad, y vienes de una versión anterior (se enseñan las novedades)
   fs.writeFileSync(path.join(ws.home, "update.json"), JSON.stringify({ checked: Date.now(), latest: "99.0.0", security: true }));
@@ -99,6 +99,8 @@ test("interfaz: versión nueva destacada y bienvenida la primera vez", { skip: !
   assert.match(result.plain, /pueden guardar lo que les escribes/);
   // «Empezar» deja la bienvenida contestada para las próximas veces
   assert.ok(JSON.parse(fs.readFileSync(path.join(ws.home, "notices.json"), "utf8")).privacy);
+  // Y la interfaz que ya no existe se ha quitado de la configuración (la próxima vez no se avisa)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ws.home, "config.json"), "utf8")).interfaz, undefined);
   await mock.close();
   ws.cleanup();
 });
@@ -225,7 +227,7 @@ test("interfaz: Ctrl+F, doble clic, barra de desplazamiento, herramientas que se
   }
 });
 
-test("interfaz: /interfaz cambia a la compacta al momento, y a la clásica y de vuelta con la misma conversación", { skip: !hasExpect && "falta el programa expect" }, async () => {
+test("interfaz: /interfaz cambia al momento a la compacta, a la zen y de vuelta, con la misma conversación", { skip: !hasExpect && "falta el programa expect" }, async () => {
   const mock = await startMock(() => ({ text: "HOLA" }));
   const ws = tempWorkspace();
   ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
