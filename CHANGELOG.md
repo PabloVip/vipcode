@@ -4,6 +4,10 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Cambiado
+
+- Con `/new` (o `/clear`) se limpia la pantalla y se ve solo la conversación nueva, con la bienvenida arriba. Al cargar otra con `/sessions` se ve solo esa. Antes, la nueva o la cargada se quedaban debajo de lo anterior.
+
 ## [0.3.1] - 2026-10-31
 
 ### Arreglado

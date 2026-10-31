@@ -74,7 +74,7 @@ export interface CommandResult {
   // Cerrar y abrir la versión nueva en esta misma conversación (tras /update)
   restart?: boolean;
   run?: { input: UserInput; options: RunOptions };
-  // Se ha cargado otra sesión: la interfaz enseña su conversación
+  // Hay otra conversación (nueva o cargada): la interfaz la enseña a ella sola
   loaded?: boolean;
 }
 
@@ -1064,7 +1064,7 @@ export class App {
       case "/clear":
         this.newSession();
         ui.info("Sesión nueva.");
-        return {};
+        return { loaded: true };
       case "/sessions": {
         this.lastSessions = listSessions(this.root).slice(0, 30);
         if (this.lastSessions.length === 0) {

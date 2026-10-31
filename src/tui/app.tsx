@@ -636,10 +636,10 @@ function Main(props: { app: App; initial: string }) {
           await restart();
           return;
         }
-        tutorialStep(app.tutorialEvent({ kind: "command", text, agent: app.agent.agent.name }));
         if (result.loaded) {
-          replay(app.agent.session);
+          startOver(app.agent.session);
         }
+        tutorialStep(app.tutorialEvent({ kind: "command", text, agent: app.agent.agent.name }));
         if (result.run) {
           void runAgent({ ...result.run.input, images }, result.run.options);
         }
@@ -683,6 +683,17 @@ function Main(props: { app: App; initial: string }) {
       }
     }
     refresh();
+  };
+
+  // Otra conversación (/new, o una cargada con /sessions): se limpia la pantalla y se ve solo esa, con la bienvenida arriba
+  const startOver = (session: Session) => {
+    setItems([{ id: nextId.current++, kind: "banner" }]);
+    conversation.toBottom();
+    if (session.log.length > 0) {
+      replay(session);
+    } else {
+      push({ kind: "info", text: "Sesión nueva." });
+    }
   };
 
   // La conversación de una sesión a la que vuelves, tal como la viste

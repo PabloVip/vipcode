@@ -92,6 +92,18 @@ expect {
 }
 libre
 
+# 4. /new: se limpia la pantalla y se ve solo la conversación nueva, con la bienvenida arriba
+send "/new\r"
+expect {
+  "programa con IAs gratuitas" {}
+  timeout { falla "/new no vuelve a enseñar la bienvenida" }
+}
+expect {
+  -re {Sesi\S*n nueva} {}
+  timeout { falla "/new no dice que la sesión es nueva" }
+}
+libre
+
 send "/exit\r"
 expect {
   eof {}

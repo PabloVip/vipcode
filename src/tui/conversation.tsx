@@ -152,6 +152,13 @@ export function useConversation(props: {
         painted.current.set(item.id, { width, open, look: look.interface.id, lines: text === "" ? [] : text.split("\n") });
         changed = true;
       }
+      // Lo pintado de lo que ya no está en la conversación (tras /new) se olvida
+      const ids = new Set(itemsRef.current.map((item) => item.id));
+      for (const id of painted.current.keys()) {
+        if (!ids.has(id)) {
+          painted.current.delete(id);
+        }
+      }
       if (changed) {
         setPaintedCount((count) => count + 1);
       }
