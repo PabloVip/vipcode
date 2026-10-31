@@ -10,7 +10,7 @@ import { configNotices, loadConfig } from "./config.js";
 import { isImagePath, toDataUrl } from "./images.js";
 import { doctorReport } from "./doctor.js";
 import { limitsReport } from "./limits.js";
-import { REPO_URL, VERSION } from "./meta.js";
+import { LEGAL_NOTICE, REPO_URL, VERSION } from "./meta.js";
 import { NoSlotError } from "./router.js";
 import { appendHistory, exportMarkdown, listSessions, loadSession, saveExport } from "./session.js";
 import { showLine } from "./sanitize.js";
@@ -90,6 +90,8 @@ function helpText(): string {
     "",
     "Atajos: Enter envía · Alt+Enter o \\ al final = nueva línea · Tab cambia de agente · Esc interrumpe",
     "        Ctrl+C dos veces sale · @ruta adjunta ficheros e imágenes · Ctrl+V pega una imagen",
+    "",
+    LEGAL_NOTICE,
   );
   return lines.join("\n");
 }

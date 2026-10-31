@@ -21,7 +21,7 @@
     "type": "git",
     "url": "git+https://github.com/PabloVip/vipcode.git"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "author": "Pablo Vicente Juan (https://github.com/PabloVip)",
   "type": "module",
   "bin": {

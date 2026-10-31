@@ -11,7 +11,7 @@ import { isRemoteSession, loginOpenRouter, openBrowser } from "./login.js";
 import { limitsReport, providerName, quotaFor } from "./limits.js";
 import { LspManager } from "./lsp.js";
 import { McpManager } from "./mcp.js";
-import { VERSION } from "./meta.js";
+import { LEGAL_NOTICE, VERSION } from "./meta.js";
 import { AUTH_PATH, HOME_DIR, NOTICES_PATH, STATE_PATH, ensureHomeDir } from "./paths.js";
 import { type PermissionReply, type PermissionRequest, SessionGrants, createAsker, permissionsFor, riskyGitConfig } from "./permissions.js";
 import { Ranking, loadRankingData, rankingKey, refreshRanking } from "./ranking.js";
@@ -642,6 +642,7 @@ export class App {
     } else {
       lines.push(row("Copiar", "selecciona con el ratón y Cmd+C (Mac), Ctrl+Shift+C (Linux) o Ctrl+C (Windows Terminal) · /copiar"));
     }
+    lines.push("", pc.dim(LEGAL_NOTICE));
     return lines.join("\n");
   }
 

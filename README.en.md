@@ -1,6 +1,6 @@
 # vipcode
 
-[![npm](https://img.shields.io/npm/v/vipcode.svg)](https://www.npmjs.com/package/vipcode) [![Tests](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) · [Español](README.md)
+[![npm](https://img.shields.io/npm/v/vipcode.svg)](https://www.npmjs.com/package/vipcode) [![Tests](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![AGPL-3.0 License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE) · [Español](README.md)
 
 A coding agent for your terminal (command `vipcode`) that only uses **free AI models** and **automatically switches provider** when one runs out. The interface and messages are in Spanish.
 
@@ -51,4 +51,8 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-[MIT](LICENSE) © Pablo Vicente Juan. Model ranking with data by LLM Stats (llm-stats.com). The full documentation (in Spanish) is in [README.md](README.md).
+[AGPL-3.0 or later](LICENSE) · Copyright © 2026 Pablo Vicente Juan. Model ranking with data by LLM Stats (llm-stats.com). The full documentation (in Spanish) is in [README.md](README.md).
+
+In short: you can use vipcode for anything, including at work, and change it for yourself. If you publish a modified version, or offer it as a service over a network, you must also publish its source code under this same license. Up to version 0.3.2, vipcode was released under the MIT license.
+
+**The name.** The license covers the code, not the name “vipcode”. You can use the code, change it and publish your own version, but give it a different name and don't present it as vipcode or as the official version. The official one is this repository and the `vipcode` package on npm.

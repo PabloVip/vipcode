@@ -1,6 +1,6 @@
 # vipcode
 
-[![npm](https://img.shields.io/npm/v/vipcode.svg)](https://www.npmjs.com/package/vipcode) [![Pruebas](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![Licencia MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE) · [English](README.en.md)
+[![npm](https://img.shields.io/npm/v/vipcode.svg)](https://www.npmjs.com/package/vipcode) [![Pruebas](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![Licencia AGPL-3.0](https://img.shields.io/badge/licencia-AGPL--3.0-blue.svg)](LICENSE) · [English](README.en.md)
 
 Agente de programación para la terminal (comando `vipcode`) que solo usa **modelos gratuitos** y **rota automáticamente** entre proveedores cuando uno se agota.
 
@@ -274,4 +274,8 @@ Si encuentras un fallo de seguridad, avísalo en privado como explica [SECURITY.
 
 ## Licencia
 
-[MIT](LICENSE) © Pablo Vicente Juan. Ranking de modelos con datos de LLM Stats (llm-stats.com).
+[AGPL-3.0 o posterior](LICENSE) · Copyright © 2026 Pablo Vicente Juan. Ranking de modelos con datos de LLM Stats (llm-stats.com).
+
+En pocas palabras: puedes usar vipcode para lo que quieras, también en el trabajo, y cambiarlo para ti. Si publicas una versión modificada, o la ofreces como servicio por internet, tienes que publicar también su código con esta misma licencia. Hasta la versión 0.3.2, vipcode se publicó con licencia MIT.
+
+**El nombre.** La licencia cubre el código, no el nombre «vipcode». Puedes usar el código, cambiarlo y publicar tu propia versión, pero ponle otro nombre y no la presentes como vipcode ni como la versión oficial. La oficial es la de este repositorio y el paquete `vipcode` de npm.
