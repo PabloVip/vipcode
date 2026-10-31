@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.3.5] - 2026-10-31
+
 ### Corregido
 
 - Cuando todo un proveedor deja de responder (por ejemplo, el plan gratis de NVIDIA saturado), vipcode ya no espera 40 segundos con cada uno de sus modelos ni enseña un aviso por cada uno: si dos modelos distintos del mismo proveedor no contestan en pocos minutos, pausa el proveedor entero 5 minutos y sigue enseguida con otros. Si solo falla un modelo, sigue pausándose solo ese.
@@ -291,7 +293,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.3.4...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/PabloVip/vipcode/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/PabloVip/vipcode/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/PabloVip/vipcode/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/PabloVip/vipcode/compare/v0.3.1...v0.3.2
