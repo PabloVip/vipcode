@@ -366,6 +366,13 @@ interface RouterState {
   recent?: Record<string, number[]>;
   // Lo que suele tardar cada modelo en empezar a contestar
   speed?: Record<string, { ms: number; at: number }>;
+  // Tokens que cuentan los proveedores por cada uno de los que calcula estimateTokens
+  tokenFactor?: number;
+}
+
+// Entre lo que cuentan los proveedores y lo que calculamos no hay más diferencia que esta (un dato raro no la dispara)
+function clampFactor(value: number): number {
+  return Math.min(2.5, Math.max(0.85, value));
 }
 
 function utcDay(time = Date.now()): string {
@@ -454,6 +461,10 @@ export class Router {
   recent: Record<string, number[]> = {};
   // Lo que suele tardar cada modelo en empezar a contestar (media en la que pesa más lo último)
   speed: Record<string, { ms: number; at: number }> = {};
+  // Cuántos tokens cuentan de verdad los proveedores por cada uno de los que calculamos: estimateTokens va por caracteres
+  // y el código, por ejemplo, gasta más tokens por carácter que el texto. Media en la que pesa más lo último; null hasta
+  // la primera respuesta que lo diga
+  tokenFactor: number | null = null;
   // Slots descartados durante esta ejecución (clave mala…)
   skipped = new Set<string>();
   // Si no es null, se usa ese slot primero
@@ -569,6 +580,7 @@ export class Router {
       this.limits = data.limits || {};
       this.recent = data.recent || {};
       this.speed = data.speed || {};
+      this.tokenFactor = typeof data.tokenFactor === "number" && Number.isFinite(data.tokenFactor) ? clampFactor(data.tokenFactor) : null;
     } catch {
       this.cooldowns = {};
       this.unsupported = {};
@@ -612,6 +624,7 @@ export class Router {
         limits: this.limits,
         recent: this.recent,
         speed: this.speed,
+        tokenFactor: this.tokenFactor ?? undefined,
       };
       writeFileAtomic(STATE_PATH, JSON.stringify(state, null, 2));
     } catch {
@@ -651,6 +664,27 @@ export class Router {
     if (entry && usage) {
       entry.tokens += usage.prompt + usage.completion;
     }
+  }
+
+  // Aprende cuánto se queda corto (o se pasa) estimateTokens con lo que cuenta el proveedor de una petición. Solo con las
+  // que tienen un tamaño suficiente (en las pequeñas pesa mucho lo que añade cada proveedor por su cuenta) y sin
+  // imágenes (cada proveedor las cuenta a su manera)
+  private learnTokens(estimated: number, usage: Usage | null, messages: ChatCompletionMessageParam[]) {
+    if (!usage || !(usage.prompt > 0) || estimated < 1500 || hasImages(messages)) {
+      return;
+    }
+    const ratio = clampFactor(usage.prompt / estimated);
+    this.tokenFactor = this.tokenFactor === null ? ratio : clampFactor(this.tokenFactor * 0.7 + ratio * 0.3);
+  }
+
+  // Por cuánto hay que multiplicar lo que calcula estimateTokens para tener lo que cuentan los proveedores
+  tokenScale(): number {
+    return this.tokenFactor ?? 1;
+  }
+
+  // El contexto de un modelo en las unidades de estimateTokens: así se compara con lo que se calcula de una petición
+  private effectiveContext(slot: Slot): number {
+    return Math.floor(slot.model.context / this.tokenScale());
   }
 
   // Cuánto ha tardado en empezar a contestar (o lo que se le esperó si no llegó a empezar)
@@ -749,7 +783,7 @@ export class Router {
       if (needsTools && slot.model.tools === false) {
         return false;
       }
-      return slot.model.context >= estTokens;
+      return this.effectiveContext(slot) >= estTokens;
     });
     // Los que suelen tardar mucho en empezar a contestar, detrás (sin cambiar el orden de los demás)
     const slow = list.filter((slot) => this.slowStart(slot, now) !== null);
@@ -772,7 +806,7 @@ export class Router {
     const now = Date.now();
     let soonest = Infinity;
     for (const slot of this.slots) {
-      if (this.skipped.has(slot.key) || excluded.has(slot.key) || slot.model.context < estTokens) {
+      if (this.skipped.has(slot.key) || excluded.has(slot.key) || this.effectiveContext(slot) < estTokens) {
         continue;
       }
       if ((needsVision && !slot.model.vision) || (needsTools && slot.model.tools === false)) {
@@ -789,12 +823,23 @@ export class Router {
     return soonest;
   }
 
-  maxContext(): number {
-    let max = 0;
+  // Los modelos que se pueden usar para una petición (sin los descartados, los que no tienen soporte ni, si hacen falta
+  // herramientas, los que no las admiten): su contexto (en las unidades de estimateTokens, para compararlo con lo que se
+  // calcula) y cuánto falta para que vuelvan si están en pausa (0 si ya están libres)
+  contextOptions(needsTools = false): { key: string; context: number; waitMs: number }[] {
     const now = Date.now();
-    for (const slot of this.slots) {
-      if (!this.skipped.has(slot.key) && (this.unsupported[slot.key] || 0) <= now && slot.model.context > max) {
-        max = slot.model.context;
+    return this.slots
+      .filter((slot) => !this.skipped.has(slot.key) && (this.unsupported[slot.key] || 0) <= now && !(needsTools && slot.model.tools === false))
+      .map((slot) => ({ key: slot.key, context: this.effectiveContext(slot), waitMs: Math.max(0, (this.cooldowns[slot.key] || 0) - now) }));
+  }
+
+  // El contexto más grande entre los modelos libres ahora mismo (en las unidades de estimateTokens): los que están en
+  // pausa no cuentan
+  maxContext(needsTools = false): number {
+    let max = 0;
+    for (const option of this.contextOptions(needsTools)) {
+      if (option.waitMs === 0 && option.context > max) {
+        max = option.context;
       }
     }
     return max;
@@ -838,10 +883,10 @@ export class Router {
         }
         // Solo es que la conversación es demasiado larga si no cabe en ninguno; si cabe, es que todos han fallado (cada
         // uno ha dicho por qué en su aviso)
-        const fits = this.slots.some((slot) => slot.model.context >= estTokens && !(needsTools && slot.model.tools === false));
+        const fits = this.slots.some((slot) => this.effectiveContext(slot) >= estTokens && !(needsTools && slot.model.tools === false));
         let reason = "Todos los proveedores están agotados o en pausa.";
         if (!fits) {
-          reason = `Ningún modelo admite una conversación de ~${estTokens} tokens. Usa /compact o /new.`;
+          reason = `Ningún modelo admite una conversación de ~${Math.round(estTokens * this.tokenScale())} tokens. Usa /compact o /new.`;
         } else if (wait === Infinity) {
           reason = "Ningún modelo ha podido contestar: arriba está lo que ha fallado en cada uno (/models dice cómo está cada uno).";
         } else if (wait > 0) {
@@ -868,6 +913,7 @@ export class Router {
         }
         this.lastSlot = slot;
         this.countTokens(slot, result.usage);
+        this.learnTokens(estTokens, result.usage, messages);
         this.saveState();
         return { ...result, slot };
       } catch (err) {

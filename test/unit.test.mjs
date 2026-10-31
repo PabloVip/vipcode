@@ -437,6 +437,121 @@ test("tokens: las imágenes no cuentan como texto enorme", () => {
   assert.match(JSON.stringify(stripped), /imagen omitida/);
 });
 
+test("contexto: la vista resumida no rompe parejas de herramientas, recorta solo en la copia y el resumen caduca si cambia lo que cubre", async () => {
+  const { badSummary, buildView, digest, hashMessages, planView, prunedCopy, summaryMessage, transcript, validSummary } = await import("../dist/context.js");
+  // Cada «tool» detrás de la llamada de su «assistant», y cada llamada con su respuesta
+  const checkPairs = (messages) => {
+    messages.forEach((message, index) => {
+      if (message.role === "tool") {
+        let j = index - 1;
+        while (j >= 0 && messages[j].role === "tool") {
+          j--;
+        }
+        assert.ok(j >= 0 && messages[j].tool_calls?.some((call) => call.id === message.tool_call_id), `«tool» sin su llamada en ${index}`);
+      }
+      for (const call of message.tool_calls || []) {
+        const answers = [];
+        for (let j = index + 1; j < messages.length && messages[j].role === "tool"; j++) {
+          answers.push(messages[j].tool_call_id);
+        }
+        assert.ok(answers.includes(call.id), `llamada ${call.id} sin respuesta en ${index}`);
+      }
+    });
+  };
+  // Doce turnos: la persona pide, el asistente llama a herramientas (a veces a varias a la vez) y contesta
+  const messages = [];
+  let id = 0;
+  for (let turn = 0; turn < 12; turn++) {
+    messages.push({ role: "user", content: `petición ${turn} ${"p".repeat(200)}` });
+    for (let step = 0; step <= turn % 3; step++) {
+      const calls = Array.from({ length: ((turn + step) % 2) + 1 }, () => ({ id: `id${id++}`, type: "function", function: { name: "read_file", arguments: "{}" } }));
+      messages.push({ role: "assistant", content: "", tool_calls: calls });
+      for (const call of calls) {
+        messages.push({ role: "tool", tool_call_id: call.id, content: "s".repeat(300 + ((id * 977) % 2500)) });
+      }
+    }
+    messages.push({ role: "assistant", content: `hecho ${turn}` });
+  }
+  const original = JSON.stringify(messages);
+  for (let budget = 600; budget <= 9000; budget += 200) {
+    const plan = planView(messages, budget, null, 0);
+    assert.ok(plan, `sin plan para ${budget}`);
+    assert.notEqual(messages[plan.start].role, "tool");
+    assert.deepEqual(plan.fold, [0, plan.start]);
+    const view = buildView(messages, plan.start, budget, "RESUMEN", {});
+    assert.ok(view, `sin vista para ${budget}`);
+    checkPairs(view);
+    assert.ok(router.estimateTokens(view) <= budget, `${budget}: la vista ocupa ${router.estimateTokens(view)}`);
+    // Primero el resumen (de la persona) y luego algo del asistente: los papeles se alternan
+    assert.equal(view[0].role, "user");
+    assert.equal(view[1].role, "assistant");
+  }
+  // Con un resumen guardado que cubre los primeros mensajes, si cabe con lo de detrás se usa tal cual
+  const covers = messages.findIndex((message, index) => index > 20 && message.role === "user");
+  const saved = { text: "R", covers, hash: hashMessages(messages, covers) };
+  assert.deepEqual(planView(messages, 100000, saved, 50), { start: covers, fold: null });
+  // Si no cabe, se resume desde donde llegaba (nunca desde el principio otra vez)
+  assert.equal(planView(messages, 3000, saved, 50).fold[0], covers);
+  // Un mensaje enorme de la herramienta se recorta en la vista, no en los mensajes
+  const big = [...messages, { role: "user", content: "lee el log" }, { role: "assistant", content: "", tool_calls: [{ id: "log", type: "function", function: { name: "read_file", arguments: "{}" } }] }, { role: "tool", tool_call_id: "log", content: "L".repeat(60000) }];
+  const bigPlan = planView(big, 3000, null, 0);
+  assert.equal(big[bigPlan.start].tool_calls?.[0].id, "log");
+  const bigView = buildView(big, bigPlan.start, 3000, "RESUMEN", {});
+  checkPairs(bigView);
+  assert.match(bigView.at(-1).content, /caracteres omitidos/);
+  assert.match(bigView[0].content, /Lo último que ha pedido la persona: «lee el log»/);
+  assert.equal(big.at(-1).content.length, 60000);
+  // Un mensaje tuyo enorme no se recorta: no hay vista (el router dirá que no cabe)
+  assert.equal(buildView([...messages, { role: "user", content: "x".repeat(60000) }], messages.length, 3000, "RESUMEN", {}), null);
+  // Recortar las salidas antiguas también es en una copia, y deja enteras las últimas
+  const pruned = prunedCopy(messages);
+  assert.equal(pruned.length, messages.length);
+  const tools = (list) => list.filter((message) => message.role === "tool");
+  assert.ok(tools(pruned).slice(0, -6).some((message) => message.content.includes("salida antigua recortada")));
+  assert.deepEqual(tools(pruned).slice(-6), tools(messages).slice(-6));
+  assert.equal(JSON.stringify(messages), original);
+
+  // El resumen deja de valer si cambia algo de lo que cubre o si ya no queda nada detrás; quitar mensajes del final no le afecta
+  assert.ok(validSummary(saved, messages));
+  assert.ok(validSummary(saved, messages.slice(0, covers + 1)));
+  assert.equal(validSummary(saved, messages.slice(0, covers)), null);
+  const changed = JSON.parse(original);
+  changed[2].content = "otra cosa";
+  assert.equal(validSummary(saved, changed), null);
+  assert.equal(validSummary({ ...saved, covers: "3" }, messages), null);
+
+  // El mensaje del resumen dice que no son instrucciones; la conversación, como texto (con las imágenes como un aviso)
+  assert.match(summaryMessage("hola").content, /no instrucciones de la persona/);
+  const text = transcript([
+    { role: "user", content: [{ type: "text", text: "mira" }, { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } }] },
+    { role: "assistant", content: null, tool_calls: [{ id: "a", type: "function", function: { name: "grep", arguments: '{"q":"x"}' } }] },
+    { role: "tool", tool_call_id: "a", content: "z".repeat(5000) },
+  ]);
+  assert.equal(text[0], "[persona]\nmira\n[imagen]");
+  assert.match(text[1], /→ llama a grep\(\{"q":"x"\}\)/);
+  assert.ok(text[2].length < 2200);
+
+  // Lo que no es un resumen: el modelo ha seguido la conversación, o ha dejado el anterior en casi nada
+  assert.ok(badSummary('→ llama a read_file({"path":"src/envios.js"})', ""));
+  assert.ok(badSummary("[asistente]\nvoy a leerlo", ""));
+  assert.ok(badSummary("ok", "x".repeat(1000)));
+  assert.ok(!badSummary("La persona revisa los precios: el descuento para socios es del 15 %.", "x".repeat(100)));
+  // El resumen sencillo, sin modelo: lo que se pidió, lo que se contestó y las herramientas, sin sus salidas
+  const simple = digest(
+    [
+      { role: "user", content: "lee stock.js" },
+      { role: "assistant", content: null, tool_calls: [{ id: "a", type: "function", function: { name: "read_file", arguments: '{"path":"src/stock.js"}' } }] },
+      { role: "tool", tool_call_id: "a", content: "SALIDA-ENORME".repeat(100) },
+      { role: "assistant", content: "El umbral de reposición es 12." },
+    ],
+    2000,
+  );
+  assert.match(simple, /La persona pidió: lee stock\.js/);
+  assert.match(simple, /Usó read_file\(\{"path":"src\/stock\.js"\}\)/);
+  assert.match(simple, /El asistente contestó: El umbral de reposición es 12\./);
+  assert.ok(!simple.includes("SALIDA-ENORME"));
+});
+
 test("editor del cuadro de texto", () => {
   let state = editor.insert(editor.EMPTY, "hola mundo");
   state = editor.moveLeft(state, true);

@@ -185,26 +185,212 @@ test("mensajes escritos mientras trabaja: se le entregan al acabar el paso", asy
   ws.cleanup();
 });
 
-test("resumen automático cuando la conversación no cabe", async () => {
-  const mock = await startMock(({ body }) => {
-    const text = lastUserText(body);
-    if (text.includes("Summarize this conversation")) {
-      return { text: "RESUMEN: el usuario leyó grande.txt" };
+// Cada «tool» va detrás de la llamada de su «assistant» y cada llamada tiene su respuesta
+function checkPairs(messages) {
+  messages.forEach((message, index) => {
+    if (message.role === "tool") {
+      let j = index - 1;
+      while (j >= 0 && messages[j].role === "tool") {
+        j--;
+      }
+      assert.ok(j >= 0 && messages[j].role === "assistant" && (messages[j].tool_calls || []).some((call) => call.id === message.tool_call_id), `«tool» sin su llamada en la posición ${index}`);
     }
-    if (lastMessage(body).role === "user" && text.startsWith("lee")) {
-      return { tools: [{ name: "read_file", args: { path: "grande.txt" } }] };
+    if (message.role === "assistant" && message.tool_calls?.length) {
+      const answers = [];
+      for (let j = index + 1; j < messages.length && messages[j].role === "tool"; j++) {
+        answers.push(messages[j].tool_call_id);
+      }
+      for (const call of message.tool_calls) {
+        assert.ok(answers.includes(call.id), `llamada ${call.id} sin respuesta en la posición ${index}`);
+      }
     }
-    return { text: `vale (${body.messages.length} mensajes)` };
   });
-  const ws = tempWorkspace({ "grande.txt": "palabra ".repeat(6000) });
-  const { app, events } = makeApp(ws, mock.url, { autoCompactTokens: 7000 });
-  await app.runPrompt({ text: "lee grande.txt" }, {});
-  assert.equal(app.agent.session.messages.length, 4);
-  await app.runPrompt({ text: "sigue" }, {});
-  assert.ok(mock.chats().some((r) => lastUserText(r.body).includes("Summarize this conversation")));
-  assert.match(contentText(app.agent.session.messages[0].content), /RESUMEN: el usuario leyó grande\.txt/);
-  assert.equal(app.agent.session.epoch, 1);
-  assert.ok(events.infos.some((m) => m.includes("Conversación resumida")));
+}
+
+test("contexto: si la conversación no cabe en ningún modelo libre, al pequeño le llega un resumen y los últimos mensajes, sin tocar el historial", async () => {
+  // Un modelo grande (100k) y uno pequeño (8k); el grande se puede «agotar» (429 durante una hora)
+  let grandeDown = false;
+  let summaries = 0;
+  const mock = await startMock(({ path: url, body }) => {
+    if (url.startsWith("/ctxgrande/") && grandeDown) {
+      return { status: 429, headers: { "retry-after": "3600" }, json: { error: { message: "Rate limit exceeded" } } };
+    }
+    if (contentText(body.messages[0].content).includes("handover summaries")) {
+      summaries++;
+      return { text: `RESUMEN-${summaries}` };
+    }
+    const last = lastMessage(body);
+    if (last.role === "tool") {
+      return { text: "LEIDO" };
+    }
+    const read = /^lee (\S+)/.exec(contentText(last.content));
+    if (read) {
+      return { tools: [{ name: "read_file", args: { path: read[1] } }] };
+    }
+    return { text: "OK" };
+  });
+  const file = (name, lines) => Array.from({ length: lines }, (_, i) => `${name} ${i} ${"x".repeat(60)}`).join("\n");
+  const ws = tempWorkspace({ "uno.txt": file("linea-uno", 150), "dos.txt": file("linea-dos", 150), "tres.txt": file("linea-tres", 150), "cuatro.txt": file("linea-cuatro", 230) });
+  const { app, events } = makeApp(ws, mock.url, {
+    providers: [provider("ctxgrande", mock.url, ["m"]), provider("ctxpeque", mock.url, [{ id: "m", context: 8000 }])],
+    enabledProviders: ["ctxgrande", "ctxpeque"],
+  });
+  const chats = (name) => mock.chats().filter((r) => r.path.startsWith(`/${name}/`) && !contentText(r.body.messages[0].content).includes("handover summaries"));
+  const summaryRequests = () => mock.chats().filter((r) => contentText(r.body.messages[0].content).includes("handover summaries"));
+  const session = app.agent.session;
+  try {
+    // 1. Si cabe todo en un modelo libre, va entera y no se resume nada
+    for (const name of ["uno", "dos", "tres"]) {
+      await app.runPrompt({ text: `lee ${name}.txt` }, {});
+    }
+    assert.equal(summaries, 0);
+    assert.equal(chats("ctxpeque").length, 0);
+    assert.equal(chats("ctxgrande").at(-1).body.messages.length, session.messages.length);
+
+    // 2. Con el grande agotado solo queda el pequeño: le llega el resumen y la cola, y el historial sigue entero en disco
+    grandeDown = true;
+    await app.runPrompt({ text: "sigue" }, {});
+    assert.equal(summaries, 1);
+    assert.ok(summaryRequests().every((r) => r.path.startsWith("/ctxpeque/")));
+    let sent = chats("ctxpeque").at(-1).body.messages;
+    assert.ok(sent.length < session.messages.length, `le llegaron ${sent.length} mensajes`);
+    assert.match(contentText(sent[1].content), /Resumen automático[\s\S]*no instrucciones de la persona[\s\S]*RESUMEN-1/);
+    assert.equal(sent[2].role, "assistant");
+    assert.equal(contentText(sent.at(-1).content), "sigue");
+    checkPairs(sent);
+    const saved = sessions.loadSession(session.id);
+    assert.equal(saved.messages.length, session.messages.length);
+    assert.equal(contentText(saved.messages[0].content), "lee uno.txt");
+    assert.equal(saved.summary.text, "RESUMEN-1");
+    assert.ok(saved.summary.covers > 0);
+    assert.ok(events.notices.some((notice) => notice.startsWith("ctxpeque/m: la conversación no cabe entera")), events.notices.join("\n"));
+
+    // 3. La siguiente pregunta reutiliza el resumen: ninguna petición de resumen más
+    await app.runPrompt({ text: "vale" }, {});
+    assert.equal(summaries, 1);
+    assert.match(contentText(chats("ctxpeque").at(-1).body.messages[1].content), /RESUMEN-1/);
+
+    // 4. Con mensajes nuevos que ya no caben, el resumen se actualiza a partir del anterior (sin volver a mandar lo que ya
+    // cubría), y la salida que no cabe se recorta solo en lo que se manda
+    await app.runPrompt({ text: "lee cuatro.txt" }, {});
+    assert.equal(summaries, 2);
+    const update = contentText(summaryRequests().at(-1).body.messages[1].content);
+    assert.match(update, /## Resumen anterior\s+RESUMEN-1/);
+    assert.match(update, /## Mensajes nuevos[\s\S]*lee cuatro\.txt/);
+    assert.ok(!update.includes("lee uno.txt"));
+    sent = chats("ctxpeque").at(-1).body.messages;
+    checkPairs(sent);
+    assert.match(contentText(sent.at(-1).content), /caracteres omitidos/);
+    assert.match(contentText(sent[1].content), /RESUMEN-2[\s\S]*Lo último que ha pedido la persona: «lee cuatro\.txt»/);
+    const output = session.messages.findLast((message) => message.role === "tool");
+    assert.ok(!output.content.includes("caracteres omitidos") && output.content.includes("linea-cuatro 229"));
+
+    // 5. Cuando vuelve el grande, le llega otra vez el historial entero
+    grandeDown = false;
+    app.router.resetCooldowns();
+    await app.runPrompt({ text: "ya" }, {});
+    sent = chats("ctxgrande").at(-1).body.messages;
+    assert.equal(sent.length, session.messages.length);
+    assert.equal(contentText(sent[1].content), "lee uno.txt");
+    assert.ok(JSON.stringify(sent).includes("linea-cuatro 125"));
+    assert.equal(summaries, 2);
+
+    // 6. Si se deshace lo que cubría el resumen, ya no vale: se hace otro desde el principio
+    while (session.messages.length >= session.summary.covers) {
+      await app.agent.undo();
+    }
+    grandeDown = true;
+    await app.runPrompt({ text: "otra vez" }, {});
+    assert.equal(summaries, 3);
+    const fresh = contentText(summaryRequests().at(-1).body.messages[1].content);
+    assert.ok(!fresh.includes("## Resumen anterior"));
+    assert.match(fresh, /lee uno\.txt/);
+  } finally {
+    app.router.resetCooldowns();
+    await app.shutdown();
+    await mock.close();
+    ws.cleanup();
+  }
+});
+
+test("contexto: si el modelo no da un resumen de verdad, se pide otra vez y, si tampoco, se hace uno sencillo sin perder el anterior", async () => {
+  const { hashMessages } = await import("../dist/context.js");
+  let mode = "siempre";
+  const summaryBodies = [];
+  const mock = await startMock(({ body }) => {
+    if (contentText(body.messages[0].content).includes("handover summaries")) {
+      summaryBodies.push(contentText(body.messages[1].content));
+      // Como pasó con un modelo de verdad: en vez de resumir, sigue la conversación
+      if (mode === "siempre" || summaryBodies.length === 1) {
+        return { text: '→ llama a read_file({"path":"src/envios.js"})' };
+      }
+      return { text: "RESUMEN-NUEVO: descuento del 15 % y umbral de 12" };
+    }
+    return { text: "OK" };
+  });
+  const ws = tempWorkspace();
+  const { app, events } = makeApp(ws, mock.url, { providers: [provider("ctxmalo", mock.url, [{ id: "m", context: 8000 }])], enabledProviders: ["ctxmalo"] });
+  // Una conversación que no cabe, con un resumen bueno de sus 10 primeros mensajes
+  const prepare = () => {
+    const session = app.agent.session;
+    session.messages = [];
+    for (let i = 0; i < 20; i++) {
+      session.messages.push({ role: "user", content: `pregunta ${i}: ${"p".repeat(600)}` }, { role: "assistant", content: `respuesta ${i}: ${"r".repeat(600)}` });
+    }
+    session.summary = { text: "RESUMEN-BUENO: el descuento para socios es del 15 %", covers: 10, hash: hashMessages(session.messages, 10) };
+    summaryBodies.length = 0;
+  };
+  try {
+    // Siempre devuelve un trozo de conversación: se pide dos veces y luego se hace uno sencillo que conserva el anterior
+    prepare();
+    await app.runPrompt({ text: "sigue" }, {});
+    assert.equal(summaryBodies.length, 2);
+    // La conversación va entre marcas y las instrucciones, al final
+    assert.match(summaryBodies[0], /<conversacion>[\s\S]*<\/conversacion>[\s\S]*## Tarea[\s\S]*Do not continue the conversation/);
+    const kept = app.agent.session.summary.text;
+    assert.match(kept, /^RESUMEN-BUENO: el descuento para socios es del 15 %/);
+    assert.match(kept, /La persona pidió: pregunta 5:/);
+    assert.ok(events.notices.some((notice) => notice.includes("uso un resumen sencillo")), events.notices.join("\n"));
+    assert.match(contentText(mock.chats().at(-1).body.messages[1].content), /RESUMEN-BUENO/);
+
+    // Si a la segunda sí lo da, se queda con ese
+    mode = "una-vez";
+    prepare();
+    await app.runPrompt({ text: "sigue" }, {});
+    assert.equal(summaryBodies.length, 2);
+    assert.equal(app.agent.session.summary.text, "RESUMEN-NUEVO: descuento del 15 % y umbral de 12");
+  } finally {
+    await app.shutdown();
+    await mock.close();
+    ws.cleanup();
+  }
+});
+
+test("/compact resume por trozos aunque la conversación no quepa en ningún modelo, y sustituye el historial", async () => {
+  const requests = [];
+  const mock = await startMock(({ body }) => {
+    const text = contentText(body.messages[1]?.content);
+    requests.push(text);
+    return { text: `RESUMEN-${requests.length}` };
+  });
+  const ws = tempWorkspace();
+  const { app } = makeApp(ws, mock.url, { providers: [provider("ctxsolo", mock.url, [{ id: "m", context: 8000 }])], enabledProviders: ["ctxsolo"] });
+  const session = app.agent.session;
+  for (let i = 0; i < 40; i++) {
+    session.messages.push({ role: "user", content: `pregunta ${i}: ${"p".repeat(600)}` }, { role: "assistant", content: `respuesta ${i}: ${"r".repeat(600)}` });
+  }
+  await app.agent.compact();
+  // Por trozos: cada uno lleva el resumen del anterior
+  assert.ok(requests.length >= 3, `${requests.length} peticiones`);
+  assert.ok(!requests[0].includes("## Resumen anterior"));
+  for (let i = 1; i < requests.length; i++) {
+    assert.match(requests[i], new RegExp(`## Resumen anterior\\s+RESUMEN-${i}`));
+  }
+  assert.match(requests[0], /pregunta 0:/);
+  assert.match(requests.at(-1), /respuesta 39:/);
+  assert.equal(session.messages.length, 2);
+  assert.match(contentText(session.messages[0].content), new RegExp(`RESUMEN-${requests.length}$`));
+  assert.equal(session.epoch, 1);
   await app.shutdown();
   await mock.close();
   ws.cleanup();

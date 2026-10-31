@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import type { ContextSummary } from "./context.js";
 import { toolLabel } from "./labels.js";
 import { EXPORTS_DIR, HISTORY_PATH, SESSIONS_DIR, ensureHomeDir, writeFileAtomic } from "./paths.js";
 import { type Todo, describeCall } from "./tools.js";
@@ -45,6 +46,9 @@ export interface Session {
   usage: { prompt: number; completion: number };
   agent?: string;
   log: LogEntry[];
+  // Resumen de los primeros mensajes para los modelos en los que la conversación no cabe entera (src/context.ts). Los
+  // mensajes siguen enteros en «messages»
+  summary?: ContextSummary;
 }
 
 export function newSession(cwd: string): Session {
@@ -151,6 +155,7 @@ function normalize(data: Partial<Session>): Session {
     usage: data.usage || { prompt: 0, completion: 0 },
     agent: data.agent,
     log: Array.isArray(data.log) ? data.log : logFromMessages(messages, data.updated || Date.now()),
+    summary: data.summary && typeof data.summary.text === "string" && typeof data.summary.hash === "string" ? data.summary : undefined,
   };
 }
 

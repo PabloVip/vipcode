@@ -207,6 +207,31 @@ test("uso de tokens, razonamiento y orden de prioridad del config", async () => 
   ws.cleanup();
 });
 
+test("tokens: aprende cuántos cuentan de verdad los proveedores y ya no manda a un modelo lo que no le cabe", async () => {
+  const { estimateTokens } = await import("../dist/router.js");
+  // Los proveedores dicen que cada petición ocupa el doble de lo que calcula vipcode (como pasa con mucho código)
+  const mock = await startMock(({ body }) => ({
+    text: `soy ${body.model}`,
+    usage: { prompt_tokens: Math.round((estimateTokens(body.messages) + estimateTokens(body.tools || [])) * 2), completion_tokens: 3 },
+  }));
+  const ws = tempWorkspace();
+  ws.writeConfig({
+    providers: [provider("tokcorto", mock.url, [{ id: "corto", context: 5000 }]), provider("toklargo", mock.url, [{ id: "largo", context: 100000 }])],
+    enabledProviders: ["tokcorto", "toklargo"],
+  });
+  const prompt = `resume esto: ${"palabra ".repeat(625)}`;
+  // La primera vez cabe en el corto según lo que calcula vipcode, y va a él (es el primero)
+  let result = await runVip(["run", prompt], { cwd: ws.proj, home: ws.home });
+  assert.match(result.output, /soy corto/, result.output);
+  assert.ok(Math.abs(state(ws).tokenFactor - 2) < 0.05, String(state(ws).tokenFactor));
+  // La siguiente (otra ejecución: lo aprendido se guarda) ya sabe que en el corto no cabe de verdad
+  result = await runVip(["run", prompt], { cwd: ws.proj, home: ws.home });
+  assert.match(result.output, /soy largo/, result.output);
+  assert.equal(mock.chats().filter((r) => r.body.model === "corto").length, 1);
+  await mock.close();
+  ws.cleanup();
+});
+
 test("bucle: si repite la misma llamada 3 veces se le avisa", async () => {
   const mock = await startMock(({ body }) => {
     const text = lastUserText(body);

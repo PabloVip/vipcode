@@ -4,6 +4,16 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Cambiado
+
+- **Conversaciones largas con modelos de poco contexto.** Cuando la conversación no cabe entera en ningún modelo libre, al que queda con más contexto le llega un resumen de lo anterior y los últimos mensajes tal cual, pero la conversación ya no se sustituye por el resumen: si vuelve un modelo en el que cabe entera, la recibe entera. El resumen se guarda con la sesión y se reutiliza, y cuando hace falta se actualiza solo con lo nuevo, así que no gasta peticiones de más. Si el modelo no devuelve un resumen de verdad (alguno sigue la conversación en vez de resumirla), se le pide otra vez y, si tampoco, vipcode hace uno sencillo con lo que se pidió y se contestó, sin perder nunca el resumen anterior. Se avisa cuando un modelo recibe la versión resumida. `/compact` sí sigue sustituyendo la conversación por el resumen, porque lo pides tú.
+
+### Corregido
+
+- vipcode ya no se queda esperando o falla con «Todos los proveedores están agotados o en pausa» cuando el único modelo en el que cabía la conversación (por ejemplo Gemini) se queda sin cupo y quedan otros más pequeños libres: ahora sigue con ellos.
+- `/compact` ya funciona aunque la conversación no quepa en ningún modelo disponible: la resume por trozos.
+- vipcode calculaba lo que ocupa la conversación por el número de caracteres, y con código se quedaba corto (en una prueba, 6.500 tokens donde el proveedor contaba 9.400): a un modelo pequeño le podía mandar algo que no le cabía. Ahora ajusta el cálculo con lo que dicen los proveedores en cada respuesta, y lo recuerda para la próxima vez.
+
 ## [0.3.3] - 2026-10-31
 
 ### Cambiado
