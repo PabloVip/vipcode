@@ -636,6 +636,8 @@ export class App {
         row("Ctrl+F", "busca en la conversación (Enter o ↑ la anterior, ↓ la siguiente, Esc cierra)"),
         row("Copiar", "arrastra con el ratón y se copia al soltar; doble clic, una palabra; triple, la línea · /copiar"),
         row("Clic en una herramienta", "despliega su salida entera (otro clic la pliega)"),
+        row("Clic en un enlace", "lo abre en el navegador; en un /comando, lo escribe en la caja"),
+        row("Clic en «y más» · «↓ N líneas»", "despliega las novedades enteras · baja al final de la conversación"),
       );
     } else {
       lines.push(row("Copiar", "selecciona con el ratón y Cmd+C (Mac), Ctrl+Shift+C (Linux) o Ctrl+C (Windows Terminal) · /copiar"));

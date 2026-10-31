@@ -318,12 +318,13 @@ function classify(err: unknown): Classified {
     return { kind: "unsupported", retryAfterMs: DAY_MS, detail: "modelo no disponible o sin soporte de herramientas" };
   }
   if (status >= 500 || /overloaded|unavailable|timeout|timed out|econnreset|socket hang up|bad gateway|dejó de responder/.test(lower)) {
-    // 503 es que está saturado (le llegan demasiadas peticiones), no que se haya roto: se dice así, que no alarme
-    let detail = status ? `error del servidor (${status})` : "el servidor no responde";
-    if (status === 503 || /overloaded/.test(lower)) {
-      detail = `saturado${status ? ` (${status})` : ""}`;
+    // 503 es que está saturado (le llegan demasiadas peticiones), no que se haya roto: se dice así, que no alarme. Un pico
+    // de demanda dura minutos (Gemini 3.8 Flash tardaba 90 s en contestar «12:15» o devolvía 503): a los 30 s volvería
+    // a fallar, así que se deja más rato y mientras se usan otros
+    if (status === 503 || /overloaded|high demand/.test(lower)) {
+      return { kind: "server", retryAfterMs: retryAfterMs || 120000, detail: `saturado${status ? ` (${status})` : ""}` };
     }
-    return { kind: "server", retryAfterMs: 30000, detail };
+    return { kind: "server", retryAfterMs: 30000, detail: status ? `error del servidor (${status})` : "el servidor no responde" };
   }
   if (/respuesta vacía/.test(lower)) {
     return { kind: "other", retryAfterMs: 0, detail: "respuesta vacía" };

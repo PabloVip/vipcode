@@ -1,0 +1,81 @@
+# Clics en la conversación: un enlace se abre en el navegador y un /comando se escribe en la caja (lo lanza
+# test/tui.test.mjs, con un navegador de prueba que apunta lo que abre)
+set timeout 30
+log_user 1
+set cli [lindex $argv 0]
+# Con la pantalla completa cada repintado ocupa varios KB: con el búfer de serie (2.000 bytes), expect tiraría lo de
+# arriba de la pantalla antes de buscar en ello
+match_max -d 200000
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+# Espera sin dejar de leer la pantalla: con sleep, la salida de la pseudo-terminal se llena (en macOS enseguida, con la
+# pantalla completa repintándose) y vipcode se queda parado escribiendo, sin atender al teclado
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
+proc libre {} {
+  expect {
+    "Escribe tu mensaje" {}
+    timeout { falla "no vuelve a quedar libre" }
+  }
+}
+
+spawn -noecho node $cli
+stty rows 30 columns 100 < $spawn_out(slave,name)
+libre
+send "enlace\r"
+expect {
+  "para empezar" {}
+  timeout { falla "no contesta" }
+}
+libre
+pausa 0.5
+
+# 1. Un clic en el enlace (columna 10 de la respuesta «● Mira https://…»; la fila se va probando) lo abre en el navegador
+set encontrada 0
+for {set fila 8} {$fila <= 22 && !$encontrada} {incr fila} {
+  send "\033\[<0;10;${fila}M\033\[<0;10;${fila}m"
+  expect {
+    -timeout 1
+    "Abriendo ejemplo.com" { set encontrada $fila }
+    timeout {}
+  }
+}
+if {!$encontrada} {
+  falla "un clic en el enlace no lo abre en el navegador"
+}
+
+# 2. En esa misma línea, un clic en /new lo escribe en la caja, y con Enter empieza otra conversación
+pausa 0.5
+send "\033\[<0;46;${encontrada}M\033\[<0;46;${encontrada}m"
+expect {
+  "en la caja" {}
+  timeout { falla "un clic en /new no lo escribe en la caja" }
+}
+send "\r"
+expect {
+  -re {Sesi\S*n nueva} {}
+  timeout { falla "el /new escrito con el clic no empieza otra conversación" }
+}
+libre
+
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-CLICS-OK"
+exit 0

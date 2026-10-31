@@ -921,10 +921,10 @@ test("velocidad: a un proveedor que suele tardar en empezar (Gemini) se le esper
   ws.cleanup();
 });
 
-test("un modelo saturado (503) se dice así, no como un error, y se pasa a otro", async () => {
+test("un modelo saturado (503) se dice así, no como un error, se deja un rato y se pasa a otro", async () => {
   const mock = await startMock(({ path: url }) => {
     if (url.startsWith("/lleno/")) {
-      return { status: 503, json: { error: { code: 503, message: "The model is overloaded. Please try again later.", status: "UNAVAILABLE" } } };
+      return { status: 503, json: { error: { code: 503, message: "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.", status: "UNAVAILABLE" } } };
     }
     if (url.startsWith("/roto/")) {
       return { status: 500, json: { error: { message: "Internal error" } } };
@@ -938,7 +938,8 @@ test("un modelo saturado (503) se dice así, no como un error, y se pasa a otro"
   });
   await app.runPrompt({ text: "hola" }, {});
   assert.match(events.text, /OTRO/);
-  assert.ok(events.notices.includes("lleno/m: saturado (503) → pausa 30 s"), events.notices.join("\n"));
+  // Un pico de demanda dura minutos: se deja 2 min (a los 30 s volvería a fallar)
+  assert.ok(events.notices.includes("lleno/m: saturado (503) → pausa 2 min"), events.notices.join("\n"));
   assert.ok(events.notices.includes("roto/m: error del servidor (500) → pausa 30 s"), events.notices.join("\n"));
   await app.shutdown();
   await mock.close();

@@ -1265,6 +1265,40 @@ test("tutorial: la carpeta de prácticas no pisa nada tuyo y cada paso avanza co
   fs.rmSync(outside);
 });
 
+test("clics: enlaces (también partidos en dos líneas), /comandos y novedades que se despliegan", async () => {
+  const mouse = await import("../dist/tui/mouse.js");
+  const long = "https://ejemplo.com/una/direccion/muy/larga/que/no/cabe/final";
+  const lines = ["Mira https://ejemplo.com/pagina o escribe /new.", `Y una larga: ${long.slice(0, 30)}`, `${long.slice(30)} y sigue`];
+  const sources = mouse.urlsIn(`Mira https://ejemplo.com/pagina o escribe /new.\nY una larga: ${long} y sigue`);
+  assert.equal(mouse.urlAt(lines, 0, 8, sources), "https://ejemplo.com/pagina");
+  // Partida en dos líneas: pinchando en cualquiera de los trozos se abre entera
+  assert.equal(mouse.urlAt(lines, 1, 15, sources), long);
+  assert.equal(mouse.urlAt(lines, 2, 3, sources), long);
+  // Lo que no es un enlace no abre nada
+  assert.equal(mouse.urlAt(lines, 0, 1, sources), null);
+  assert.equal(mouse.urlAt(lines, 2, lines[2].indexOf("sigue") + 1, sources), null);
+  // Solo direcciones web: con un clic nunca se abre otra cosa que haya escrito un modelo
+  assert.equal(mouse.urlAt(["javascript:alert(1)"], 0, 3, []), null);
+  assert.equal(mouse.urlAt(["file:///etc/passwd"], 0, 3, []), null);
+  // Solo los /comandos que existen
+  assert.equal(mouse.commandAt("escribe /update para instalarla", 10, ["update", "new"]), "/update");
+  assert.equal(mouse.commandAt("(/new empieza otra conversación)", 3, ["update", "new"]), "/new");
+  assert.equal(mouse.commandAt("en /Users/pablo/notas", 5, ["update", "new"]), null);
+  assert.equal(mouse.commandAt("escribe /update para instalarla", 2, ["update", "new"]), null);
+
+  // Las novedades: plegadas enseñan lo primero y «y más … clic aquí para verlo»; desplegadas, todo y «plegarlo»
+  const { ItemView } = await import("../dist/tui/items.js");
+  const { renderToString } = await import("ink");
+  const { createElement } = await import("react");
+  const news = { id: 1, kind: "news", version: "9.9.9", security: false, markdown: Array.from({ length: 30 }, (_, i) => `- punto ${i + 1}`).join("\n") };
+  const folded = renderToString(createElement(ItemView, { item: news, app: {}, width: 80, fold: "folded" }), { columns: 80 });
+  const open = renderToString(createElement(ItemView, { item: news, app: {}, width: 80, fold: "open" }), { columns: 80 });
+  assert.match(folded, /… y más en CHANGELOG\.md · clic aquí para verlo/);
+  assert.ok(!folded.includes("punto 30"));
+  assert.match(open, /punto 30/);
+  assert.match(open, /▴ clic aquí para plegarlo/);
+});
+
 test("ratón: la rueda, pulsar, arrastrar y soltar, y el texto seleccionado sin colores", async () => {
   const mouse = await import("../dist/tui/mouse.js");
   // El botón derecho (2) no cuenta

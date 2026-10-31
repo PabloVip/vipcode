@@ -104,7 +104,27 @@ expect {
   timeout { falla "la herramienta desplegada no enseña toda su salida" }
 }
 
-# 5. Ctrl+Fin vuelve al final
+# 5. Arriba, la última línea de la conversación dice cuánto queda por debajo («↓ N líneas más»): un clic en ella baja al
+# final (la fila se va probando)
+set abajo 0
+for {set fila 21} {$fila <= 27 && !$abajo} {incr fila} {
+  send "\033\[<0;5;${fila}M\033\[<0;5;${fila}m"
+  expect {
+    -timeout 1
+    "LINEA-80" { set abajo 1 }
+    timeout {}
+  }
+}
+if {!$abajo} {
+  falla "un clic en «↓ N líneas más» no baja al final"
+}
+
+# 6. Ctrl+Inicio lleva al principio y Ctrl+Fin vuelve al final
+send "\033\[1;5H"
+expect {
+  "programa con IAs gratuitas" {}
+  timeout { falla "Ctrl+Inicio no lleva al principio" }
+}
 send "\033\[1;5F"
 expect {
   "LINEA-80" {}

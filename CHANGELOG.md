@@ -4,8 +4,19 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- Más cosas que se pueden pinchar con el ratón en la conversación:
+  - **un enlace** se abre en el navegador, también si no cabía en una línea y está partido en dos (solo direcciones web);
+  - **un comando** que sale en el texto (por ejemplo `/update` en el aviso de versión nueva, o cualquiera de `/help`) queda escrito en la caja, listo para pulsar Enter;
+  - **«y más en CHANGELOG.md»** despliega las novedades enteras ahí mismo, y otro clic las pliega;
+  - **«↓ N líneas más»** baja al final de la conversación.
+
+  Abajo sale un aviso de lo que se ha hecho («Abriendo ejemplo.com en el navegador»), que ya no desaparece por falta de sitio.
+
 ### Cambiado
 
+- Un modelo saturado (error 503 de «mucha demanda») se deja en pausa 2 minutos, no 30 s: un pico de demanda dura minutos y a los 30 s volvía a fallar. Mientras, vipcode usa otros modelos.
 - Con `/new` (o `/clear`) se limpia la pantalla y se ve solo la conversación nueva, con la bienvenida arriba. Al cargar otra con `/sessions` se ve solo esa. Antes, la nueva o la cargada se quedaban debajo de lo anterior.
 
 ## [0.3.1] - 2026-10-31

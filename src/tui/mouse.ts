@@ -105,3 +105,55 @@ export function wordAt(line: string, col: number): [number, number] | null {
 export function lineColumns(line: string): [number, number] {
   return [0, stringWidth(stripControl(line).replace(/\s+$/, ""))];
 }
+
+// Las direcciones de un texto (para encontrar entera la que no cabía en una línea y sigue en la de abajo)
+export function urlsIn(text: string): string[] {
+  return [...stripControl(text).matchAll(/https?:\/\/[^\s<>()[\]{}"'`|\\^]+/gi)].map((match) => match[0].replace(/[.,:;!?]+$/, ""));
+}
+
+// Solo direcciones web: un modelo podría escribir otra cosa (file:, javascript:…) que no queremos abrir con un clic
+function webUrl(text: string): string | null {
+  try {
+    const url = new URL(text);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// La palabra (sin colores) que hay en esa columna de la línea
+function tokenAt(line: string, col: number): string {
+  const range = wordAt(line, col);
+  if (!range) {
+    return "";
+  }
+  return sliceAnsi(stripControl(line), range[0], range[1]);
+}
+
+// El enlace que hay en esa columna de las líneas de un mensaje («sources»: las direcciones enteras del mensaje). Si no
+// cabía en una línea, sirve pinchar en cualquiera de los dos trozos
+export function urlAt(lines: string[], line: number, col: number, sources: string[]): string | null {
+  const token = tokenAt(lines[line] || "", col);
+  if (!token) {
+    return null;
+  }
+  let prefix = token;
+  if (!/^https?:\/\//i.test(token)) {
+    // ¿El final de una dirección que empieza al final de la línea de arriba?
+    const above = stripControl(lines[line - 1] || "").trimEnd().split(/\s+/).pop() || "";
+    const first = stripControl(lines[line] || "").trimStart().split(/\s+/)[0] || "";
+    if (!/^https?:\/\//i.test(above) || first !== token) {
+      return null;
+    }
+    prefix = above + token;
+  }
+  const exact = sources.find((url) => url === prefix);
+  const longer = sources.filter((url) => url.startsWith(prefix));
+  return webUrl(exact || (longer.length === 1 ? longer[0] : prefix));
+}
+
+// El /comando que hay en esa columna, si es uno de los que existen («/update», «/connect»…)
+export function commandAt(line: string, col: number, names: string[]): string | null {
+  const token = tokenAt(line, col);
+  return token.startsWith("/") && names.includes(token.slice(1)) ? token : null;
+}

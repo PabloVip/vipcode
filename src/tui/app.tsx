@@ -305,7 +305,8 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
     () => (fit.score = false),
     () => (fit.name = 1),
     () => (fit.name = 2),
-    () => (fit.hint = 0),
+    // Un aviso de un momento («✓ copiado», «Abriendo… en el navegador») no se quita: se recorta lo de la izquierda
+    () => (fit.hint = props.flash ? fit.hint : 0),
     () => (fit.gauge = warning),
     () => (fit.who = false),
   ];
@@ -371,7 +372,17 @@ function Main(props: { app: App; initial: string }) {
   const side = layout
     ? { width: layout.width, render: (height: number) => <CreaturePanel creature={creature} busy={busy} layout={layout} height={height} />, onClick: pokeCreature }
     : null;
-  const conversation = useConversation({ app, items, columns, rows, dialog, interfaceId, side });
+  // Un clic en un /comando que sale en la conversación (por ejemplo «/update») lo deja escrito en la caja
+  const conversation = useConversation({
+    app,
+    items,
+    columns,
+    rows,
+    dialog,
+    interfaceId,
+    side,
+    onCommand: (command) => setEditor({ value: `${command} `, cursor: command.length + 1 }),
+  });
   const [attachments, setAttachments] = useState<string[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
   const [suggestionsClosed, setSuggestionsClosed] = useState(false);

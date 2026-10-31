@@ -5,9 +5,10 @@ import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "rea
 import sliceAnsi from "slice-ansi";
 import type { App } from "../app.js";
 import { copyToClipboard } from "../clipboard.js";
+import { openBrowser } from "../login.js";
 import { stripControl } from "../sanitize.js";
-import { type Item, ItemView } from "./items.js";
-import { MOUSE_OFF, MOUSE_ON, type TextPos, lineColumns, mouseEvents, selectedColumns, selectedText, wordAt } from "./mouse.js";
+import { type Item, ItemView, itemText } from "./items.js";
+import { MOUSE_OFF, MOUSE_ON, type TextPos, commandAt, lineColumns, mouseEvents, selectedColumns, selectedText, urlAt, urlsIn, wordAt } from "./mouse.js";
 import { type Match, findMatches, scrollThumb } from "./view.js";
 import { look } from "./theme.js";
 
@@ -70,8 +71,12 @@ export function useConversation(props: {
   // Un panel a la derecha de la conversación (el de la interfaz Criaturas), que le quita ese ancho: cómo se pinta con el
   // alto que tiene y qué hacer si lo pinchas
   side?: { width: number; render: (height: number) => ReactNode; onClick: () => void } | null;
+  // Un clic en un /comando del texto: se escribe en la caja
+  onCommand?: (command: string) => void;
 }): Conversation {
   const { app, items, rows, dialog, interfaceId, side } = props;
+  const onCommandRef = useRef(props.onCommand);
+  onCommandRef.current = props.onCommand;
   // El ancho de la conversación, con su barra de desplazamiento
   const columns = props.columns - (side?.width ?? 0);
   const dialogRef = useRef(dialog);
@@ -89,7 +94,7 @@ export function useConversation(props: {
   // que se ve ahora (para saber qué línea hay bajo el ratón)
   const [selection, setSelection] = useState<{ from: TextPos; to: TextPos } | null>(null);
   const dragStart = useRef<TextPos | null>(null);
-  const view = useRef({ lines: [] as string[], owners: [] as { id: number; first: boolean }[], top: 0, height: 1, bar: false });
+  const view = useRef({ lines: [] as string[], owners: [] as { id: number; first: boolean }[], top: 0, height: 1, bar: false, more: false });
   // Herramientas desplegadas con un clic, Ctrl+F (lo que se busca y cuál de las coincidencias es la actual; -1, la última)
   // y los clics seguidos (doble clic: palabra; triple: línea)
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -144,7 +149,7 @@ export function useConversation(props: {
         }
         const text = renderToString(
           <Box width={width} flexDirection="column">
-            <ItemView item={item} app={app} width={width} fold={item.kind === "tool" ? (open ? "open" : "folded") : undefined} />
+            <ItemView item={item} app={app} width={width} fold={item.kind === "tool" || item.kind === "news" ? (open ? "open" : "folded") : undefined} />
           </Box>,
           { columns: width },
         );
@@ -194,7 +199,10 @@ export function useConversation(props: {
   const maxTop = Math.max(0, historyLines.length - viewHeight);
   const top = scrollTop === null ? maxTop : Math.min(scrollTop, maxTop);
   const thumb = scrollThumb(historyLines.length, viewHeight, top);
-  view.current = { lines: historyLines, owners: history.owners, top, height: viewHeight, bar: thumb !== null };
+  // Cuánto queda por debajo de lo que se ve (si has subido, la última línea lo dice y se puede pinchar para bajar)
+  const below = historyLines.length - (top + viewHeight);
+  const more = scrollTop !== null && below > 0;
+  view.current = { lines: historyLines, owners: history.owners, top, height: viewHeight, bar: thumb !== null, more };
 
   // Un mensaje que se tiene que ver desde su principio (las novedades al abrir una versión nueva: si no, con lo que llega
   // después solo se vería su final). Se coloca arriba en cuanto está pintado, y desde ahí se baja como siempre
@@ -327,20 +335,13 @@ export function useConversation(props: {
           dragStart.current = null;
           if (start.line === pos.line && start.col === pos.col) {
             setSelection(null);
-            // Un clic en la primera línea de una herramienta despliega (o pliega) su salida; se espera un momento por si
-            // es un doble clic
-            const owner = owners[pos.line];
-            if (owner?.first && itemsRef.current.find((item) => item.id === owner.id)?.kind === "tool") {
+            // Lo que hace un clic (sin arrastrar) depende de dónde: se espera un momento por si es un doble clic
+            const action = clickAction(pos, event.y);
+            if (action) {
               clearTimeout(pendingToggle.current ?? undefined);
               pendingToggle.current = setTimeout(() => {
                 pendingToggle.current = null;
-                setExpanded((previous) => {
-                  const next = new Set(previous);
-                  if (!next.delete(owner.id)) {
-                    next.add(owner.id);
-                  }
-                  return next;
-                });
+                action();
               }, 300);
             }
             continue;
@@ -350,6 +351,56 @@ export function useConversation(props: {
         }
       }
     };
+    // Lo que se puede pinchar: la última línea si has subido («↓ N líneas más», baja al final), la primera línea de una
+    // herramienta y «y más» de las novedades (las despliegan o las pliegan), un enlace (se abre en el navegador) y un
+    // /comando (se escribe en la caja)
+    const clickAction = (pos: TextPos, y: number): (() => void) | null => {
+      const { lines, owners, height, more } = view.current;
+      if (more && y === height - 1) {
+        return () => setScrollTop(null);
+      }
+      const owner = owners[pos.line];
+      const item = owner ? itemsRef.current.find((entry) => entry.id === owner.id) : undefined;
+      if (!owner || !item) {
+        return null;
+      }
+      const plain = stripControl(lines[pos.line] || "");
+      if ((item.kind === "tool" && owner.first) || (item.kind === "news" && /clic aquí para (verlo|plegarlo)/.test(plain))) {
+        return () =>
+          setExpanded((previous) => {
+            const next = new Set(previous);
+            if (!next.delete(owner.id)) {
+              next.add(owner.id);
+            }
+            return next;
+          });
+      }
+      // Las líneas de ese mensaje: una dirección que no cabía puede seguir en la de abajo
+      let first = pos.line;
+      while (first > 0 && owners[first - 1]?.id === owner.id) {
+        first--;
+      }
+      let last = pos.line;
+      while (last + 1 < owners.length && owners[last + 1]?.id === owner.id) {
+        last++;
+      }
+      const url = urlAt(lines.slice(first, last + 1), pos.line - first, pos.col, urlsIn(itemText(item)));
+      if (url) {
+        return () => {
+          openBrowser(url);
+          showFlash(`Abriendo ${new URL(url).host} en el navegador`);
+        };
+      }
+      const command = commandAt(lines[pos.line] || "", pos.col, app.commandSuggestions().map((entry) => entry.name));
+      if (command && onCommandRef.current) {
+        return () => {
+          onCommandRef.current?.(command);
+          showFlash(`${command} en la caja: pulsa Enter`);
+        };
+      }
+      return null;
+    };
+
     const stdin = process.stdin;
     const read = stdin.read;
     stdin.read = ((size?: number) => {
@@ -418,9 +469,8 @@ export function useConversation(props: {
     }
     return out;
   });
-  const below = historyLines.length - (top + viewHeight);
-  if (scrollTop !== null && below > 0) {
-    visible = [...visible.slice(0, -1), pc.dim(`↓ ${below} líneas más · rueda del ratón o AvPág para bajar`)];
+  if (more) {
+    visible = [...visible.slice(0, -1), pc.dim(`↓ ${below} líneas más · clic aquí, rueda del ratón o AvPág para bajar`)];
   }
   const viewport = (
     <Box ref={historyRef} flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">

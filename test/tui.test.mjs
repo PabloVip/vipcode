@@ -227,6 +227,24 @@ test("interfaz: Ctrl+F, doble clic, barra de desplazamiento, herramientas que se
   }
 });
 
+test("interfaz: un clic en un enlace lo abre en el navegador, y en un /comando lo escribe en la caja", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const mock = await startMock(() => ({ text: "Mira https://ejemplo.com/pagina o escribe /new para empezar." }));
+  const ws = tempWorkspace();
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  // Un navegador de prueba que solo apunta lo que se le pide abrir
+  const log = path.join(ws.dir, "navegador.log");
+  const browser = `"${process.execPath}" "${path.join(ROOT, "test", "fixtures", "fake-browser.mjs")}"`;
+  try {
+    const result = await runExpect("tui-clics.exp", ws, { VIPCODE_BROWSER: browser, VIPCODE_TEST_BROWSER_LOG: log });
+    assert.equal(result.code, 0, result.plain.slice(-3000));
+    assert.match(result.plain, /TUI-CLICS-OK/);
+    assert.equal(fs.readFileSync(log, "utf8").trim(), "https://ejemplo.com/pagina");
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
+});
+
 test("interfaz: /interfaz cambia al momento a la compacta, a la zen y de vuelta, con la misma conversación", { skip: !hasExpect && "falta el programa expect" }, async () => {
   const mock = await startMock(() => ({ text: "HOLA" }));
   const ws = tempWorkspace();

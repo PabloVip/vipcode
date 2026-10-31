@@ -35,6 +35,28 @@ type WithoutId<T> = T extends unknown ? Omit<T, "id"> : never;
 
 export type NewItem = WithoutId<Item>;
 
+// El texto de un mensaje tal cual llegó (para encontrar entera una dirección que se ha partido al pintarla)
+export function itemText(item: Item): string {
+  switch (item.kind) {
+    case "user":
+    case "assistant":
+    case "info":
+    case "notice":
+    case "error":
+    case "block":
+    case "tutorial":
+      return item.text;
+    case "news":
+      return item.markdown;
+    case "tool":
+      return `${item.event.summary}\n${item.event.output || ""}\n${item.event.display || ""}`;
+    case "shell":
+      return `${item.command}\n${item.output}`;
+    default:
+      return "";
+  }
+}
+
 export function formatDuration(ms: number): string {
   if (ms < 1000) {
     return "<1 s";
@@ -396,8 +418,10 @@ export function ItemView(props: { item: Item; app: App; width: number; fold?: "f
       );
     }
     case "news": {
+      // En pantalla completa, un clic en «y más» las enseña enteras («fold»), y otro las pliega
       const lines = renderMarkdown(item.markdown, Math.max(20, width - 6)).split("\n");
-      const shown = lines.slice(0, 18);
+      const open = props.fold === "open";
+      const shown = open ? lines : lines.slice(0, 18);
       const tone = item.security ? "yellow" : "cyan";
       return (
         <Box marginY={look.gap} flexDirection="column" borderStyle="round" borderColor={tone} paddingX={2}>
@@ -406,7 +430,7 @@ export function ItemView(props: { item: Item; app: App; width: number; fold?: "f
             {item.security ? " · trae arreglos de seguridad" : ""}
           </Text>
           <Text>{shown.join("\n")}</Text>
-          {lines.length > shown.length ? <Text dimColor>… y más en CHANGELOG.md</Text> : null}
+          {lines.length > 18 ? <Text dimColor>{open ? "▴ clic aquí para plegarlo" : "… y más en CHANGELOG.md · clic aquí para verlo"}</Text> : null}
         </Box>
       );
     }
