@@ -2,7 +2,8 @@ name: Vigilancia de proveedores
 
 # Cada día comprueba que los modelos del catálogo siguen existiendo y contestan (scripts/vigilar.mjs). Si alguno falla,
 # abre un aviso (issue) con la etiqueta «vigilancia»; si sigue fallando lo actualiza, y lo cierra cuando todo funciona.
-# También se puede lanzar a mano desde la pestaña Actions.
+# Además tiene una conversación de verdad con los modelos gratis (scripts/prueba-real.mjs), con su propio aviso
+# («prueba-real»). También se puede lanzar a mano desde la pestaña Actions.
 on:
   schedule:
     - cron: "17 6 * * *"
@@ -52,3 +53,29 @@ jobs:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           UNOROUTER_API_KEY: ${{ secrets.UNOROUTER_API_KEY }}
         run: node scripts/vigilar.mjs --github
+
+  prueba-real:
+    name: Conversación real con los modelos gratis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # La prueba deja trabajar a modelos de fuera: que el token de GitHub no se quede guardado en la carpeta
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # Sin claves ni token: es la experiencia de quien acaba de instalar vipcode, y los modelos solo pueden leer y editar
+      # en una carpeta temporal
+      - name: Conversación de prueba
+        id: prueba
+        run: node scripts/prueba-real.mjs --out prueba-real.json
+      - name: Abrir, actualizar o cerrar el aviso
+        if: always() && (steps.prueba.outcome == 'success' || steps.prueba.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/prueba-real.mjs --github prueba-real.json

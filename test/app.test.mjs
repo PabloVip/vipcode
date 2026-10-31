@@ -1086,6 +1086,60 @@ test("vigilancia: dice qué modelos del catálogo ya no existen o no contestan, 
   await mock.close();
 });
 
+test("prueba real: qué se comprueba en cada paso, cuándo es un fallo y el informe (sin claves)", async () => {
+  const real = await import("../scripts/prueba-real.mjs");
+  const { redactSecrets } = await import("../dist/debug.js");
+  // El proyecto de prueba tiene los datos que luego se preguntan
+  const ws = tempWorkspace();
+  real.writeProject(ws.proj);
+  const envios = path.join(ws.proj, "src", "envios.js");
+  assert.match(fs.readFileSync(path.join(ws.proj, "src", "precios.js"), "utf8"), /DESCUENTO_SOCIOS = 0\.15/);
+  assert.match(fs.readFileSync(path.join(ws.proj, "src", "stock.js"), "utf8"), /UMBRAL_REPOSICION = 12/);
+  assert.match(fs.readFileSync(envios, "utf8"), /zona: "Canarias", coste: 18\.5, dias: 6/);
+  // Lo que tiene que salir en cada respuesta
+  const [descuento, umbral, canarias, memoria, editar] = real.STEPS;
+  assert.equal(descuento.check("El descuento para socios es del **15 %**."), null);
+  assert.ok(descuento.check("No lo sé"));
+  assert.equal(umbral.check("El umbral es de 12 unidades"), null);
+  assert.ok(umbral.check("El umbral es 120"));
+  assert.equal(canarias.check("Cuesta 18,50 € y tarda 6 días"), null);
+  assert.equal(canarias.check("18.5 € en 6 días"), null);
+  assert.ok(canarias.check("Cuesta 18 € y tarda 6 días"));
+  assert.equal(memoria.check("Descuento: 15 % · umbral: 12"), null);
+  assert.ok(memoria.check("No tengo esa información: solo he leído src/envios.js"));
+  assert.ok(editar.check("hecho", ws.proj));
+  fs.writeFileSync(envios, `// Revisado por vipcode\n${fs.readFileSync(envios, "utf8")}`);
+  assert.equal(editar.check("hecho", ws.proj), null);
+  ws.cleanup();
+
+  // Cuándo ha ido bien, cuándo es un fallo y cuándo no se ha podido probar
+  const step = (ok, problem = null) => ({ prompt: "p", ok, problem, answer: "", model: "kilo/m", tools: [], seconds: 3 });
+  const good = { steps: real.STEPS.map(() => step(true)), summarized: true, summary: "R", complete: true, tokenScale: 1.4, notices: [] };
+  assert.equal(real.judge(good), "bien");
+  assert.equal(real.judge({ ...good, summarized: false }), "fallo");
+  assert.equal(real.judge({ ...good, complete: false }), "fallo");
+  assert.equal(real.judge({ ...good, steps: [step(true), step(false, "no dice que el umbral de reposición es 12")] }), "fallo");
+  assert.equal(real.judge({ ...good, steps: [step(false, "Todos los proveedores están agotados o en pausa.")] }), "sin-modelos");
+  assert.equal(real.judge({ ...good, steps: [step(false, "no ha terminado en 4 minutos")] }), "sin-modelos");
+  assert.equal(real.judge(null), "fallo");
+  // La huella solo cambia si cambia lo que falla
+  assert.equal(real.fingerprint(good), real.fingerprint({ ...good, tokenScale: 2 }));
+  assert.notEqual(real.fingerprint(good), real.fingerprint({ ...good, summarized: false }));
+
+  // El informe es público: sin claves, y lo que escribe un modelo no puede romper el Markdown
+  const secret = "sk-or-v1-0123456789abcdef0123456789abcdef";
+  const failed = { ...good, attempt: 2, steps: [step(true), { ...step(false, "no dice que el umbral de reposición es 12"), answer: `mi clave es ${secret} \`\`\`fin` }] };
+  const report = real.renderReport(failed, { when: new Date("2026-11-01T06:17:00Z"), redact: redactSecrets });
+  assert.match(report, /## ✗ Algo ha salido mal/);
+  assert.match(report, /Paso 2: no dice que el umbral de reposición es 12/);
+  assert.match(report, /2026-11-01 06:17 UTC · intento 2 de 2/);
+  assert.match(report, /<!-- huella: \w+ -->/);
+  assert.ok(!report.includes(secret));
+  assert.ok(!report.includes("```fin"));
+  assert.match(real.renderReport(good), /## ✓ Todo bien/);
+  assert.match(real.renderReport(null), /no ha llegado a terminar/);
+});
+
 test("velocidad: a un proveedor que suele tardar en empezar (Gemini) se le espera más que al resto", async () => {
   // Los dos tardan 1 s en empezar a contestar; a «paciente» se le esperan 3 s, al otro lo de la config (0,3 s)
   const mock = await startMock(async ({ path: url }) => {
