@@ -271,6 +271,34 @@ test("descubrimiento: formatos de OpenRouter, Groq, Mistral y Gemini", () => {
   const gemini = CATALOG.find((p) => p.name === "gemini");
   const geminiModels = discovery.parseModels({ data: [{ id: "models/gemini-9-flash" }, { id: "models/gemini-9-flash-image" }, { id: "models/text-embedding" }] }, gemini);
   assert.deepEqual(geminiModels, [{ id: "gemini-9-flash", context: 250000, vision: false }]);
+  // Los Gemini 2.x ya no son para claves nuevas («no disponible»): ni en el catálogo ni al descubrir modelos, ni aunque
+  // estuvieran en los descubiertos con una versión anterior de vipcode
+  assert.ok(!gemini.models.some((model) => model.id.startsWith("gemini-2.")));
+  assert.deepEqual(discovery.parseModels({ data: [{ id: "models/gemini-2.5-pro" }, { id: "models/gemini-2.5-flash" }, { id: "models/gemini-3.9-flash" }] }, gemini).map((model) => model.id), ["gemini-3.9-flash"]);
+  // De Gemini solo los del plan gratis: su lista trae también de pago, preview y de imágenes, que contestan «no incluido»
+  const paid = ["gemini-pro-latest", "gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-3.1-pro-preview-customtools", "gemini-3.1-flash-lite-preview", "gemini-nano-banana-2.1", "gemini-omni-flash-preview", "gemini-omni-1.1-flash", "gemini-4-argon", "gemini-3.8-flash-tts", "gemini-3.8-live"];
+  const free = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-4-flash", "gemma-4-31b-it"];
+  assert.deepEqual(discovery.parseModels({ data: [...paid, ...free].map((id) => ({ id: `models/${id}` })) }, gemini).map((model) => model.id), free);
+  assert.ok(gemini.models.every((model) => new RegExp(gemini.modelFilter, "i").test(model.id)));
+  fs.writeFileSync(path.join(HOME, "models.json"), JSON.stringify({ updated: Date.now(), providers: { gemini: { updated: Date.now(), models: [{ id: "gemini-2.5-pro", context: 250000 }, { id: "gemini-3.9-flash", context: 250000 }] } } }));
+  const cached = discovery.buildProviders({ ...config.DEFAULT_CONFIG, enabledProviders: ["gemini"] })[0].models.map((model) => model.id);
+  fs.rmSync(path.join(HOME, "models.json"));
+  assert.ok(cached.includes("gemini-3.9-flash") && !cached.includes("gemini-2.5-pro"), cached.join(", "));
+  // ModelScope cambia de modelos a menudo: se descubren solos, pero solo los de las familias buenas para programar
+  const modelscope = CATALOG.find((p) => p.name === "modelscope");
+  const listed = ["Qwen/Qwen3.8-27B", "Qwen/Qwen-Image-Edit", "deepseek-ai/DeepSeek-V4.1-Flash", "ZhipuAI/GLM-5.2", "MiniMax/MiniMax-M3", "opencompass/CompassJudger-1-32B-Instruct", "XGenerationLab/XiYanSQL-QwenCoder-32B-2504", "MedAIBase/AntAngelMed", "PaddlePaddle/ERNIE-4.5-0.3B-PT"];
+  assert.deepEqual(
+    discovery.parseModels({ data: listed.map((id) => ({ id })) }, modelscope).map((model) => model.id),
+    ["Qwen/Qwen3.8-27B", "deepseek-ai/DeepSeek-V4.1-Flash", "ZhipuAI/GLM-5.2", "MiniMax/MiniMax-M3"],
+  );
+  assert.ok(modelscope.pruneMissing && modelscope.models.every((model) => discovery.parseModels({ data: [{ id: model.id }] }, modelscope).length === 1));
+  // Los Flash piensan en nivel bajo (con el de serie tardan tanto en empezar que parece que no contestan), y a Gemini se le
+  // espera más que al resto; los Flash-Lite y Gemma, con lo de serie
+  assert.equal(gemini.models.find((model) => model.id === "gemini-3.8-flash").reasoningEffort, "low");
+  assert.equal(gemini.models.find((model) => model.id === "gemini-3.5-flash").reasoningEffort, "low");
+  assert.equal(gemini.firstResponseMs, 60000);
+  assert.equal(gemini.models.find((model) => model.id === "gemini-3.5-flash-lite").reasoningEffort, undefined);
+  assert.equal(gemini.models.find((model) => model.id.startsWith("gemma-")).reasoningEffort, undefined);
 
   // OVHcloud lista también modelos de vectores, voz e imágenes (sin max_completion_tokens)
   const ovh = CATALOG.find((p) => p.name === "ovhcloud");
@@ -1170,6 +1198,11 @@ test("profe: enseña paso a paso y no puede cambiar nada; el consejo de Git en W
   const text = systemPrompt(os.tmpdir(), { agent: profe, toolNames: [], instructions: [] });
   assert.match(text, /TEACHER mode/);
   assert.ok(!/BUILD mode/.test(text));
+  // Con bash, cómo pasar un script de varias líneas sin que se rompan las comillas (python3 -c '…' con comillas dentro)
+  assert.ok(!text.includes("multi-line script"));
+  const programar = list.find((agent) => agent.name === "programar");
+  const building = systemPrompt(os.tmpdir(), { agent: programar, toolNames: ["bash"], instructions: [] });
+  assert.match(building, process.platform === "win32" ? /multi-line script.*(here-string|heredoc|write_file)/ : /multi-line script.*python3 - <<'EOF'/);
   // Git para Windows: solo en Windows, y solo si falta git o los comandos irían por PowerShell
   const { gitAdvice } = await import("../dist/doctor.js");
   assert.equal(gitAdvice("darwin", false, "bash", false), null);

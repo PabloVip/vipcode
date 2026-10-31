@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import pc from "picocolors";
 import { Agent, type UserInput } from "./agent.js";
@@ -23,7 +22,7 @@ import { cleanForClipboard, copyToClipboard, lastCodeBlock } from "./clipboard.j
 import { bugReportUrl, doctorReport, gitAdvice } from "./doctor.js";
 import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession, sessionMarkdownPath } from "./session.js";
 import { Snapshots } from "./snapshot.js";
-import { commandShell, findProgram, killTree } from "./shell.js";
+import { commandShell, findProgram, killTree, spawnGroup } from "./shell.js";
 import { type UpdateStep, compareVersions, updateVipcode } from "./update.js";
 import { type TutorialCard, type TutorialEvent, isTutorialDir, tutorialCard, tutorialDone } from "./tutorial.js";
 import { INTERFACES, interfaceFor } from "./interfaces.js";
@@ -1354,13 +1353,15 @@ export class App {
         const found = commandShell();
         shell = { file: found.file, args: found.args(command), env: found.env };
       }
-      const child = spawn(shell.file, shell.args, {
+      // En su propio grupo de procesos: al pararlo (Esc o si se pasa de tiempo) se para también todo lo que haya lanzado,
+      // por ejemplo el servidor de un «!npm run dev»
+      const child = spawnGroup(shell.file, shell.args, {
         cwd: this.root,
-        stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env, ...shell.env, GIT_PAGER: "cat", PAGER: "cat" },
         windowsHide: true,
       });
       let output = "";
+      let stopped = "";
       const add = (text: string) => {
         output += text;
         onOutput?.(text);
@@ -1370,9 +1371,13 @@ export class App {
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", add);
       child.stderr.on("data", add);
-      const stop = () => killTree(child);
-      const timer = setTimeout(stop, this.config.bashTimeoutMs);
-      signal?.addEventListener("abort", stop, { once: true });
+      const stop = (reason: string) => {
+        stopped = reason;
+        killTree(child);
+      };
+      const timer = setTimeout(() => stop(`cancelado por tiempo (${Math.round(this.config.bashTimeoutMs / 1000)} s)`), this.config.bashTimeoutMs);
+      const interrupt = () => stop("interrumpido");
+      signal?.addEventListener("abort", interrupt, { once: true });
       let done = false;
       const finish = (code: number | null) => {
         // "error" y "close" pueden llegar los dos
@@ -1381,8 +1386,11 @@ export class App {
         }
         done = true;
         clearTimeout(timer);
-        signal?.removeEventListener("abort", stop);
-        const clean = output.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").trimEnd();
+        signal?.removeEventListener("abort", interrupt);
+        let clean = output.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").trimEnd();
+        if (stopped) {
+          clean = `${clean}${clean ? "\n" : ""}(${stopped})`;
+        }
         this.agent.addNote(`(El usuario ha ejecutado en la terminal \`${command}\`, código de salida ${code ?? "desconocido"}:\n\`\`\`\n${truncate(clean, 8000)}\n\`\`\`)\n\n`);
         this.agent.logEntry({ role: "tool", text: truncate(clean, 4000), tool: { name: "bash", summary: `(tú) ${command}`, isError: code !== 0 } });
         saveSession(this.agent.session);

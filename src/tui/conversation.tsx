@@ -55,6 +55,8 @@ export interface Conversation {
   openSearch: () => void;
   // Abajo del todo, siguiendo lo que llega, y sin nada seleccionado (al escribir)
   toBottom: () => void;
+  // Que ese mensaje se vea desde su principio en cuanto esté pintado (si no cabe con lo que tiene debajo)
+  reveal: (id: number) => void;
 }
 
 export function useConversation(props: {
@@ -186,6 +188,21 @@ export function useConversation(props: {
   const top = scrollTop === null ? maxTop : Math.min(scrollTop, maxTop);
   const thumb = scrollThumb(historyLines.length, viewHeight, top);
   view.current = { lines: historyLines, owners: history.owners, top, height: viewHeight, bar: thumb !== null };
+
+  // Un mensaje que se tiene que ver desde su principio (las novedades al abrir una versión nueva: si no, con lo que llega
+  // después solo se vería su final). Se coloca arriba en cuanto está pintado, y desde ahí se baja como siempre
+  const pendingReveal = useRef<number | null>(null);
+  useEffect(() => {
+    const id = pendingReveal.current;
+    const first = id === null ? -1 : history.owners.findIndex((owner) => owner.id === id);
+    if (first < 0) {
+      return;
+    }
+    pendingReveal.current = null;
+    const { lines, height } = scrollState.current;
+    const max = Math.max(0, lines - height);
+    setScrollTop(first >= max ? null : first);
+  }, [history]);
 
   // Ctrl+F: las coincidencias y la actual (al cambiar lo buscado, la de más abajo)
   const matches = useMemo(() => (search ? findMatches(historyLines, search.query) : []), [historyLines, search?.query]);
@@ -434,6 +451,9 @@ export function useConversation(props: {
     toBottom: () => {
       setScrollTop(null);
       setSelection(null);
+    },
+    reveal: (id: number) => {
+      pendingReveal.current = id;
     },
   };
 }

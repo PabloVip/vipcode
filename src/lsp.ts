@@ -373,6 +373,8 @@ export class LspManager {
   private clients = new Map<string, Promise<LspClient | null>>();
   private specs: ServerSpec[] = [];
   private failed = new Map<string, string>();
+  // Cuántas veces se ha vuelto a arrancar cada servidor tras cerrarse
+  private restarts = new Map<string, number>();
 
   constructor(
     private root: string,
@@ -441,13 +443,17 @@ export class LspManager {
           if (!command) {
             continue;
           }
+          let started: LspClient | null = null;
           try {
-            const started = new LspClient(spec, command, this.root);
+            started = new LspClient(spec, command, this.root);
             const ready = started.initialize().then(() => started);
             this.clients.set(`id:${spec.id}`, ready.catch(() => null));
             await ready;
+            this.failed.delete(spec.id);
             return started;
           } catch (err) {
+            // Si no ha llegado a arrancar bien, que no se quede encendido gastando memoria
+            void started?.shutdown();
             this.failed.set(spec.id, (err as Error).message);
             debugLog("lsp arranque", spec.id, err);
           }
@@ -459,11 +465,28 @@ export class LspManager {
     return client;
   }
 
+  // Un servidor que se ha cerrado (por ejemplo, porque se ha quedado sin memoria) se vuelve a arrancar la próxima vez
+  // que haga falta, hasta 3 veces por sesión: si no, ya no habría errores de ese lenguaje hasta reiniciar vipcode
+  private forget(spec: ServerSpec): boolean {
+    const count = this.restarts.get(spec.id) || 0;
+    if (count >= 3) {
+      return false;
+    }
+    this.restarts.set(spec.id, count + 1);
+    for (const ext of spec.extensions) {
+      this.clients.delete(`ext:${ext}`);
+    }
+    return true;
+  }
+
   async diagnostics(file: string): Promise<Diagnostic[] | null> {
     if (!this.enabled() || !fs.existsSync(file)) {
       return null;
     }
-    const client = await this.clientFor(file);
+    let client = await this.clientFor(file);
+    if (client?.dead && this.forget(client.spec)) {
+      client = await this.clientFor(file);
+    }
     if (!client || client.dead) {
       return null;
     }

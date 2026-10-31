@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { ProviderConfig } from "./config.js";
+import { type ProviderConfig, configNotices, jsonProblem } from "./config.js";
 import { AUTH_PATH, ensureHomeDir, writeFileAtomic } from "./paths.js";
 
 // Lo que guarda "vipcode auth login" para cada proveedor
@@ -18,16 +18,45 @@ export interface Credentials {
   source: "config" | "auth" | "env" | "sin clave";
 }
 
-export function readAuth(): AuthFile {
+// Lo que hay en auth.json, y si está roto (por ejemplo, editado a mano con un error), por qué
+function loadAuth(): { data: AuthFile; broken: string | null } {
+  let text: string;
   try {
-    const data = JSON.parse(fs.readFileSync(AUTH_PATH, "utf8"));
-    if (data && typeof data === "object") {
-      return data as AuthFile;
-    }
+    text = fs.readFileSync(AUTH_PATH, "utf8");
   } catch {
     // sin fichero todavía
+    return { data: {}, broken: null };
   }
-  return {};
+  try {
+    const data = JSON.parse(text);
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      return { data: data as AuthFile, broken: null };
+    }
+    return { data: {}, broken: "no es un objeto JSON" };
+  } catch (err) {
+    return { data: {}, broken: jsonProblem(err) };
+  }
+}
+
+export function readAuth(): AuthFile {
+  const { data, broken } = loadAuth();
+  if (broken) {
+    // Sin las claves guardadas vipcode sigue funcionando (con las IAs sin registro), pero que no pase desapercibido
+    const notice = `No puedo leer ${AUTH_PATH} (${broken}): las claves guardadas no se usan. Arréglalo, o bórralo y vuelve a conectar tus cuentas con /connect.`;
+    if (!configNotices.includes(notice)) {
+      configNotices.push(notice);
+    }
+  }
+  return data;
+}
+
+// Para cambiarlo hay que poder leerlo: si está roto no se sobrescribe, que se perderían las demás claves
+function editableAuth(): AuthFile {
+  const { data, broken } = loadAuth();
+  if (broken) {
+    throw new Error(`No puedo leer ${AUTH_PATH} (${broken}) y, si lo guardo, se perderían las claves que tiene. Arréglalo, o bórralo y vuelve a conectar tus cuentas.`);
+  }
+  return data;
 }
 
 function writeAuth(data: AuthFile) {
@@ -38,7 +67,7 @@ function writeAuth(data: AuthFile) {
 }
 
 export function saveAuth(provider: string, entry: AuthEntry) {
-  const data = readAuth();
+  const data = editableAuth();
   const previous = data[provider] || {};
   data[provider] = { ...previous, ...entry, vars: { ...(previous.vars || {}), ...(entry.vars || {}) } };
   if (Object.keys(data[provider].vars || {}).length === 0) {
@@ -48,7 +77,7 @@ export function saveAuth(provider: string, entry: AuthEntry) {
 }
 
 export function removeAuth(provider: string): boolean {
-  const data = readAuth();
+  const data = editableAuth();
   if (!data[provider]) {
     return false;
   }

@@ -1,7 +1,7 @@
 import type { ModelConfig, ProviderConfig } from "./config.js";
 import { REPO_URL } from "./meta.js";
 
-// Catálogo de proveedores con plan gratuito (revisado en octubre de 2026).
+// Catálogo de proveedores con plan gratuito (revisado a finales de octubre de 2026).
 // El orden es la prioridad: el router prueba de arriba abajo y salta al siguiente cuando uno se agota.
 // Los modelos nuevos se añaden solos con "vipcode models --refresh" (o una vez al día al arrancar).
 
@@ -10,6 +10,10 @@ function m(id: string, context: number, extra: Partial<ModelConfig> = {}): Model
 }
 
 const V = { vision: true };
+// Los Gemini Flash piensan antes de contestar sin mandar nada mientras. Con el nivel de serie («medio» en los más nuevos)
+// tardan más de 40 s en empezar con lo que manda vipcode en cada paso; con «bajo», mucho menos (es el más bajo que
+// admite el 3.8)
+const FLASH: Partial<ModelConfig> = { vision: true, reasoningEffort: "low" };
 
 export const CATALOG: ProviderConfig[] = [
   {
@@ -18,25 +22,27 @@ export const CATALOG: ProviderConfig[] = [
     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
     apiKeyEnv: ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"],
     signup: "https://aistudio.google.com/apikey",
-    freeInfo: "Plan gratis para Flash y Flash-Lite (y algo de 2.5 Pro), con límites por minuto y por día en cada modelo.",
+    freeInfo: "Plan gratis para Flash y Flash-Lite, con límites por minuto y por día en cada modelo.",
     discover: "openai",
-    modelFilter: "^(gemini|gemma)-",
+    // Solo los del plan gratis: Flash, Flash-Lite y Gemma. Su lista trae también los de pago (Pro, Argon, Omni), versiones
+    // preview y modelos de imágenes, que con el plan gratis contestan «no incluido», y los Gemini 2.x, que ya solo puede
+    // usar quien los usaba antes
+    modelFilter: "^(gemini-([3-9]|\\d{2,})(\\.\\d+)?-flash(-lite)?|gemini-flash(-lite)?-latest|gemma-\\d[\\w.-]*)$",
     limitScope: "model",
     defaultContext: 250000,
     // El plan gratis limita los tokens por minuto, así que no mandamos más de esto aunque el modelo admita 1M
     contextCap: 250000,
+    // La API de AI Studio tarda más que el resto en empezar a contestar (también por lo que piensan los Flash)
+    firstResponseMs: 60000,
     models: [
-      m("gemini-3.8-flash", 250000, V),
-      m("gemini-3.7-flash", 250000, V),
-      m("gemini-3.6-flash", 250000, V),
-      m("gemini-3.5-flash", 250000, V),
-      m("gemini-2.5-pro", 250000, V),
-      m("gemini-2.5-flash", 250000, V),
-      m("gemini-flash-latest", 250000, V),
+      m("gemini-3.8-flash", 250000, FLASH),
+      m("gemini-3.7-flash", 250000, FLASH),
+      m("gemini-3.6-flash", 250000, FLASH),
+      m("gemini-3.5-flash", 250000, FLASH),
+      m("gemini-flash-latest", 250000, FLASH),
       m("gemini-3.5-flash-lite", 250000, V),
       m("gemini-3.1-flash-lite", 250000, V),
       m("gemini-flash-lite-latest", 250000, V),
-      m("gemini-2.5-flash-lite", 250000, V),
       m("gemma-4-31b-it", 15000, V),
       m("gemma-4-26b-a4b-it", 15000, V),
     ],
@@ -53,7 +59,6 @@ export const CATALOG: ProviderConfig[] = [
     limitScope: "provider",
     defaultContext: 128000,
     models: [
-      m("z-ai/glm-5.3", 1000000),
       m("deepseek-ai/deepseek-v4.1-flash", 1000000, V),
       m("minimaxai/minimax-m3.1-flash", 262144, V),
       m("nvidia/nemotron-3-ultra-550b-a55b", 1000000),
@@ -236,11 +241,12 @@ export const CATALOG: ProviderConfig[] = [
     signup: "https://cloud.sambanova.ai/apis",
     freeInfo: "Plan gratis con un límite diario de tokens por modelo.",
     discover: "openai",
+    pruneMissing: true,
     limitScope: "model",
     defaultContext: 32768,
     contextCap: 131072,
     models: [
-      m("MiniMax-M3", 131072),
+      m("MiniMax-M3.1-Flash", 131072),
       m("gpt-oss-120b", 131072),
       m("DeepSeek-V3.1", 131072),
       m("gemma-4-31B-it", 131072, V),
@@ -268,8 +274,8 @@ export const CATALOG: ProviderConfig[] = [
     limitScope: "provider",
     models: [
       m("reflection/beam-free", 1048576),
-      m("poolside/laguna-s-2.1-free", 256000),
       m("nvidia/nemotron-3.5-lightning-free", 1000000),
+      m("inclusionai/ling-3.1-flash-1019", 1000000),
       m("stealth/glyph-cluster", 256000),
     ],
   },
@@ -305,8 +311,8 @@ export const CATALOG: ProviderConfig[] = [
     limitScope: "provider",
     models: [
       m("zai-org/GLM-4.7-Flash", 200000),
+      m("zai-org/GLM-5.3-Flash", 262144),
       m("openai/gpt-oss-120b", 131072),
-      m("Qwen/Qwen3-Coder-30B-A3B-Instruct", 262144),
       m("deepseek-ai/DeepSeek-V4-Flash", 262144),
     ],
   },
@@ -317,14 +323,21 @@ export const CATALOG: ProviderConfig[] = [
     apiKeyEnv: "MODELSCOPE_API_KEY",
     signup: "https://modelscope.cn/my/myaccesstoken",
     freeInfo: "2.000 llamadas gratis al día (hay que vincular una cuenta de Alibaba Cloud).",
+    // Cambia de modelos a menudo (de los que había en octubre de 2026 no quedaba ninguno): se descubren solos, solo de
+    // las familias buenas para programar (tiene también modelos de imagen, de SQL o de medicina), y se quitan los que
+    // ya no están
+    discover: "openai",
+    modelFilter: "^(Qwen/Qwen3|deepseek-ai/DeepSeek-V\\d|ZhipuAI/GLM-\\d|MiniMax/MiniMax-M\\d)",
+    pruneMissing: true,
     limitScope: "provider",
     freeLimits: { perDay: 2000 },
+    defaultContext: 131072,
     models: [
-      m("Qwen/Qwen3-Coder-30B-A3B-Instruct", 262144),
-      m("Qwen/Qwen3-235B-A22B-Instruct-2507", 262144),
-      m("ZhipuAI/GLM-4.6", 202752),
-      m("ZhipuAI/GLM-4.5", 131072),
-      m("Qwen/Qwen3-30B-A3B-Instruct-2507", 262144),
+      m("Qwen/Qwen3.8-27B", 131072),
+      m("deepseek-ai/DeepSeek-V4.1-Flash", 131072),
+      m("ZhipuAI/GLM-5.2", 131072),
+      m("Qwen/Qwen3.5-397B-A17B", 131072),
+      m("ZhipuAI/GLM-4.7-Flash", 131072),
     ],
   },
   {
@@ -335,6 +348,7 @@ export const CATALOG: ProviderConfig[] = [
     signup: "https://ollama.com/settings/keys",
     freeInfo: "Plan gratis con límites por hora y por semana.",
     discover: "openai",
+    pruneMissing: true,
     limitScope: "provider",
     defaultContext: 131072,
     models: [
@@ -407,6 +421,7 @@ export const CATALOG: ProviderConfig[] = [
     signup: "https://www.ovhcloud.com/es-es/public-cloud/ai-endpoints/",
     freeInfo: "Funciona sin clave, pero solo 2 peticiones por minuto en cada modelo (con clave, 400).",
     discover: "openai",
+    pruneMissing: true,
     limitScope: "model",
     defaultContext: 131072,
     models: [
@@ -436,7 +451,6 @@ export const CATALOG: ProviderConfig[] = [
     freeLimits: { perHour: 60, keyless: true },
     defaultContext: 128000,
     models: [
-      m("minimax-m2.7", 180000),
       m("codestral-latest", 32000),
       m("nemotron-3-nano:30b", 1000000),
       m("gpt-oss:20b", 128000),

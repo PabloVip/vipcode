@@ -25,6 +25,8 @@ export interface SkillDefinition {
 }
 
 const MAX_BODY = 40000;
+// Más que esto no se lee entero (de un fichero enorme solo se aprovecharía el principio, y agotaría la memoria)
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const SKILL_FILES = ["SKILL.md", "skill.md", "Skill.md"];
 
 // Nombre según el estándar: minúsculas, números y guiones, hasta 64 caracteres
@@ -211,9 +213,13 @@ export function readSkillFile(skill: SkillDefinition, file: string): string {
   if (real !== base && !real.startsWith(base + path.sep)) {
     return `Error: ${file} está fuera de la carpeta de la skill.`;
   }
-  if (fs.statSync(real).isDirectory()) {
+  const stat = fs.statSync(real);
+  if (stat.isDirectory()) {
     const entries = safeReaddir(real).map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name));
     return `Contenido de ${file}:\n${entries.join("\n") || "(vacía)"}`;
+  }
+  if (stat.size > MAX_FILE_BYTES) {
+    return `${file} ocupa más de 20 MB: no se lee entero. Úsalo desde bash con la ruta ${real}.`;
   }
   const buffer = fs.readFileSync(real);
   if (buffer.subarray(0, 8000).includes(0)) {
@@ -318,6 +324,10 @@ export function installSkills(source: string, root: string, options: { project?:
       const git = parseGitSource(source);
       if (!git) {
         throw new Error(`No encuentro ${source}: pon la ruta de una carpeta con SKILL.md o la dirección de un repositorio git.`);
+      }
+      // La carpeta del enlace no puede salir del repositorio descargado (…/tree/main/../../otra)
+      if (git.subdir && git.subdir.split(/[\\/]/).includes("..")) {
+        throw new Error(`La carpeta ${git.subdir} sale del repositorio.`);
       }
       temp = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-skill-"));
       // Con «--» un origen que empiece por - no se toma como una opción de git (por ejemplo --upload-pack)

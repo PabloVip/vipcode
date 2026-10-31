@@ -18,7 +18,7 @@ export interface RefreshSummary {
 
 // Modelos que no sirven para chatear (embeddings, voz, imágenes, vídeo…)
 const NON_CHAT =
-  /embed|bge-|minilm|rerank|guard|safety|moderation|whisper|tts|transcri|speech|audio-|native-audio|image|imagen|flux|diffusion|sdxl|video|veo|lyria|ocr|retriever|reward|nvclip|clip-|cosmos|bevformer|sparsedrive|streampetr|detector|studiovoice|riva|canary|parakeet|paligemma|grounding|aqa|deplot|kosmos|fuyu|neva|translate|computer-use|robotics|-live|usdcode|usdvalidate|usdsearch/i;
+  /embed|bge-|minilm|rerank|guard|safety|moderation|whisper|tts|transcri|speech|audio-|native-audio|image|imagen|flux|diffusion|sdxl|video|veo|lyria|ocr|retriever|reward|nvclip|clip-|cosmos|bevformer|sparsedrive|streampetr|detector|studiovoice|riva|canary|parakeet|paligemma|grounding|aqa|deplot|kosmos|fuyu|neva|translate|computer-use|robotics|-live|nano-banana|usdcode|usdvalidate|usdsearch/i;
 
 export function readDiscovery(): DiscoveryCache {
   try {
@@ -45,8 +45,11 @@ export function discoveryIsStale(maxAgeMs = 24 * 60 * 60 * 1000): boolean {
   return Date.now() - readDiscovery().updated > maxAgeMs;
 }
 
-// Junta los modelos del catálogo con los descubiertos, manteniendo el orden del catálogo
-function combine(provider: ProviderConfig, discovered: ModelConfig[], handAdded: Set<string> = new Set()): ModelConfig[] {
+// Junta los modelos del catálogo con los descubiertos, manteniendo el orden del catálogo. Los descubiertos que ya no
+// pasan el filtro del proveedor (descubiertos con una versión anterior de vipcode) no se usan
+function combine(provider: ProviderConfig, found: ModelConfig[], handAdded: Set<string> = new Set()): ModelConfig[] {
+  const filter = provider.modelFilter ? new RegExp(provider.modelFilter, "i") : null;
+  const discovered = filter ? found.filter((model) => filter.test(model.id)) : found;
   const ids = new Set(discovered.map((model) => model.id));
   let base = provider.models;
   if (provider.pruneMissing) {

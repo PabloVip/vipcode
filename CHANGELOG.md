@@ -4,6 +4,26 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Arreglado
+
+- Gemini: de su lista de modelos solo se usan los del plan gratis (Flash, Flash-Lite y Gemma). Antes se añadían también los de pago (Pro, Gemini 4 Argon, Omni), las versiones preview y modelos de imágenes, y cuando los Flash se quedaban sin peticiones por minuto vipcode los probaba todos, con un aviso de «no incluido en el plan gratis» o de error por cada uno.
+- Cuando un modelo está saturado (error 503), el aviso dice «saturado» y no «error del servidor»: no se ha roto nada, le llegan demasiadas peticiones. vipcode lo deja en pausa 30 s y sigue con otro, como antes.
+- El agente ya no mete scripts de varias líneas entre comillas en la línea de comandos (`python3 -c '…'`), que se rompían en cuanto el script llevaba una comilla: los pasa con un heredoc (en PowerShell, con su equivalente).
+- Gemini: se quitan Gemini 2.5 Pro, Flash y Flash-Lite. Google ya solo los deja usar a quien los usaba antes, y con una clave nueva contestaban «modelo no disponible». Tampoco se añaden al buscar modelos nuevos.
+- Catálogo revisado: había modelos que ya no existen y se probaban igual, con su aviso de error. Se quitan los de NVIDIA (GLM-5.3), Vercel (Laguna S 2.1), Hugging Face (Qwen3 Coder 30B) y LLM7 (MiniMax M2.7); en SambaNova, MiniMax-M3 pasa a ser MiniMax-M3.1-Flash. En ModelScope no quedaba ninguno: ahora tiene los actuales (Qwen3.8, DeepSeek V4.1 Flash, GLM-5.2…), y a partir de ahora se añaden solos los nuevos y se quitan los que desaparecen, lo mismo que en SambaNova, Ollama Cloud y OVHcloud. Vercel suma Ling 3.1 Flash (gratis) y Hugging Face, GLM-5.3 Flash.
+- Gemini: los Flash tardaban más de 40 s en empezar a contestar (piensan antes sin mandar nada) y vipcode los daba por colgados («no ha empezado a contestar»). Ahora se les pide pensar en nivel bajo, que los hace mucho más rápidos, y a Gemini se le espera hasta 60 s antes de probar otro.
+
+- Parar un `!comando` con Esc (o porque se pasa de tiempo) paraba solo la shell en macOS y Linux: lo que había lanzado, por ejemplo el servidor de un `!npm run dev`, seguía en marcha, y vipcode se quedaba esperando a que acabara. Ahora se para todo, y la salida dice si se interrumpió o se pasó de tiempo. Lo mismo con los comandos de las plantillas.
+- Si se cierra vipcode con un comando en marcha (también cerrando la ventana de la terminal), ese comando y lo que haya lanzado se paran con él.
+- Al abrir una versión nueva, las novedades se ven desde su título: en una ventana normal, con el aviso de otra versión o la bienvenida debajo, solo se veía su final.
+- MCP: si dos herramientas acababan con el mismo nombre (por ejemplo, de dos servidores con nombres parecidos), o con el de una de vipcode, los proveedores rechazaban todas las peticiones. Ahora la repetida lleva `_2` detrás.
+- MCP: un servidor que se cae ya no sale como «conectado» en `/mcp`, y sus herramientas dejan de ofrecerse.
+- Servidores de lenguaje: si uno se cae (por ejemplo, porque se queda sin memoria), se vuelve a arrancar la siguiente vez que hace falta (hasta 3 veces); antes ya no había errores de ese lenguaje hasta reiniciar vipcode. Y uno que no llega a arrancar bien ya no se queda encendido.
+- Skills: un fichero de más de 20 MB ya no se carga entero en memoria, y un enlace de GitHub cuya carpeta tiene `..` ya no puede salir del repositorio descargado.
+- Si `auth.json` está roto (por ejemplo, editado a mano con un error), vipcode avisa al abrirse, y al conectar otra cuenta ya no lo sobrescribe: antes se perdían todas las claves guardadas.
+- Con `auth.json` o la configuración rotos, el aviso dice la línea y la columna del error sin citar lo que hay allí: el mensaje de antes podía enseñar en pantalla un trozo de una clave.
+- Un error al conectar la primera cuenta al abrir vipcode lo cerraba de golpe; ahora se enseña.
+
 ## [0.3.0] - 2026-10-31
 
 ### Quitado

@@ -9,7 +9,7 @@ import { isImagePath, toDataUrl } from "./images.js";
 import type { Permission, PermissionReply, PermissionRequest } from "./permissions.js";
 import { stripControl } from "./sanitize.js";
 import { isInside, protectedDirs } from "./paths.js";
-import { commandShell, findProgram, killTree } from "./shell.js";
+import { commandShell, findProgram, killTree, spawnGroup } from "./shell.js";
 
 export type { Permission } from "./permissions.js";
 
@@ -871,41 +871,16 @@ const bashTool: Tool = {
 
     return await new Promise<string>((resolve) => {
       const shell = commandShell();
-      const child = spawn(shell.file, shell.args(command), {
+      // En su propio grupo de procesos, para poder parar también a los hijos (npm test, servidores…)
+      const child = spawnGroup(shell.file, shell.args(command), {
         cwd: ctx.root,
         env: { ...process.env, ...shell.env, ...gitSafetyEnv(), VIPCODE: "1", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat" },
-        stdio: ["ignore", "pipe", "pipe"],
-        // Grupo de procesos propio para poder matar también a los hijos (npm test, servidores…)
-        detached: process.platform !== "win32",
         windowsHide: true,
       });
       let output = "";
       let timedOut = false;
 
-      const kill = () => {
-        if (process.platform === "win32") {
-          killTree(child);
-          return;
-        }
-        try {
-          if (child.pid) {
-            process.kill(-child.pid, "SIGTERM");
-          } else {
-            child.kill("SIGTERM");
-          }
-        } catch {
-          child.kill("SIGTERM");
-        }
-        setTimeout(() => {
-          try {
-            if (child.pid) {
-              process.kill(-child.pid, "SIGKILL");
-            }
-          } catch {
-            // ya había terminado
-          }
-        }, 3000).unref();
-      };
+      const kill = () => killTree(child);
 
       const timer = setTimeout(() => {
         timedOut = true;

@@ -4,8 +4,9 @@ import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotoc
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServerConfig } from "./config.js";
 import { debugLog } from "./debug.js";
+import { VERSION } from "./meta.js";
 import { findProgram } from "./shell.js";
-import { type Tool, truncate } from "./tools.js";
+import { CORE_TOOLS, type Tool, truncate } from "./tools.js";
 
 // {env:NOMBRE} se cambia por esa variable de tu entorno (vacío si no existe): así se le pasa a un servidor solo lo que
 // necesita, sin escribir la clave en la configuración
@@ -52,6 +53,9 @@ interface ServerState {
 function sanitizeName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
 }
+
+// Los de las herramientas de vipcode (más «task» y «skill», que se añaden según el agente)
+const RESERVED = new Set([...CORE_TOOLS.map((tool) => tool.name), "task", "skill"]);
 
 // Algunos proveedores (Gemini) rechazan palabras del JSON Schema que no conocen
 function cleanSchema(schema: unknown): any {
@@ -109,6 +113,10 @@ function toText(result: any): { output: string; images: string[] } {
 // Conecta con los servidores MCP del config y ofrece sus herramientas al agente
 export class McpManager {
   private servers = new Map<string, ServerState>();
+  // Nombres de herramienta ya dados: dos iguales harían que los proveedores rechazaran todas las peticiones
+  private names = new Set<string>();
+  private onChange?: () => void;
+  private closing = false;
 
   constructor(
     private configs: Record<string, McpServerConfig>,
@@ -125,6 +133,7 @@ export class McpManager {
 
   // Conecta con todos a la vez; los que fallan se quedan en "error" sin parar el resto
   async start(onChange?: () => void): Promise<void> {
+    this.onChange = onChange;
     await Promise.allSettled(
       [...this.servers.values()]
         .filter((server) => server.state === "conectando")
@@ -144,7 +153,7 @@ export class McpManager {
 
   private async connect(server: ServerState, config: McpServerConfig) {
     const timeout = config.timeoutMs || 30000;
-    const client = new Client({ name: "vipcode", version: "0.2.0" });
+    const client = new Client({ name: "vipcode", version: VERSION });
     const isRemote = config.type === "remote" || (!config.type && Boolean(config.url));
 
     const withTimeout = <T>(promise: Promise<T>, what: string): Promise<T> => {
@@ -168,7 +177,8 @@ export class McpManager {
       } catch (err) {
         // Servidores antiguos que solo hablan SSE
         debugLog("mcp streamable falló, pruebo SSE", server.name, err);
-        const fallback = new Client({ name: "vipcode", version: "0.2.0" });
+        await client.close().catch(() => {});
+        const fallback = new Client({ name: "vipcode", version: VERSION });
         await withTimeout(fallback.connect(new SSEClientTransport(url, { requestInit })), "conectar (SSE)");
         server.client = fallback;
       }
@@ -199,12 +209,31 @@ export class McpManager {
     if (!server.client) {
       server.client = client;
     }
+    // Si el servidor se cierra (se cae, o se cierra la conexión), sus herramientas dejan de ofrecerse y /mcp lo dice
+    server.client.onclose = () => {
+      if (!this.closing && server.state !== "error") {
+        server.state = "error";
+        server.error = "se ha cerrado la conexión";
+        this.onChange?.();
+      }
+    };
     const listed = await withTimeout(server.client.listTools(), "listar herramientas");
     server.tools = (listed.tools || []).map((tool: any) => this.wrapTool(server, tool));
   }
 
+  // El nombre que ve el modelo: servidor_herramienta, y si ya existe (o es uno de vipcode), con _2, _3…
+  private uniqueName(server: string, tool: string): string {
+    const base = sanitizeName(`${server}_${tool}`);
+    let name = base;
+    for (let n = 2; RESERVED.has(name) || this.names.has(name); n++) {
+      name = `${base.slice(0, 64 - String(n).length - 1)}_${n}`;
+    }
+    this.names.add(name);
+    return name;
+  }
+
   private wrapTool(server: ServerState, tool: any): Tool {
-    const fullName = sanitizeName(`${server.name}_${tool.name}`);
+    const fullName = this.uniqueName(server.name, String(tool.name));
     let parameters = cleanSchema(tool.inputSchema || { type: "object", properties: {} });
     if (!parameters || parameters.type !== "object") {
       parameters = { type: "object", properties: {} };
@@ -261,6 +290,7 @@ export class McpManager {
   }
 
   async close() {
+    this.closing = true;
     await Promise.allSettled(
       [...this.servers.values()].map(async (server) => {
         if (server.client) {

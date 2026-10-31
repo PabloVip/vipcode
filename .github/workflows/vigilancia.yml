@@ -1,0 +1,54 @@
+name: Vigilancia de proveedores
+
+# Cada día comprueba que los modelos del catálogo siguen existiendo y contestan (scripts/vigilar.mjs). Si alguno falla,
+# abre un aviso (issue) con la etiqueta «vigilancia»; si sigue fallando lo actualiza, y lo cierra cuando todo funciona.
+# También se puede lanzar a mano desde la pestaña Actions.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  vigilar:
+    name: Proveedores y modelos del catálogo
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Comprobar los proveedores
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Claves opcionales, como secretos del repositorio (Settings → Secrets and variables → Actions). Sin la suya, un
+          # proveedor se comprueba solo si funciona sin clave o si su lista de modelos es pública. Nunca salen en el aviso
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+          POOLSIDE_API_KEY: ${{ secrets.POOLSIDE_API_KEY }}
+          REFLECTION_API_KEY: ${{ secrets.REFLECTION_API_KEY }}
+          NOVA_API_KEY: ${{ secrets.NOVA_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
+          HETZNER_API_KEY: ${{ secrets.HETZNER_API_KEY }}
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          MODELSCOPE_API_KEY: ${{ secrets.MODELSCOPE_API_KEY }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          UNOROUTER_API_KEY: ${{ secrets.UNOROUTER_API_KEY }}
+        run: node scripts/vigilar.mjs --github

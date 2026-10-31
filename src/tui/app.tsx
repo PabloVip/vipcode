@@ -393,9 +393,10 @@ function Main(props: { app: App; initial: string }) {
 
   const refresh = () => setVersion((v) => v + 1);
 
-  const push = (item: NewItem) => {
+  const push = (item: NewItem): number => {
     const id = nextId.current++;
     setItems((previous) => [...previous, { ...item, id } as Item]);
+    return id;
   };
 
   const agentColor = () => app.agents.find((item) => item.name === app.agent.agent.name)?.color || "magenta";
@@ -843,9 +844,15 @@ function Main(props: { app: App; initial: string }) {
         kind: "notice",
         text: "Para empezar, conecta una IA gratuita: elige una de la lista y sigue los pasos (puedes repetirlo cuando quieras con /connect).",
       });
-      void app.connect(adapter, "").then(refresh);
+      // Un error al conectar (por ejemplo, si no se puede guardar la clave) se enseña: sin el catch cerraría vipcode
+      void app
+        .connect(adapter, "")
+        .catch((err) => push({ kind: "error", text: (err as Error).message }))
+        .then(refresh);
     } else if (app.needsPrivacyNotice()) {
-      starting = askPrivacy();
+      starting = askPrivacy().catch((err) => {
+        push({ kind: "error", text: (err as Error).message });
+      });
     } else if (app.onlyAnonymous()) {
       push({ kind: "info", text: app.anonymousNotice() });
     }
@@ -862,10 +869,11 @@ function Main(props: { app: App; initial: string }) {
     if (gitNotice) {
       push({ kind: "notice", text: gitNotice });
     }
-    // La primera vez que abres una versión nueva, lo que trae
+    // La primera vez que abres una versión nueva, lo que trae, desde su título (con la bienvenida o el aviso de otra
+    // versión debajo, en una ventana normal solo se vería el final)
     const news = app.takeNews();
     if (news) {
-      push({ kind: "news", ...news });
+      conversation.reveal(push({ kind: "news", ...news }));
     }
     // «vipcode tutorial»: el primer paso
     if (app.tutorialStep !== null) {

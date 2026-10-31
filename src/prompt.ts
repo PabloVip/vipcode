@@ -51,7 +51,6 @@ function projectInstructions(root: string, extra: string[]): string {
   return `\n\n${parts.join("\n\n")}`;
 }
 
-// Lo que hay en la raíz del proyecto, para que el modelo se oriente sin gastar una llamada
 // Para que el modelo escriba los comandos en el idioma de la shell que hay de verdad
 function shellLine(): string {
   const shell = commandShell();
@@ -67,6 +66,20 @@ function shellLine(): string {
   return shell.name;
 }
 
+// Un script de varias líneas metido entre comillas en la línea de comandos (python3 -c '…') se rompe en cuanto el script
+// lleva comillas: cómo pasarlo sin ellas en cada shell
+function scriptRule(): string {
+  const shell = commandShell();
+  if (shell.name === "PowerShell") {
+    return "For a multi-line script (Python, Node…), don't put it in quotes on the command line: pipe a here-string, e.g. @'\n…\n'@ | python -";
+  }
+  if (shell.name === "cmd") {
+    return "For a multi-line script (Python, Node…), don't put it in quotes on the command line: write it to a file with write_file and run that file.";
+  }
+  return "For a multi-line script (Python, Node…), don't put it in quotes on the command line (python3 -c '…' breaks as soon as the script has a quote): pass it with a quoted heredoc, e.g. python3 - <<'EOF' … EOF.";
+}
+
+// Lo que hay en la raíz del proyecto, para que el modelo se oriente sin gastar una llamada
 function topLevel(root: string): string {
   try {
     const entries = fs
@@ -119,6 +132,9 @@ export function systemPrompt(root: string, options: PromptOptions): string {
       "Make the smallest change that solves the task and follows the existing style of the project.",
       "After changing code, run the relevant build, linter or tests with bash when the project has them. If the language server reports errors after your edit, fix them.",
     );
+  }
+  if (has("bash")) {
+    rules.push(scriptRule());
   }
   rules.push(
     "Call several tools in one turn when they are independent.",

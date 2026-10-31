@@ -718,3 +718,41 @@ test("vipcode doctor: qué funciona y qué falta, sin enseñar las claves", asyn
   await mock.close();
   ws.cleanup();
 });
+
+test("si se cierra vipcode (por ejemplo cerrando la ventana de la terminal), se paran los comandos que estaban en marcha", { skip: process.platform === "win32" && "en Windows lo para la propia consola" }, async () => {
+  // Un comando que lanza un programa que apunta su número de proceso y se queda esperando
+  const command = `node -e "require('fs').writeFileSync('largo.pid', String(process.pid)); setInterval(() => {}, 1000)" && echo fin`;
+  const mock = await startMock(({ body }) => (lastMessage(body).role === "tool" ? { text: "hecho" } : { tools: [{ name: "bash", args: { command } }] }));
+  const ws = tempWorkspace();
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false });
+  const { spawn } = await import("node:child_process");
+  const { CLI, systemEnv } = await import("./helpers/mock-llm.mjs");
+  const vip = spawn(process.execPath, [CLI, "run", "lanza el comando", "--yolo"], { cwd: ws.proj, env: { ...systemEnv(ws.home), VIPCODE_HOME: ws.home, NO_COLOR: "1" }, stdio: "ignore" });
+  const exited = new Promise((resolve) => vip.on("exit", (code, signal) => resolve(signal || code)));
+  const file = path.join(ws.proj, "largo.pid");
+  for (let i = 0; i < 200 && !(fs.existsSync(file) && fs.readFileSync(file, "utf8")); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const pid = Number(fs.readFileSync(file, "utf8"));
+  // Lo que manda la terminal al cerrar la ventana
+  vip.kill("SIGHUP");
+  assert.equal(await exited, "SIGHUP");
+  const alive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (let i = 0; i < 100 && alive(); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const left = alive();
+  if (left) {
+    process.kill(pid, "SIGKILL");
+  }
+  assert.equal(left, false, "el programa del comando sigue en marcha");
+  await mock.close();
+  ws.cleanup();
+});

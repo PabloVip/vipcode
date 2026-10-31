@@ -1,9 +1,8 @@
-import { spawn } from "node:child_process";
 import path from "node:path";
 import type { Config } from "./config.js";
 import { readMarkdownDir } from "./frontmatter.js";
 import { GLOBAL_COMMANDS_DIR } from "./paths.js";
-import { commandShell, killTree, splitArgs } from "./shell.js";
+import { commandShell, killTree, spawnGroup, splitArgs } from "./shell.js";
 import { truncate } from "./tools.js";
 import { isProjectFile, projectTrust } from "./trust.js";
 
@@ -92,9 +91,9 @@ export function loadCommands(root: string, config: Config, trusted = projectTrus
 function runShell(command: string, cwd: string): Promise<string> {
   return new Promise((resolve) => {
     const shell = commandShell();
-    const child = spawn(shell.file, shell.args(command), {
+    // En su propio grupo de procesos: si se pasa de tiempo, se para también todo lo que haya lanzado
+    const child = spawnGroup(shell.file, shell.args(command), {
       cwd,
-      stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, ...shell.env, GIT_PAGER: "cat", PAGER: "cat" },
       windowsHide: true,
     });

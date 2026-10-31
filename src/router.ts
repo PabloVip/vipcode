@@ -318,7 +318,12 @@ function classify(err: unknown): Classified {
     return { kind: "unsupported", retryAfterMs: DAY_MS, detail: "modelo no disponible o sin soporte de herramientas" };
   }
   if (status >= 500 || /overloaded|unavailable|timeout|timed out|econnreset|socket hang up|bad gateway|dejó de responder/.test(lower)) {
-    return { kind: "server", retryAfterMs: 30000, detail: status ? `error del servidor (${status})` : "el servidor no responde" };
+    // 503 es que está saturado (le llegan demasiadas peticiones), no que se haya roto: se dice así, que no alarme
+    let detail = status ? `error del servidor (${status})` : "el servidor no responde";
+    if (status === 503 || /overloaded/.test(lower)) {
+      detail = `saturado${status ? ` (${status})` : ""}`;
+    }
+    return { kind: "server", retryAfterMs: 30000, detail };
   }
   if (/respuesta vacía/.test(lower)) {
     return { kind: "other", retryAfterMs: 0, detail: "respuesta vacía" };
@@ -654,10 +659,15 @@ export class Router {
     this.speed[slot.key] = { ms: Math.round(fresh ? old.ms * 0.6 + ms * 0.4 : ms), at: Date.now() };
   }
 
+  // Lo que se le espera a un modelo a que empiece a contestar: lo de tu config, o más si su proveedor suele tardar
+  private firstWait(slot: Slot): number {
+    return Math.max(this.config.firstResponseMs, slot.provider.firstResponseMs || 0);
+  }
+
   // Lento: de media tarda en empezar más de la mitad de lo que se le espera
   private slowStart(slot: Slot, now: number): number | null {
     const entry = this.speed[slot.key];
-    if (!entry || slot.provider.local || now - entry.at > SPEED_TTL_MS || entry.ms <= this.config.firstResponseMs / 2) {
+    if (!entry || slot.provider.local || now - entry.at > SPEED_TTL_MS || entry.ms <= this.firstWait(slot) / 2) {
       return null;
     }
     return entry.ms;
@@ -943,6 +953,9 @@ export class Router {
     if (request.temperature !== undefined) {
       params.temperature = request.temperature;
     }
+    if (slot.model.reasoningEffort) {
+      params.reasoning_effort = slot.model.reasoningEffort;
+    }
     if (slot.provider.streamUsage !== false && !this.noStreamUsage[slot.provider.name]) {
       params.stream_options = { include_usage: true };
     }
@@ -950,7 +963,7 @@ export class Router {
     // Hasta que empieza a contestar se le da poco tiempo (más si tiene mucho que leer): si no, se prueba otro. Cuando
     // ya escribe, solo se corta si deja de mandar datos mucho rato. Los modelos de tu ordenador pueden tardar en
     // empezar: con ellos se espera como siempre
-    const firstMs = slot.provider.local ? IDLE_MS : firstResponseMs(this.config.firstResponseMs, estimateTokens(params.messages));
+    const firstMs = slot.provider.local ? IDLE_MS : firstResponseMs(this.firstWait(slot), estimateTokens(params.messages));
     const startedAt = Date.now();
     let started = false;
     const idle = new AbortController();

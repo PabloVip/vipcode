@@ -17,6 +17,8 @@ export interface ModelConfig {
   vision?: boolean;
   // false si no sabe usar herramientas (solo se usa para resúmenes)
   tools?: boolean;
+  // Cuánto piensa antes de contestar (reasoning_effort), en los modelos que lo admiten: menos es empezar antes
+  reasoningEffort?: "minimal" | "low" | "medium" | "high";
   disabled?: boolean;
 }
 
@@ -60,6 +62,9 @@ export interface ProviderConfig {
   defaultContext?: number;
   // Contexto máximo real del plan gratis (por ejemplo, Groq limita los tokens por minuto)
   contextCap?: number;
+  // Lo que se espera como mínimo a que empiece a contestar, si suele tardar más que el resto (Gemini piensa antes de
+  // contestar sin mandar nada mientras)
+  firstResponseMs?: number;
   // "provider" si el límite es de toda la cuenta y no de cada modelo
   limitScope?: "model" | "provider";
   // Límites conocidos del plan gratis, para calcular en /limites cuánto te queda (por modelo o por proveedor, según
@@ -380,16 +385,35 @@ function isOldGeneratedConfig(raw: Record<string, unknown>): boolean {
   );
 }
 
+// Por qué un JSON no vale, sin citarlo: el error de JSON.parse puede llevar un trozo del fichero, y en la configuración
+// o en auth.json ese trozo podría ser parte de una clave
+export function jsonProblem(err: unknown): string {
+  const message = String((err as Error)?.message || "");
+  const place = /line (\d+) column (\d+)/.exec(message);
+  if (place) {
+    return `no es JSON válido (línea ${place[1]}, columna ${place[2]})`;
+  }
+  const position = /position (\d+)/.exec(message);
+  return position ? `no es JSON válido (carácter ${Number(position[1]) + 1})` : "no es JSON válido";
+}
+
 function readJson(file: string): Record<string, unknown> {
+  let text: string;
   try {
-    const data = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (!isObject(data)) {
-      throw new Error("no es un objeto JSON");
-    }
-    return data;
+    text = fs.readFileSync(file, "utf8");
   } catch (err) {
     throw new Error(`No se pudo leer ${file}: ${(err as Error).message}`);
   }
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    throw new Error(`No se pudo leer ${file}: ${jsonProblem(err)}`);
+  }
+  if (!isObject(data)) {
+    throw new Error(`No se pudo leer ${file}: no es un objeto JSON`);
+  }
+  return data;
 }
 
 // Config del proyecto: vipcode.json o .vipcode/config.json en la carpeta donde ejecutas vipcode

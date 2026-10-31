@@ -15,10 +15,11 @@ proc falla {motivo} {
 spawn -noecho node $cli
 stty rows 40 columns 120 < $spawn_out(slave,name)
 
-# 1. Recuadro de versión nueva con arreglos de seguridad (abajo de la conversación, que es lo que se ve)
+# 1. Las novedades de esta versión se ven desde su título, aunque debajo vengan el recuadro de la versión nueva y la
+# bienvenida (si no, solo se vería su final)
 expect {
-  "nueva de vipcode con arreglos de seguridad" {}
-  timeout { falla "el recuadro de versión nueva no avisa de los arreglos de seguridad" }
+  "Novedades de vipcode" {}
+  timeout { falla "no se ve el título de las novedades de esta versión" }
 }
 
 # 2. Bienvenida: se acepta con Enter («Empezar»)
@@ -38,16 +39,18 @@ expect {
   timeout { falla "la barra de abajo no recuerda la versión nueva con arreglos de seguridad" }
 }
 
-# 4. Arriba del todo (Ctrl+Inicio): el aviso de que la interfaz de la configuración ya no existe (se usa la de serie) y
-# las novedades de esta versión
+# 4. Arriba del todo (Ctrl+Inicio), el aviso de que la interfaz de la configuración ya no existe (se usa la de serie)
 send "\033\[1;5H"
 expect {
   -re {Alto contraste\S* ya no est} {}
   timeout { falla "no avisa de que la interfaz de alto contraste ya no está" }
 }
+
+# 5. Y abajo del todo (Ctrl+Fin), el recuadro de la versión nueva con arreglos de seguridad
+send "\033\[1;5F"
 expect {
-  "Novedades de vipcode" {}
-  timeout { falla "no aparecen las novedades de esta versión" }
+  "nueva de vipcode con arreglos de seguridad" {}
+  timeout { falla "el recuadro de versión nueva no avisa de los arreglos de seguridad" }
 }
 
 send "/exit\r"

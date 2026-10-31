@@ -640,3 +640,307 @@ test("los datos se guardan de golpe (sin ficheros a medias) y la salida de los c
   await mock.close();
   ws.cleanup();
 });
+
+test("parar un !comando (Esc o porque se pasa de tiempo) para también todo lo que haya lanzado", async () => {
+  const mock = await startMock(() => ({ text: "ok" }));
+  const ws = tempWorkspace();
+  const { app } = makeApp(ws, mock.url);
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const waitFor = async (check) => {
+    for (let i = 0; i < 200 && !check(); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return check();
+  };
+  // Un programa que apunta su número de proceso y se queda esperando, detrás de otro (así la shell no se sustituye por
+  // él: es un hijo suyo, como el servidor de «!npm run dev»)
+  const run = async (name, signal) => {
+    const file = path.join(ws.proj, `${name}.pid`);
+    const command = `node -e "require('fs').writeFileSync('${name}.pid', String(process.pid)); setInterval(() => {}, 1000)" && echo fin`;
+    const running = app.runShell(command, undefined, signal);
+    assert.ok(await waitFor(() => fs.existsSync(file) && fs.readFileSync(file, "utf8") !== ""), "el programa no arranca");
+    return { running, pid: Number(fs.readFileSync(file, "utf8")) };
+  };
+  // Esc
+  const controller = new AbortController();
+  const first = await run("esc", controller.signal);
+  controller.abort();
+  const stopped = await first.running;
+  assert.match(stopped.output, /\(interrumpido\)$/);
+  assert.equal(await waitFor(() => !alive(first.pid)), true, "el programa sigue en marcha tras Esc");
+  // Se pasa de tiempo
+  app.config.bashTimeoutMs = 1500;
+  const second = await run("tiempo");
+  const late = await second.running;
+  assert.match(late.output, /\(cancelado por tiempo \(2 s\)\)$/);
+  assert.equal(await waitFor(() => !alive(second.pid)), true, "el programa sigue en marcha tras pasarse de tiempo");
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("MCP: los nombres de herramienta no se repiten (tampoco con los de vipcode) y un servidor que se cae deja de ofrecer las suyas", async () => {
+  const { McpManager } = await import("../dist/mcp.js");
+  const ws = tempWorkspace();
+  const fixture = path.join(ROOT, "test", "fixtures", "mcp-server.mjs");
+  // «c.a» y «c_a» darían los mismos nombres (el punto no vale y se cambia por _): los proveedores rechazarían todas las
+  // peticiones por tener dos herramientas iguales
+  const manager = new McpManager({ "c.a": { command: ["node", fixture] }, c_a: { command: ["node", fixture] } }, ws.proj);
+  let changes = 0;
+  await manager.start(() => changes++);
+  const names = manager.tools().map((tool) => tool.name).sort();
+  assert.deepEqual(names, ["c_a_entorno", "c_a_entorno_2", "c_a_sumar", "c_a_sumar_2"]);
+  // Uno que se llamaría como una herramienta de vipcode tampoco la pisa, y los largos siguen cabiendo en 64
+  assert.equal(manager.uniqueName("read", "file"), "read_file_2");
+  const long = manager.uniqueName("s".repeat(40), "t".repeat(40));
+  assert.equal(long.length, 64);
+  assert.equal(manager.uniqueName("s".repeat(40), "t".repeat(40)), `${long.slice(0, 62)}_2`);
+  // Si un servidor se cae, /mcp lo dice y sus herramientas dejan de ofrecerse
+  const before = changes;
+  const dying = [...manager.servers.values()].find((server) => server.name === "c_a");
+  process.kill(dying.client.transport.pid, "SIGKILL");
+  for (let i = 0; i < 100 && manager.status().find((server) => server.name === "c_a").state !== "error"; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.deepEqual(manager.status().find((server) => server.name === "c_a"), { name: "c_a", state: "error", error: "se ha cerrado la conexión", tools: 2 });
+  assert.ok(changes > before);
+  assert.equal(manager.tools().length, 2);
+  await manager.close();
+  // Al cerrar vipcode no se marca como caído
+  assert.equal(manager.status().find((server) => server.name === "c.a").state, "conectado");
+  ws.cleanup();
+});
+
+test("LSP: un servidor de lenguaje que se cae se vuelve a arrancar (unas pocas veces) y uno que no arranca no se queda encendido", async () => {
+  const { LspManager } = await import("../dist/lsp.js");
+  const ws = tempWorkspace({ "a.fake": "hola\n" });
+  const pids = path.join(ws.dir, "pids.txt");
+  const fake = path.join(ROOT, "test", "fixtures", "fake-lsp.mjs");
+  const lsp = new LspManager(ws.proj, { lsp: { fake: { command: [process.execPath, fake], extensions: [".fake"], env: { FAKE_LSP_PIDS: pids } } } });
+  const file = path.join(ws.proj, "a.fake");
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const started = () => (fs.existsSync(pids) ? fs.readFileSync(pids, "utf8").trim().split("\n").filter(Boolean).map(Number) : []);
+  // Cada vez contesta con el error y se cae: la siguiente vez lo contesta otro (arrancado de nuevo), hasta 3 veces más
+  const seen = [];
+  for (let round = 0; round < 5; round++) {
+    const report = await lsp.report(file, false);
+    seen.push(report);
+    const last = started().at(-1);
+    for (let i = 0; i < 100 && last && alive(last); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  assert.equal(started().length, 4, seen.join("\n"));
+  for (const [index, pid] of started().entries()) {
+    assert.match(seen[index], new RegExp(`^a\\.fake:1:1 error: fallo del proceso ${pid}$`));
+  }
+  assert.equal(seen[4], "");
+  await lsp.shutdown();
+
+  // Uno que contesta con un error al arrancar: no se queda encendido esperando
+  fs.rmSync(pids, { force: true });
+  const broken = new LspManager(ws.proj, { lsp: { fake: { command: [process.execPath, fake], extensions: [".fake"], env: { FAKE_LSP_PIDS: pids, FAKE_LSP_MODE: "falla" } } } });
+  assert.equal(await broken.report(file, false), "");
+  const [pid] = started();
+  for (let i = 0; i < 100 && alive(pid); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(alive(pid), false, "el servidor que no arranca sigue encendido");
+  assert.match((await broken.status()).map((row) => `${row.id} ${row.state}`).join("\n"), /fake error: no arranco/);
+  await broken.shutdown();
+  ws.cleanup();
+});
+
+test("skills y claves: un fichero enorme no se lee entero, un enlace con .. no sale del repositorio y un auth.json roto no se pisa", async () => {
+  const skills = await import("../dist/skills.js");
+  const auth = await import("../dist/auth.js");
+  const config = await import("../dist/config.js");
+  const ws = tempWorkspace({ ".vipcode/skills/grande/SKILL.md": "---\nname: grande\ndescription: con un fichero enorme\n---\nNada" });
+  const dir = path.join(ws.proj, ".vipcode", "skills", "grande");
+  // De 21 MB (sin ocupar disco de verdad)
+  fs.closeSync(fs.openSync(path.join(dir, "datos.bin"), "w"));
+  fs.truncateSync(path.join(dir, "datos.bin"), 21 * 1024 * 1024);
+  const skill = skills.loadSkills(ws.proj, { ...config.DEFAULT_CONFIG }).find((item) => item.name === "grande");
+  assert.match(skills.readSkillFile(skill, "datos.bin"), /datos\.bin ocupa más de 20 MB: no se lee entero/);
+  // Un enlace de GitHub cuya carpeta sale del repositorio no se descarga
+  assert.throws(() => skills.installSkills("https://github.com/alguien/repo/tree/main/../../../etc", ws.proj), /sale del repositorio/);
+
+  // auth.json roto (por ejemplo, editado a mano): no se usan sus claves, se avisa, y no se sobrescribe al conectar otra
+  const file = path.join(shared.home, "auth.json");
+  const before = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+  try {
+    // Sin comillas en la clave: el error de JSON.parse citaría un trozo («"key": gsk_mia_sec…»), y no se enseña
+    const broken = '{ "groq": { "key": gsk_mia_secreta } }';
+    fs.writeFileSync(file, broken);
+    config.configNotices.length = 0;
+    assert.deepEqual(auth.readAuth(), {});
+    const notices = config.configNotices.filter((notice) => notice.includes("las claves guardadas no se usan"));
+    assert.equal(notices.length, 1);
+    assert.match(notices[0], /no es JSON válido/);
+    assert.doesNotMatch(notices[0], /gsk_/);
+    assert.throws(() => auth.saveAuth("gemini", { key: "nueva" }), (err) => /se perderían las claves que tiene/.test(err.message) && !err.message.includes("gsk_"));
+    assert.throws(() => auth.removeAuth("groq"), /se perderían las claves que tiene/);
+    assert.equal(fs.readFileSync(file, "utf8"), broken);
+    // Igual con la configuración: dice dónde está el error, sin citar lo que hay
+    const configFile = path.join(shared.home, "config.json");
+    const savedConfig = fs.existsSync(configFile) ? fs.readFileSync(configFile, "utf8") : null;
+    try {
+      fs.writeFileSync(configFile, '{\n  "providers": [{ "name": "x", "apiKey": sk-mi-clave-secreta }]\n}');
+      assert.throws(() => config.loadConfig(ws.proj), (err) => /config\.json: no es JSON válido/.test(err.message) && !err.message.includes("sk-mi"));
+      fs.writeFileSync(configFile, '{\n  "maxSteps": 3,\n}');
+      assert.throws(() => config.loadConfig(ws.proj), /no es JSON válido \(línea 3, columna 1\)/);
+    } finally {
+      if (savedConfig === null) {
+        fs.rmSync(configFile, { force: true });
+      } else {
+        fs.writeFileSync(configFile, savedConfig);
+      }
+    }
+  } finally {
+    if (before === null) {
+      fs.rmSync(file, { force: true });
+    } else {
+      fs.writeFileSync(file, before);
+    }
+    config.configNotices.length = 0;
+  }
+  ws.cleanup();
+});
+
+test("modelos que piensan: se les pide el nivel de razonamiento que lleven en el catálogo (y a los demás nada)", async () => {
+  const mock = await startMock(() => ({ text: "ok" }));
+  const ws = tempWorkspace();
+  const { app } = makeApp(ws, mock.url, {
+    providers: [provider("p", mock.url, [{ id: "piensa", context: 100000, reasoningEffort: "medium" }, { id: "normal", context: 100000 }])],
+    enabledProviders: ["p"],
+  });
+  app.router.pinned = "p/piensa";
+  await app.runPrompt({ text: "hola" }, {});
+  app.router.pinned = "p/normal";
+  await app.runPrompt({ text: "otra" }, {});
+  const [first, second] = mock.chats().map((chat) => chat.body);
+  assert.equal(first.model, "piensa");
+  assert.equal(first.reasoning_effort, "medium");
+  assert.equal(second.model, "normal");
+  assert.ok(!("reasoning_effort" in second));
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("vigilancia: dice qué modelos del catálogo ya no existen o no contestan, sin enseñar nunca las claves", async () => {
+  const vigilar = await import("../scripts/vigilar.mjs");
+  const secret = "clave-de-groq-que-no-se-ve";
+  const mock = await startMock(({ path: url, body }) => {
+    if (url.endsWith("/models")) {
+      return { json: { data: [{ id: "vivo" }, { id: "roto" }, { id: "limitado" }] } };
+    }
+    if (body.model === "roto") {
+      return { status: 404, json: { error: { message: `The model roto does not exist (usaste ${secret})` } } };
+    }
+    if (body.model === "limitado") {
+      return { status: 429, json: { error: { message: "Rate limit reached for requests per minute" } } };
+    }
+    return { json: { choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] } };
+  });
+  const provider = {
+    name: "prueba",
+    baseURL: `${mock.url}/prueba/v1`,
+    apiKeyEnv: "GROQ_API_KEY",
+    models: [{ id: "vivo", context: 1000, reasoningEffort: "medium" }, { id: "roto", context: 1000 }, { id: "limitado", context: 1000 }, { id: "desaparecido", context: 1000 }],
+  };
+  const result = await vigilar.checkProvider(provider, { env: { GROQ_API_KEY: secret }, pauseMs: 0, timeoutMs: 5000 });
+  assert.deepEqual(
+    result.problems.map((problem) => [problem.model, problem.detail.split(":")[0]]),
+    [
+      ["desaparecido", "ya no está en su lista de modelos"],
+      ["roto", "no existe o ya no está disponible"],
+    ],
+  );
+  assert.deepEqual(result.warnings, [{ model: "limitado", detail: "límite de peticiones" }]);
+  // Se le pregunta como lo hace vipcode: con una herramienta, con su nivel de razonamiento y con la clave
+  const chats = mock.chats();
+  assert.deepEqual(chats.map((chat) => chat.body.model), ["vivo", "roto", "limitado"]);
+  assert.equal(chats[0].body.tools[0].function.name, "leer_fichero");
+  assert.equal(chats[0].body.reasoning_effort, "medium");
+  assert.ok(!("reasoning_effort" in chats[1].body));
+  assert.equal(chats[0].headers.authorization, `Bearer ${secret}`);
+  // El informe (que va a un aviso público) nunca lleva la clave, y su huella solo cambia si cambia lo que falla
+  const report = vigilar.renderReport([result], new Date("2026-10-31T06:17:00Z"));
+  assert.match(report, /## ✖ 2 modelos del catálogo no funcionan/);
+  assert.match(report, /\| prueba \| `roto` \| no existe o ya no está disponible: .*\[clave\]/);
+  assert.match(report, /Comprobado el 2026-10-31 a las 06:17 \(UTC\)/);
+  assert.ok(!report.includes(secret));
+  assert.equal(vigilar.fingerprint([result]), vigilar.fingerprint([{ ...result, warnings: [] }]));
+  assert.notEqual(vigilar.fingerprint([result]), vigilar.fingerprint([{ ...result, problems: result.problems.slice(1) }]));
+  assert.match(vigilar.renderReport([{ name: "prueba", how: "sin clave", problems: [], warnings: [] }]), /✓ Todos los modelos del catálogo que se han podido comprobar funcionan[\s\S]*<!-- huella:  -->/);
+  // Sin clave, una lista privada no se comprueba (y dice qué secreto falta); los que funcionan sin clave, sí
+  const closed = await vigilar.checkProvider({ ...provider, baseURL: `${mock.url}/cerrado/v1` }, { env: {}, pauseMs: 0, fetchImpl: async () => new Response("no", { status: 401 }) });
+  assert.equal(closed.how, "sin comprobar: añade el secreto GROQ_API_KEY");
+  assert.equal(vigilar.credentialsFor({ ...provider, noKey: true }, {}).key, "no-key");
+  assert.equal(vigilar.credentialsFor({ ...provider, baseURL: "https://x/${CUENTA}/v1" }, {}).missing, "CUENTA");
+  // Qué se considera un problema del catálogo y qué puede ser pasajero
+  assert.equal(vigilar.classifyProbe(429, '{"error":{"message":"Quota exceeded, limit: 0"}}').detail, "fuera del plan gratis");
+  assert.equal(vigilar.classifyProbe(503, "overloaded").kind, "pasajero");
+  assert.equal(vigilar.classifyProbe(400, "This model does not support tools").detail, "no acepta herramientas");
+  await mock.close();
+});
+
+test("velocidad: a un proveedor que suele tardar en empezar (Gemini) se le espera más que al resto", async () => {
+  // Los dos tardan 1 s en empezar a contestar; a «paciente» se le esperan 3 s, al otro lo de la config (0,3 s)
+  const mock = await startMock(async ({ path: url }) => {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return { text: url.startsWith("/paciente/") ? "PACIENTE" : "NORMAL" };
+  });
+  const ws = tempWorkspace();
+  const { app, events } = makeApp(ws, mock.url, {
+    providers: [provider("normal", mock.url, ["m"]), provider("paciente", mock.url, ["m"], { firstResponseMs: 3000 })],
+    enabledProviders: ["normal", "paciente"],
+    firstResponseMs: 300,
+  });
+  await app.runPrompt({ text: "hola" }, {});
+  assert.match(events.text, /PACIENTE/);
+  assert.ok(events.notices.some((notice) => /normal\/m: no ha empezado a contestar/.test(notice)), events.notices.join("\n"));
+  assert.ok(!events.notices.some((notice) => /paciente\/m/.test(notice)), events.notices.join("\n"));
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("un modelo saturado (503) se dice así, no como un error, y se pasa a otro", async () => {
+  const mock = await startMock(({ path: url }) => {
+    if (url.startsWith("/lleno/")) {
+      return { status: 503, json: { error: { code: 503, message: "The model is overloaded. Please try again later.", status: "UNAVAILABLE" } } };
+    }
+    if (url.startsWith("/roto/")) {
+      return { status: 500, json: { error: { message: "Internal error" } } };
+    }
+    return { text: "OTRO" };
+  });
+  const ws = tempWorkspace();
+  const { app, events } = makeApp(ws, mock.url, {
+    providers: [provider("lleno", mock.url, ["m"]), provider("roto", mock.url, ["m"]), provider("bien", mock.url, ["m"])],
+    enabledProviders: ["lleno", "roto", "bien"],
+  });
+  await app.runPrompt({ text: "hola" }, {});
+  assert.match(events.text, /OTRO/);
+  assert.ok(events.notices.includes("lleno/m: saturado (503) → pausa 30 s"), events.notices.join("\n"));
+  assert.ok(events.notices.includes("roto/m: error del servidor (500) → pausa 30 s"), events.notices.join("\n"));
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
