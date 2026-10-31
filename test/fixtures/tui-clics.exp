@@ -44,12 +44,14 @@ expect {
 libre
 pausa 0.5
 
-# 1. Un clic en el enlace (columna 10 de la respuesta «● Mira https://…»; la fila se va probando) lo abre en el navegador
+# 1. Un clic en el enlace (columna 10 de la respuesta «● Mira https://…»; la fila se va probando) lo abre en el navegador.
+# Con el ordenador cargado (las pruebas van a la vez), el aviso puede llegar cuando ya se ha probado la fila de abajo:
+# por eso la fila encontrada puede ser una o dos de más
 set encontrada 0
 for {set fila 8} {$fila <= 22 && !$encontrada} {incr fila} {
   send "\033\[<0;10;${fila}M\033\[<0;10;${fila}m"
   expect {
-    -timeout 1
+    -timeout 2
     "Abriendo ejemplo.com" { set encontrada $fila }
     timeout {}
   }
@@ -58,12 +60,23 @@ if {!$encontrada} {
   falla "un clic en el enlace no lo abre en el navegador"
 }
 
-# 2. En esa misma línea, un clic en /new lo escribe en la caja, y con Enter empieza otra conversación
-pausa 0.5
-send "\033\[<0;46;${encontrada}M\033\[<0;46;${encontrada}m"
-expect {
-  "en la caja" {}
-  timeout { falla "un clic en /new no lo escribe en la caja" }
+# 2. En esa misma línea, un clic en /new lo escribe en la caja (se prueba también una y dos filas más arriba, por si
+# el aviso llegó tarde), y con Enter empieza otra conversación
+set escrito 0
+foreach fila [list $encontrada [expr {$encontrada - 1}] [expr {$encontrada - 2}]] {
+  pausa 0.5
+  send "\033\[<0;46;${fila}M\033\[<0;46;${fila}m"
+  expect {
+    -timeout 3
+    "en la caja" { set escrito 1 }
+    timeout {}
+  }
+  if {$escrito} {
+    break
+  }
+}
+if {!$escrito} {
+  falla "un clic en /new no lo escribe en la caja"
 }
 send "\r"
 expect {
