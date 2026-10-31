@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.3.4] - 2026-10-31
+
 ### Cambiado
 
 - **Conversaciones largas con modelos de poco contexto.** Cuando la conversación no cabe entera en ningún modelo libre, al que queda con más contexto le llega un resumen de lo anterior y los últimos mensajes tal cual, pero la conversación ya no se sustituye por el resumen: si vuelve un modelo en el que cabe entera, la recibe entera. El resumen se guarda con la sesión y se reutiliza, y cuando hace falta se actualiza solo con lo nuevo, así que no gasta peticiones de más. Si el modelo no devuelve un resumen de verdad (alguno sigue la conversación en vez de resumirla), se le pide otra vez y, si tampoco, vipcode hace uno sencillo con lo que se pidió y se contestó, sin perder nunca el resumen anterior. Se avisa cuando un modelo recibe la versión resumida. `/compact` sí sigue sustituyendo la conversación por el resumen, porque lo pides tú.
@@ -285,7 +287,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.3.3...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/PabloVip/vipcode/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/PabloVip/vipcode/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/PabloVip/vipcode/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/PabloVip/vipcode/compare/v0.3.0...v0.3.1
