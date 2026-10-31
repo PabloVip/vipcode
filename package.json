@@ -11,7 +11,15 @@
     "llm",
     "free",
     "terminal",
-    "spanish"
+    "spanish",
+    "free-llm",
+    "ai-agent",
+    "coding-assistant",
+    "openai-compatible",
+    "openrouter",
+    "gemini",
+    "mcp",
+    "agent-skills"
   ],
   "homepage": "https://github.com/PabloVip/vipcode#readme",
   "bugs": {

@@ -1,16 +1,48 @@
+<div align="center">
+
 # vipcode
 
-[![npm](https://img.shields.io/npm/v/vipcode.svg)](https://www.npmjs.com/package/vipcode) [![Pruebas](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![Licencia AGPL-3.0](https://img.shields.io/badge/licencia-AGPL--3.0-blue.svg)](LICENSE) · [English](README.en.md)
+**El agente de programación para la terminal que no te cuesta nada.**<br>
+Usa las IA gratuitas de más de 20 proveedores, funciona sin claves ni registro y, cuando una se agota, salta sola a otra.
 
-Agente de programación para la terminal (comando `vipcode`) que solo usa **modelos gratuitos** y **rota automáticamente** entre proveedores cuando uno se agota.
+[![npm](https://img.shields.io/npm/v/vipcode.svg)](https://www.npmjs.com/package/vipcode) [![Descargas](https://img.shields.io/npm/dm/vipcode.svg?label=descargas)](https://www.npmjs.com/package/vipcode) [![Pruebas](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/ci.yml) [![Vigilancia diaria](https://github.com/PabloVip/vipcode/actions/workflows/vigilancia.yml/badge.svg)](https://github.com/PabloVip/vipcode/actions/workflows/vigilancia.yml) [![Licencia AGPL-3.0](https://img.shields.io/badge/licencia-AGPL--3.0-blue.svg)](LICENSE) ![macOS · Linux · Windows](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-555.svg)
+
+[English](README.en.md) · [Novedades](CHANGELOG.md) · [Colaborar](CONTRIBUTING.md) · [Seguridad](SECURITY.md)
+
+</div>
 
 ![vipcode arreglando un fallo en carrito.js: lee el fichero, enseña el cambio, pide permiso y lo aplica; después, el profe explica por qué](https://raw.githubusercontent.com/PabloVip/vipcode/main/docs/demo.svg)
 
-- **Funciona nada más instalarlo, sin claves ni registro**: usa los proveedores que permiten el acceso anónimo (Kilo Gateway, OVHcloud, LLM7 y Pollinations).
-- Con claves gratuitas de los más de 20 proveedores incluidos (Gemini, NVIDIA, Mistral, Cerebras, OpenRouter, Groq, Z.ai…) tienes más límites y mejores modelos; en OpenRouter basta con iniciar sesión en el navegador.
-- Lee y edita tus ficheros, ejecuta comandos y busca en tu código y en internet, enseñándote cada cambio antes de hacerlo. `/undo` deshace lo último.
-- Te dice cuánto te queda de cada plan gratis, guarda tus conversaciones y admite agentes, comandos y [skills](#skills) propios.
-- **Seguro por defecto**: pregunta antes de editar, ejecutar o salir a internet y no sale de la carpeta del proyecto (ver [Seguridad y privacidad](#seguridad-y-privacidad)).
+```bash
+npm install -g vipcode
+cd mi-proyecto && vipcode
+```
+
+Escribe lo que quieres hacer («arregla el test que falla», «añade un botón de exportar», «explícame este fichero») y vipcode lo hace: busca y lee en tu código, propone los cambios, te los enseña, pide permiso y los aplica. También ejecuta comandos y pruebas y consulta internet.
+
+## En qué destaca
+
+- **💸 Gratis de verdad.** Solo usa modelos gratuitos: nunca pagas nada. Nada más instalarlo funciona **sin claves ni registro**, con los proveedores que dejan entrar sin cuenta (Kilo Gateway, OVHcloud, LLM7 y Pollinations). Con claves gratuitas de más de 20 proveedores (Gemini, NVIDIA, Cerebras, Mistral, OpenRouter, Groq…) tienes más cupo y mejores modelos.
+- **🔄 No te deja tirado.** Cuando un modelo llega a su límite, falla, está saturado o tarda en empezar a contestar, lo deja en pausa y sigue con otro sin que tengas que hacer nada. Si es todo un proveedor el que no responde, lo aparta entero en vez de esperar a cada modelo. Recuerda las pausas entre sesiones y te dice cuánto te queda de cada plan gratis.
+- **🧠 Conversaciones largas también con modelos pequeños.** Si la conversación ya no cabe en los modelos libres, al de más capacidad le llega un resumen de lo anterior y los últimos mensajes tal cual. La conversación no se pierde: cuando vuelve un modelo en el que cabe entera, la recibe entera. Y aprende de cada respuesta cuántos tokens cuentan de verdad los proveedores, para no mandarle a un modelo lo que no le cabe.
+- **🇪🇸 En español.** La interfaz, los avisos, los mensajes y la documentación. Y con un agente, el **profe**, que te enseña paso a paso para que lo hagas tú, sin tocar tu código.
+- **🔒 Seguro por defecto.** Pregunta antes de editar, ejecutar o salir a internet, enseñando el cambio o el comando entero. No sale de la carpeta del proyecto, no ejecuta lo que traiga un proyecto hasta que confías en él y los programas que arranca no reciben tus claves. `/undo` deshace ficheros y conversación.
+- **🩺 Un catálogo vigilado a diario.** Los planes gratis cambian sin avisar, así que cada día una tarea de GitHub comprueba que los modelos del catálogo siguen contestando y mantiene una conversación de verdad con los gratis: lee ficheros, resume, recuerda y edita. Si algo deja de funcionar, se sabe antes de que te pase a ti.
+- **🧰 Completo.** Agentes y subagentes que trabajan a la vez, comandos y [skills](#skills) propios (con el formato abierto Agent Skills), servidores MCP, errores del servidor de lenguaje después de cada edición, imágenes, conversaciones guardadas también en Markdown, modelos en tu ordenador (Ollama, LM Studio, llama.cpp) y modo sin interfaz para scripts (`vipcode run`).
+- **🖱️ Una interfaz cuidada.** Pantalla completa con ratón (rueda, selección que se copia sola, clic en enlaces y en comandos), búsqueda con Ctrl+F y cuatro estilos, uno de ellos con criaturas de píxeles.
+- **💻 macOS, Linux y Windows.** Cada cambio se prueba en los tres antes de publicarse.
+
+## Índice
+
+- [Instalación](#instalación)
+- [Primeros pasos](#primeros-pasos) · [Proveedores](#proveedores)
+- [Cómo elige el modelo](#cómo-elige-el-modelo)
+- [Conversaciones largas](#conversaciones-largas)
+- [Uso](#uso): [en la interfaz](#en-la-interfaz) · [comandos](#comandos) · [agentes](#agentes) · [conversaciones](#conversaciones) · [cuánto te queda](#cuánto-te-queda)
+- [Personalizar](#personalizar): [configuración](#configuración) · [agentes y comandos propios](#agentes-y-comandos-propios) · [skills](#skills) · [instrucciones del proyecto](#instrucciones-del-proyecto)
+- [Seguridad y privacidad](#seguridad-y-privacidad)
+- [Preguntas frecuentes](#preguntas-frecuentes)
+- [Colaborar](#colaborar) · [Licencia](#licencia)
 
 ## Instalación
 
@@ -22,22 +54,30 @@ npm install -g vipcode
 
 **En Windows** instala también [Git para Windows](https://git-scm.com/download/win) (`winget install Git.Git`): vipcode usa su bash para los comandos y git para `/undo`. Sin él usa PowerShell, y te lo recuerda al abrirlo.
 
-Para actualizar, escribe `/update` dentro de vipcode o `vipcode update` en la terminal: verás cómo va con una barra de carga y, al terminar, te ofrecerá reiniciar vipcode para usar la versión nueva sin salir de la conversación. Cuando sale una versión nueva, vipcode te avisa (y te dice si trae arreglos de seguridad), y al abrir la nueva te enseña lo que trae. Todas las novedades están en [CHANGELOG.md](CHANGELOG.md).
+**Actualizar.** Escribe `/update` dentro de vipcode o `vipcode update` en la terminal: verás cómo va con una barra de carga y, al terminar, te ofrecerá reiniciar vipcode para usar la versión nueva sin salir de la conversación. Cuando sale una versión nueva, vipcode te avisa (y te dice si trae arreglos de seguridad), y al abrirla te enseña lo que trae. Todas las novedades están en [CHANGELOG.md](CHANGELOG.md).
 
-Si algo falla, ejecuta `vipcode doctor` (o `/doctor` dentro de vipcode): comprueba los programas, tus claves y los proveedores, y dice cómo arreglar lo que falte. Si no se arregla, escribe `/bug` (o `vipcode bug`): abre en tu navegador un issue de GitHub con ese informe ya puesto, que no lleva tus claves; tú cuentas qué ha pasado y lo envías. Con `VIPCODE_DEBUG=1 vipcode` se guarda además en `~/.vipcode/debug.log` un registro que ayuda a encontrar el problema.
+**Si algo falla**, ejecuta `vipcode doctor` (o `/doctor` dentro de vipcode): comprueba los programas, tus claves y los proveedores, y dice cómo arreglar lo que falte. Si no se arregla, escribe `/bug` (o `vipcode bug`): abre en tu navegador un issue de GitHub con ese informe ya puesto, sin tus claves; tú cuentas qué ha pasado y lo envías. Con `VIPCODE_DEBUG=1 vipcode` se guarda además en `~/.vipcode/debug.log` un registro que ayuda a encontrar el problema.
 
 ## Primeros pasos
 
-¿Es tu primera vez? `vipcode tutorial` te enseña lo básico en 5 pasos, en una carpeta de prácticas.
+¿Es tu primera vez? `vipcode tutorial` te enseña lo básico en 5 pasos, en una carpeta de prácticas que no toca nada tuyo.
 
-Abre `vipcode` en la carpeta de tu proyecto y escribe lo que quieres hacer. No hace falta configurar nada: sin claves usa proveedores que permiten el acceso anónimo, con pocos mensajes (Kilo Gateway, 200 por hora; OVHcloud, 2 por minuto en cada modelo; LLM7, unos 60 por hora; Pollinations, un límite por hora). Cuando uno se agota, o tarda mucho en empezar a contestar, salta al siguiente.
+Abre `vipcode` en la carpeta de tu proyecto y escribe lo que quieres hacer. No hace falta configurar nada: sin claves usa los proveedores que permiten el acceso anónimo, con pocos mensajes (Kilo Gateway, 200 por hora; OVHcloud, 2 por minuto en cada modelo; LLM7, unos 60 por hora; Pollinations, un límite por hora). Cuando uno se agota, o tarda mucho en empezar a contestar, salta al siguiente.
 
-Para tareas largas se quedan cortos, así que conviene añadir alguna clave gratuita; con una de Gemini, NVIDIA o Mistral se nota mucho:
+Para trabajar en serio conviene añadir alguna clave gratuita. **Con estas tres se nota mucho**, y cada una se consigue en unos minutos:
+
+1. **NVIDIA**: muchos de los mejores modelos abiertos (DeepSeek, GLM, Kimi, Nemotron) y unas 40 peticiones por minuto.
+2. **Gemini**: los modelos Flash de Google, de buena calidad y con conversaciones muy largas.
+3. **Cerebras**: el más rápido, con 14.400 peticiones al día por modelo.
+
+Para añadir una clave:
 
 - **`/connect`** dentro de vipcode: eliges el proveedor y pegas la clave. Si todavía no la tienes, pulsa Enter sin escribir nada y se abre la página donde se consigue.
-- **OpenRouter, sin copiar claves**: `/connect openrouter` → «Iniciar sesión en el navegador». Entras con tu cuenta y vipcode recibe la clave sola; se llama «vipcode» en https://openrouter.ai/settings/keys y la puedes borrar desde ahí. Por SSH te da un enlace para abrirlo en cualquier navegador.
+- **OpenRouter, sin copiar claves**: `/connect openrouter` → «Iniciar sesión en el navegador». Entras con tu cuenta y vipcode recibe la clave solo; se llama «vipcode» en https://openrouter.ai/settings/keys y la puedes borrar desde ahí. Por SSH te da un enlace para abrirlo en cualquier navegador.
 - **Desde la terminal**: `vipcode auth login [proveedor]`, `vipcode auth list` para ver lo que tienes y `vipcode auth logout <proveedor>` para borrar una clave. Se guardan en `~/.vipcode/auth.json`, que solo puede leer tu usuario.
 - **Variables de entorno**, por ejemplo `export GEMINI_API_KEY="..."` en `~/.zshrc`.
+
+### Proveedores
 
 | Proveedor | Variable | Dónde conseguir la clave | Plan gratuito |
 |---|---|---|---|
@@ -67,6 +107,31 @@ Para tareas largas se quedan cortos, así que conviene añadir alguna clave grat
 | Pollinations | sin clave (opcional `POLLINATIONS_API_KEY`) | https://auth.pollinations.ai | Límite por hora y por IP |
 | Ollama, LM Studio, llama.cpp | sin clave | se detectan solos si están encendidos | En tu ordenador, sin límites |
 
+## Cómo elige el modelo
+
+vipcode empieza por los mejores modelos gratis que tienes disponibles y va cambiando de uno a otro según haga falta:
+
+- **Límites.** Cuando un modelo llega al límite de su plan gratis, lo deja en pausa hasta que vuelve (lo que diga el proveedor, o hasta el día siguiente si es un límite diario) y sigue con el siguiente. Las pausas se recuerdan aunque cierres vipcode.
+- **Saturados.** Si un proveedor dice que el modelo está saturado (el famoso error 503), lo deja descansar un par de minutos y usa otro mientras tanto.
+- **Lentos.** Si un modelo no empieza a contestar en unos 40 segundos (60 en Gemini, que suele tardar más; algo más con conversaciones largas), prueba otro y se acuerda de que es lento para ponerlo detrás. Si ya ha empezado a contestar, se le espera.
+- **Proveedores caídos.** Si dos modelos distintos del mismo proveedor no responden en pocos minutos, lo que falla es el proveedor: lo pausa entero 5 minutos y sigue enseguida con otros, en vez de esperar a cada uno de sus modelos.
+- **Modelos que desaparecen.** Si un modelo ya no existe o no admite herramientas, lo descarta. Cada día añade solos los modelos gratis nuevos que publican los proveedores.
+- **Calidad.** Con una clave gratuita de [LLM Stats](https://llm-stats.com/developer) (`vipcode auth login llm-stats`) los ordena por su ranking, dando más peso a programar y a usar herramientas.
+
+`/models` enseña cada modelo con su estado (disponible, en pausa hasta…, lento), `/model <proveedor/modelo>` fija uno y `/model auto` vuelve a la rotación. En la [configuración](#configuración), `order` pone primero los que prefieras.
+
+## Conversaciones largas
+
+Los modelos gratis tienen tamaños muy distintos: algunos admiten cientos de miles de tokens y otros apenas unos miles. vipcode lo gestiona solo:
+
+- **Si la conversación cabe** en algún modelo libre, se le manda entera.
+- **Si no cabe en ninguno**, primero se recortan las salidas antiguas de las herramientas y, si no basta, al modelo libre con más capacidad le llega **un resumen de lo anterior y los últimos mensajes tal cual**, sin romper nunca una llamada a una herramienta y su respuesta. Te avisa cuando un modelo recibe esta versión resumida.
+- **La conversación nunca se pierde.** El resumen solo es lo que se le manda a ese modelo: la conversación entera se guarda, y cuando vuelve un modelo en el que cabe (por ejemplo, Gemini tras su pausa), la recibe entera.
+- **Sin gastar de más.** El resumen se guarda con la conversación y se reutiliza; cuando hace falta, se actualiza solo con lo nuevo. Si un modelo devuelve algo que no es un resumen de verdad, se le pide otra vez y, si tampoco, vipcode hace uno sencillo sin perder el anterior.
+- **Con cálculos que se ajustan.** vipcode estima lo que ocupa la conversación por su número de caracteres, y con el código se quedaría corto. Por eso aprende de cada respuesta cuántos tokens cuentan de verdad los proveedores y lo recuerda para la próxima vez.
+
+`/compact` resume la conversación a mano y la sustituye por el resumen (el historial que ves, y el `.md` de la conversación, siguen enteros).
+
 ## Uso
 
 ```bash
@@ -75,12 +140,15 @@ vipcode                      # abre vipcode
 vipcode "arregla el test"    # y empieza con ese mensaje
 vipcode -c                   # sigue con la última conversación de esta carpeta
 vipcode --plan               # empieza con el agente planear (solo lectura)
-vipcode run "tarea"          # hace la tarea sin interfaz y termina
+vipcode run "tarea"          # hace la tarea sin interfaz y termina (útil en scripts)
 vipcode limites              # cuánto te queda hoy de cada plan gratis
+vipcode models               # modelos disponibles (refresh busca modelos gratis nuevos)
 vipcode doctor               # comprueba que todo funciona
 vipcode bug                  # avisa de un fallo en GitHub con el informe de vipcode doctor
 vipcode tutorial             # aprende lo básico en 5 pasos, en una carpeta de prácticas
 ```
+
+Otras opciones: `-s <id>` abre una conversación concreta, `-m <proveedor/modelo>` elige el modelo preferido, `--agent <nombre>` el agente con el que empezar, `--image <fichero>` adjunta una imagen, `--plain` usa una interfaz de texto simple y `--yolo` aprueba todo sin preguntar. `vipcode --help` las enseña todas.
 
 ### En la interfaz
 
@@ -96,13 +164,11 @@ vipcode tutorial             # aprende lo básico en 5 pasos, en una carpeta de 
 - **Un clic en una herramienta** (la línea que dice qué ha hecho) despliega su salida entera, y otro clic la pliega. **Un clic en un enlace** lo abre en el navegador, y en un comando que sale en el texto (por ejemplo `/update`) lo deja escrito en la caja, listo para pulsar Enter. Un clic en «y más en CHANGELOG.md» enseña las novedades enteras, y en «↓ N líneas más» baja al final.
 - **Copiar**: arrastra con el ratón sobre la conversación y, al soltar, lo seleccionado se copia solo al portapapeles. Doble clic copia una palabra (también una ruta o una dirección entera) y triple clic, la línea. `/copiar` copia la última respuesta y `/copiar código`, su último bloque de código. Para seleccionar como siempre lo hace la terminal (por ejemplo en la caja de escribir), mantén **Fn** (Terminal de macOS), **⌥** (iTerm2) o **Mayúsculas** (Windows y Linux) mientras arrastras.
 
-Antes de editar un fichero, ejecutar un comando o salir a internet, vipcode te enseña el cambio o el comando y pregunta. Puedes contestar que sí una vez, que sí a todo lo de ese tipo durante la sesión, que sí siempre a ese comando (por ejemplo `npm test*`), que no, o que no y decirle qué hacer.
+**Permisos.** Antes de editar un fichero, ejecutar un comando o salir a internet, vipcode te enseña el cambio o el comando y pregunta. Puedes contestar que sí una vez, que sí a todo lo de ese tipo durante la sesión, que sí siempre a ese comando (por ejemplo `npm test*`), que no, o que no y decirle qué hacer.
 
-La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan gratis y cuánto contexto llevas gastado.
+La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan gratis y cuánto contexto llevas gastado. vipcode ocupa la pantalla completa mientras lo usas; al salir, la terminal vuelve a estar como antes y la conversación queda guardada (`vipcode -c` sigue con ella).
 
-vipcode ocupa la pantalla completa mientras lo usas; al salir, la terminal vuelve a estar como antes y la conversación queda guardada (`vipcode -c` sigue con ella).
-
-Con **`/interfaz`** eliges cómo se ve, y se guarda para la próxima vez. Todas ocupan la pantalla completa, con el scroll, el ratón y Ctrl+F de arriba:
+**Estilos.** Con **`/interfaz`** eliges cómo se ve, y se guarda para la próxima vez. Todos ocupan la pantalla completa, con el scroll, el ratón y Ctrl+F de arriba:
 
 - **Pantalla completa** (la de serie).
 - **Compacta**: sin espacios ni bordes de más, para que quepa más conversación.
@@ -135,7 +201,7 @@ Con **`/interfaz`** eliges cómo se ve, y se guarda para la próxima vez. Todas 
 | `/update` | Actualizar vipcode |
 | `/init` | Crea o mejora `AGENTS.md` con las instrucciones del proyecto |
 | `/review` | Revisa los cambios sin confirmar (sin tocar nada) |
-| `/config`, `/help`, `/exit` | |
+| `/config`, `/help`, `/exit` | Rutas de la configuración, ayuda y salir |
 
 ### Agentes
 
@@ -143,6 +209,8 @@ Con **`/interfaz`** eliges cómo se ve, y se guarda para la próxima vez. Todas 
 - **planear**: solo lee; investiga y propone un plan.
 - **profe**: para aprender. Te explica paso a paso, en palabras sencillas, y te propone los cambios para que los hagas tú (no toca nada).
 - **ayudante** y **explorar**: subagentes que el principal lanza para subtareas (ayudante puede editar; explorar solo busca y lee). Si lanza varios, trabajan a la vez.
+
+Puedes crear los tuyos: mira [Agentes y comandos propios](#agentes-y-comandos-propios).
 
 ### Conversaciones
 
@@ -154,10 +222,6 @@ Cada conversación se guarda sola en `~/.vipcode/sessions/`, también en Markdow
 
 - **«quedan»** es lo que dice el propio proveedor (Groq y Cerebras, por ejemplo).
 - **«≈ quedan»** es la cuenta de vipcode con los límites conocidos de su plan gratis. Solo cuenta lo de este ordenador: si usas la misma clave en otros programas, te quedará menos.
-
-### Qué modelo usa
-
-Empieza por los mejores modelos gratis y, cuando uno llega a su límite, lo deja en pausa hasta que vuelve y sigue con el siguiente. Con una clave gratuita de [LLM Stats](https://llm-stats.com/developer) (`vipcode auth login llm-stats`) los ordena por su ranking, dando más peso a programar y a usar herramientas. Cada día añade solos los modelos gratis nuevos. `/models` enseña la lista y `/model` fija uno.
 
 ## Personalizar
 
@@ -190,6 +254,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
 - **interfaz**: la que eliges con `/interfaz` (`completa`, `compacta`, `zen` o `criaturas`). La clásica y la de alto contraste (y el `"fullscreen": false` de antes) ya no existen: si las tenías, vipcode te avisa una vez y usa la pantalla completa.
 - **firstResponseMs**: cuánto se espera a que una IA empiece a contestar antes de probar otra (40000, unos 40 s; algo más con conversaciones largas). A Gemini se le espera al menos 60 s, porque suele tardar más. No cuenta para los modelos de tu ordenador.
+- **autoCompactTokens**: el máximo de tokens que se le manda a un modelo aunque admita más (90000). Por encima, le llega la [versión resumida](#conversaciones-largas).
 
 Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash), `VIPCODE_BROWSER` (otro navegador) y `VIPCODE_CLIPBOARD` (otro programa para copiar, que reciba el texto por su entrada).
 
@@ -267,10 +332,38 @@ Después de cada edición, le pasa al modelo los errores que encuentre el servid
 - **Carpetas en las que confías.** Un proyecto puede traer su propia configuración de vipcode, y eso podría arrancar programas o mandar tus claves a otro sitio. Por eso vipcode no la usa hasta que confías en la carpeta: te enseña qué cambiaría y te pregunta (`vipcode trust` y `vipcode untrust` lo cambian a mano).
 - **Ficheros e internet.** Solo lee, busca y escribe dentro de la carpeta del proyecto, y no puede leer ni cambiar tus claves ni su configuración. Antes de entrar en una dirección de tu ordenador o de tu red (tu router, `localhost`…) pregunta siempre, aunque tengas `webfetch` en `allow`.
 - **Tus claves.** Los servidores MCP y de lenguaje que arranca vipcode no reciben tus claves: si el paquete de uno estuviera comprometido, no podría llevárselas. «Sí siempre a este comando» tampoco vale si el comando escribe en un fichero (`>`) o lleva `$(…)`: eso se pregunta siempre.
+- **Resúmenes.** Los resúmenes de las conversaciones largas los escribe un modelo a partir de todo lo anterior (también de webs o de salidas de comandos), así que van marcados como contexto y no como instrucciones tuyas.
 - **Tus datos.** vipcode no envía datos de uso a nadie: solo habla con los proveedores de IA que uses, con las webs que consulte el agente, con tus servidores MCP, con LLM Stats si le das tu clave y, como mucho una vez por hora, con npm y GitHub para ver si hay versión nueva.
 - **Planes gratuitos.** Los proveedores sin clave y varios planes gratis pueden guardar lo que les envías o usarlo para entrenar sus modelos. No mandes contraseñas ni código confidencial; para eso usa un modelo local (Ollama, LM Studio) y pon `"keyless": false` en la configuración.
 
 Si encuentras un fallo de seguridad, avísalo en privado como explica [SECURITY.md](SECURITY.md).
+
+## Preguntas frecuentes
+
+**¿De verdad es gratis? ¿Dónde está el truco?**
+vipcode es gratis y de código abierto, y solo usa los planes gratuitos de los proveedores. El «precio» es el de esos planes: tienen límites (por eso vipcode cambia de uno a otro), a veces van lentos o están saturados y algunos pueden guardar lo que les mandas.
+
+**¿Qué proveedores me recomiendas?**
+Sin claves ya funciona. Para trabajar en serio, saca claves gratuitas de NVIDIA, Gemini y Cerebras (ver [Primeros pasos](#primeros-pasos)); con esas tres casi nunca te quedarás sin cupo. Para código privado, un modelo en tu ordenador con Ollama o LM Studio.
+
+**¿Por qué a veces tarda o salen avisos de «saturado» o «no ha empezado a contestar»?**
+Son los planes gratis: en horas de mucho uso los proveedores se saturan o ponen las peticiones en cola. vipcode espera un tiempo razonable, pausa el modelo (o el proveedor entero si no contesta ninguno de sus modelos) y sigue con otro. Con más claves tiene más sitios a los que ir.
+
+**¿Funciona sin internet?**
+Sí, con un modelo en tu ordenador: enciende Ollama, LM Studio o llama.cpp y vipcode lo detecta solo.
+
+**¿Puedo usar un modelo de pago o mi propio servidor?**
+Sí: cualquier servidor compatible con la API de OpenAI se añade en `providers` de la [configuración](#configuración), con su clave en una variable de entorno.
+
+**¿En qué se diferencia de otros agentes como opencode, Aider o Claude Code?**
+Esos agentes usan el modelo que tú elijas, normalmente de pago o con tus propias claves (opencode, por ejemplo, ofrece unos pocos modelos gratis solo dentro de su aplicación). vipcode está hecho para no pagar nunca: junta los planes gratis de muchos proveedores, cambia solo de uno a otro, funciona sin claves y gestiona conversaciones largas con modelos de capacidades muy distintas. Además, todo está en español.
+
+**¿Por qué en español?**
+Porque la mayoría de estas herramientas solo hablan inglés, y programar (o aprender a programar) es más fácil en tu idioma. El agente **profe** está pensado justo para aprender.
+
+## Colaborar
+
+Las ideas, los avisos de fallos y las mejoras son bienvenidos: [CONTRIBUTING.md](CONTRIBUTING.md) explica cómo usar vipcode desde el código, pasar las pruebas y cómo se vigila a diario el catálogo de modelos gratis. Cada cambio pasa más de cien pruebas automáticas en Linux, macOS y Windows antes de publicarse.
 
 ## Licencia
 

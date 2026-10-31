@@ -1,5 +1,7 @@
 # Seguridad
 
+vipcode le deja hacer cosas en tu ordenador a modelos de IA de otros, así que la seguridad va primero: pregunta antes de editar, ejecutar o salir a internet, no sale de la carpeta del proyecto, no ejecuta lo que traiga un proyecto hasta que confías en él y los programas que arranca no reciben tus claves. Todo está explicado en [Seguridad y privacidad](README.md#seguridad-y-privacidad).
+
 ## Versiones con soporte
 
 Solo la última versión publicada (en npm y en las releases de GitHub) recibe arreglos de seguridad. Actualiza con `vipcode update` o `/update`.

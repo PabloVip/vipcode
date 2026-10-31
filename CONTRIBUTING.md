@@ -1,5 +1,12 @@
 # Colaborar con vipcode
 
+¡Gracias por querer ayudar! Las ideas, los avisos de fallos y las mejoras son bienvenidos.
+
+- **¿Has encontrado un fallo?** Lo más fácil es escribir `/bug` dentro de vipcode (o `vipcode bug`): abre un issue con el informe de `vipcode doctor` ya puesto, sin tus claves. Cuenta qué hacías, qué esperabas y qué ha pasado.
+- **¿Un fallo de seguridad?** No abras un issue público: sigue [SECURITY.md](SECURITY.md).
+- **¿Una idea?** Abre un issue contando qué te gustaría poder hacer y por qué.
+- **¿Un cambio en el código?** Mejor si antes lo comentas en un issue, sobre todo si es grande. Después, un pull request con el cambio, sus pruebas y la línea del CHANGELOG (abajo están las normas).
+
 ## Usarlo desde el código
 
 ```bash
@@ -14,6 +21,44 @@ Instalado así, `/update` trae lo último del repositorio con `git pull`, instal
 
 vipcode no se deja modificar a sí mismo. Para trabajar en su código con un vipcode instalado desde esa misma carpeta, arráncalo con `VIPCODE_ALLOW_SELF_EDIT=1 vipcode`, o usa el instalado con npm.
 
+## Cómo está organizado
+
+Es TypeScript (Node.js 22 o superior, módulos ES) y la interfaz está hecha con [Ink](https://github.com/vadimdemedes/ink) (React para la terminal). Lo principal:
+
+| Fichero | Qué hace |
+|---|---|
+| `src/index.ts` | La línea de comandos: `vipcode`, `vipcode run`, `auth`, `skills`, `doctor`… |
+| `src/app.ts` | La aplicación: configuración, proveedores, comandos con `/` y sesiones |
+| `src/agent.ts` | El agente: el bucle de pedir al modelo, ejecutar herramientas y seguir, y los subagentes |
+| `src/router.ts` | Elige el modelo y cambia de uno a otro: límites, pausas, saturados, lentos, proveedores caídos y el cálculo de tokens |
+| `src/context.ts` | La versión resumida de las conversaciones que no caben en los modelos libres |
+| `src/catalog.ts`, `src/discovery.ts` | Los proveedores gratuitos y sus modelos, y cómo se descubren los nuevos |
+| `src/tools.ts` | Las herramientas del agente: leer, editar, buscar, ejecutar, consultar la web… |
+| `src/permissions.ts`, `src/trust.ts` | Qué se pregunta antes de hacer, y la confianza en la configuración de cada carpeta |
+| `src/session.ts`, `src/snapshot.ts` | Conversaciones guardadas, y las instantáneas de `/undo` |
+| `src/mcp.ts`, `src/lsp.ts`, `src/skills.ts` | Servidores MCP, servidores de lenguaje y skills |
+| `src/tui/` | La interfaz de pantalla completa: conversación, ratón, diálogos, estilos y criaturas |
+
+## Pruebas
+
+```bash
+npm test
+```
+
+Compila y pasa todas las pruebas con `node --test`, con un servidor de IA de mentira (`test/helpers/mock-llm.mjs`) y carpetas temporales: nunca tocan tu `~/.vipcode`. Las de la interfaz (`test/fixtures/*.exp`) manejan vipcode en una pseudo-terminal con [expect](https://core.tcl-lang.org/expect/), que viene con macOS y en Linux se instala con `sudo apt-get install expect`; sin él se saltan. En GitHub, cada cambio pasa por Linux (Node 22 y 24), macOS y Windows.
+
+## Normas
+
+- **Todo en español**: los mensajes de vipcode, los comentarios del código y la documentación. Que se entiendan sin saber programar mucho.
+- **Que funcione en macOS, Linux y Windows.** Ojo con las rutas, las shells y los saltos de línea.
+- **Seguridad primero.** Cada función nueva se revisa también pensando en qué podría hacer con ella un modelo engañado o un proyecto malicioso: que no salga de la carpeta, que no lleve claves a otros programas y que no se apruebe sola nada que cambie cosas.
+- **Con pruebas.** Cada arreglo o función nueva lleva su prueba, a ser posible una que fallara sin el cambio.
+- **CHANGELOG.md.** Todo lo que note quien usa vipcode se apunta en «## [Sin publicar]» (Seguridad, Añadido, Cambiado o Corregido), contado para quien lo usa, no para quien lo programa.
+- **Nada de claves en el código**, ni en las pruebas: las de las pruebas son inventadas.
+
+## Publicar una versión
+
+Solo quien mantiene el proyecto: `npm run release -- <versión>` comprueba que todo está en orden, sube la versión, pasa las pruebas, convierte «Sin publicar» del CHANGELOG en la versión nueva, crea la etiqueta y la release de GitHub y publica en npm (`--dry-run` lo simula sin publicar nada).
 
 ## Vigilancia diaria de los proveedores
 
