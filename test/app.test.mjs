@@ -769,6 +769,50 @@ test("velocidad: si una IA no empieza a contestar a tiempo se prueba otra, y las
   ws.cleanup();
 });
 
+test("velocidad: si dos modelos del mismo proveedor no contestan, se pausa el proveedor entero (y no se espera a cada uno)", async () => {
+  // Como pasó con NVIDIA: ninguno de sus modelos manda nada. En «mixto», en cambio, solo hay uno atascado
+  const mock = await startMock(async ({ path: url, body }) => {
+    if (url.startsWith("/caido/") || (url.startsWith("/mixto/") && body.model === "atascado")) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return { text: "TARDE" };
+    }
+    return { text: url.startsWith("/mixto/") ? "MIXTO" : "VIVO" };
+  });
+  const ws = tempWorkspace();
+  let { app, events } = makeApp(ws, mock.url, {
+    providers: [provider("caido", mock.url, ["a", "b", "c"]), provider("vivo", mock.url, ["m"])],
+    enabledProviders: ["caido", "vivo"],
+    firstResponseMs: 300,
+  });
+  try {
+    await app.runPrompt({ text: "hola" }, {});
+    assert.match(events.text, /VIVO/);
+    // Al segundo modelo que no contesta se pausa todo el proveedor: al tercero ni se le pregunta
+    const asked = mock.chats().filter((r) => r.path.startsWith("/caido/")).map((r) => r.body.model);
+    assert.deepEqual(asked, ["a", "b"]);
+    assert.ok(events.notices.some((notice) => /caido\/b: no ha empezado a contestar en 0 s → pausa 5 min a todo caido \(no contesta ninguno de sus modelos\)/.test(notice)), events.notices.join("\n"));
+    assert.match(app.router.describe().find((row) => row.key === "caido/c").status, /en pausa/);
+    app.router.resetCooldowns();
+    await app.shutdown();
+
+    // Un solo modelo atascado no basta: se pausa ese y se sigue con otro del mismo proveedor
+    ({ app, events } = makeApp(ws, mock.url, {
+      providers: [provider("mixto", mock.url, ["atascado", "bien"]), provider("vivo", mock.url, ["m"])],
+      enabledProviders: ["mixto", "vivo"],
+      firstResponseMs: 300,
+    }));
+    await app.runPrompt({ text: "hola" }, {});
+    assert.match(events.text, /MIXTO/);
+    assert.ok(!events.notices.some((notice) => notice.includes("a todo mixto")), events.notices.join("\n"));
+    assert.match(app.router.describe().find((row) => row.key === "mixto/bien").status, /^disponible/);
+  } finally {
+    app.router.resetCooldowns();
+    await app.shutdown();
+    await mock.close();
+    ws.cleanup();
+  }
+});
+
 
 test("si todos los modelos fallan no se dice que la conversación es demasiado larga (solo si de verdad no cabe)", async () => {
   // Los dos contestan siempre con un error raro (ni de límites ni de contexto)

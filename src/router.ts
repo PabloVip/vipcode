@@ -59,6 +59,9 @@ interface Classified {
   kind: ErrorKind;
   retryAfterMs: number;
   detail: string;
+  // El proveedor no responde (no empieza a contestar, no hay conexión, su pasarela se rinde): no es algo de este modelo
+  // en concreto, y si les pasa a dos modelos suyos se pausa entero
+  stall?: boolean;
 }
 
 export interface SlotRow {
@@ -95,6 +98,9 @@ export interface UsageDay {
 export class NoSlotError extends Error {}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// Si dos modelos distintos de un proveedor no responden en este tiempo, se pausa el proveedor entero, y tanto como esto
+const STALL_WINDOW_MS = 10 * 60 * 1000;
+const PROVIDER_PAUSE_MS = 5 * 60 * 1000;
 // Si el proveedor deja de mandar datos este tiempo cuando ya está contestando, cortamos y probamos otro
 const IDLE_MS = 120000;
 // Lo que tarda cada modelo en empezar a contestar se recuerda unas horas (luego se le da otra oportunidad)
@@ -256,10 +262,10 @@ function classify(err: unknown): Classified {
 
   // Tarda demasiado en empezar a contestar: un rato en pausa, para no volver a esperarle enseguida
   if (message.startsWith("no ha empezado a contestar")) {
-    return { kind: "server", retryAfterMs: 5 * 60000, detail: message };
+    return { kind: "server", retryAfterMs: 5 * 60000, detail: message, stall: true };
   }
   if (err instanceof OpenAI.APIConnectionError) {
-    return { kind: "server", retryAfterMs: 30000, detail: "sin conexión" };
+    return { kind: "server", retryAfterMs: 30000, detail: "sin conexión", stall: true };
   }
   if (err instanceof OpenAI.APIError) {
     status = err.status || 0;
@@ -324,7 +330,8 @@ function classify(err: unknown): Classified {
     if (status === 503 || /overloaded|high demand/.test(lower)) {
       return { kind: "server", retryAfterMs: retryAfterMs || 120000, detail: `saturado${status ? ` (${status})` : ""}` };
     }
-    return { kind: "server", retryAfterMs: 30000, detail: status ? `error del servidor (${status})` : "el servidor no responde" };
+    // 502 y 504 los da la pasarela del proveedor cuando lo de detrás no contesta
+    return { kind: "server", retryAfterMs: 30000, detail: status ? `error del servidor (${status})` : "el servidor no responde", stall: !status || status === 502 || status === 504 };
   }
   if (/respuesta vacía/.test(lower)) {
     return { kind: "other", retryAfterMs: 0, detail: "respuesta vacía" };
@@ -461,6 +468,8 @@ export class Router {
   recent: Record<string, number[]> = {};
   // Lo que suele tardar cada modelo en empezar a contestar (media en la que pesa más lo último)
   speed: Record<string, { ms: number; at: number }> = {};
+  // Modelos de cada proveedor que no han respondido hace poco (cuándo y cuál), para ver si lo que falla es el proveedor
+  private stalls: Record<string, { key: string; at: number }[]> = {};
   // Cuántos tokens cuentan de verdad los proveedores por cada uno de los que calculamos: estimateTokens va por caracteres
   // y el código, por ejemplo, gasta más tokens por carácter que el texto. Media en la que pesa más lo último; null hasta
   // la primera respuesta que lo diga
@@ -675,6 +684,19 @@ export class Router {
     }
     const ratio = clampFactor(usage.prompt / estimated);
     this.tokenFactor = this.tokenFactor === null ? ratio : clampFactor(this.tokenFactor * 0.7 + ratio * 0.3);
+  }
+
+  // Apunta que este modelo no ha respondido y dice si ya le había pasado lo mismo hace poco a otro modelo de su proveedor
+  // (un solo modelo atascado no basta para pausar a todo el proveedor)
+  private providerStalled(slot: Slot, now: number): boolean {
+    const name = slot.provider.name;
+    const recent = (this.stalls[name] || []).filter((entry) => now - entry.at < STALL_WINDOW_MS);
+    if (recent.some((entry) => entry.key !== slot.key)) {
+      delete this.stalls[name];
+      return true;
+    }
+    this.stalls[name] = [...recent, { key: slot.key, at: now }];
+    return false;
   }
 
   // Por cuánto hay que multiplicar lo que calcula estimateTokens para tener lo que cuentan los proveedores
@@ -952,8 +974,18 @@ export class Router {
           this.setCooldown(scope, until);
           action = `pausa hasta ${new Date(until).toLocaleString()}`;
         } else if (info.kind === "server") {
-          this.setCooldown([slot], now + info.retryAfterMs);
-          action = `pausa ${duration(info.retryAfterMs)}`;
+          if (info.stall && this.providerStalled(slot, now)) {
+            // Tampoco contestaba otro modelo suyo hace poco: lo que falla es el proveedor. Se pausa entero, y así no se
+            // pierde el tiempo de espera con cada uno de sus modelos
+            this.setCooldown(
+              this.slots.filter((other) => other.provider === slot.provider),
+              now + Math.max(info.retryAfterMs, PROVIDER_PAUSE_MS),
+            );
+            action = `pausa ${duration(Math.max(info.retryAfterMs, PROVIDER_PAUSE_MS))} a todo ${slot.provider.label || slot.provider.name} (no contesta ninguno de sus modelos)`;
+          } else {
+            this.setCooldown([slot], now + info.retryAfterMs);
+            action = `pausa ${duration(info.retryAfterMs)}`;
+          }
         } else if (info.kind === "auth") {
           // Si la clave falla, fallan todos los modelos de ese proveedor
           for (const other of this.slots) {

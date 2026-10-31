@@ -4,6 +4,10 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Corregido
+
+- Cuando todo un proveedor deja de responder (por ejemplo, el plan gratis de NVIDIA saturado), vipcode ya no espera 40 segundos con cada uno de sus modelos ni enseña un aviso por cada uno: si dos modelos distintos del mismo proveedor no contestan en pocos minutos, pausa el proveedor entero 5 minutos y sigue enseguida con otros. Si solo falla un modelo, sigue pausándose solo ese.
+
 ## [0.3.4] - 2026-10-31
 
 ### Cambiado
