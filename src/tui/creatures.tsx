@@ -326,6 +326,16 @@ export function makeCreature(seed = Math.floor(Math.random() * 4294967296)): Cre
   return { name, message, color: body, rare, pixels: grid, big: detailed(grid, { body, light, shade, outline }) };
 }
 
+// Otra criatura que no se llame como la de ahora (si no, parecería que no ha cambiado). «make»: de dónde salen (para
+// las pruebas)
+export function anotherCreature(current: Creature, make: () => Creature = makeCreature): Creature {
+  let next = make();
+  for (let tries = 0; tries < 20 && next.name === current.name; tries++) {
+    next = make();
+  }
+  return next;
+}
+
 // Al doble de tamaño redondeando las esquinas (Scale2x: cada píxel pasa a cuatro y, en las diagonales, toma el color de
 // los vecinos que coinciden)
 function scale2x(grid: Pixels): Pixels {

@@ -1413,7 +1413,7 @@ test("interfaces: cuál sale de la configuración, cómo pinta cada una y las qu
 });
 
 test("criaturas: monstruitos al azar, repetibles con la misma semilla, y su panel", async () => {
-  const { makeCreature, CreaturePanel, CreatureView, creatureLayout, pixelMode, spriteRows, wrapWords } = await import("../dist/tui/creatures.js");
+  const { makeCreature, anotherCreature, CreaturePanel, CreatureView, creatureLayout, pixelMode, spriteRows, wrapWords } = await import("../dist/tui/creatures.js");
   const { INTERFACES } = await import("../dist/interfaces.js");
   const { setLook } = await import("../dist/tui/theme.js");
   const { renderToString } = await import("ink");
@@ -1425,6 +1425,12 @@ test("criaturas: monstruitos al azar, repetibles con la misma semilla, y su pane
   const many = Array.from({ length: 400 }, (_, seed) => makeCreature(seed));
   assert.ok(new Set(many.map((creature) => creature.name)).size > 250);
   assert.equal(new Set(many.map((creature) => JSON.stringify(creature.pixels))).size, many.length);
+  // La que sale nueva no se llama nunca como la de antes: si sale con el mismo nombre, se saca otra
+  const before = makeCreature(1);
+  let made = 0;
+  const after = anotherCreature(before, () => ({ ...makeCreature(++made), name: made < 3 ? before.name : "Otro" }));
+  assert.equal(made, 3);
+  assert.equal(after.name, "Otro");
   for (const creature of many) {
     // 16 × 16 píxeles, de un color o vacíos, y simétrica salvo el brillo y hacia dónde miran los ojos; la grande, 32 × 32
     assert.equal(creature.pixels.length, 16);

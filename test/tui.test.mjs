@@ -273,9 +273,11 @@ test("interfaz: la de criaturas pone un monstruito a la derecha que cambia con c
         const where = `${size.join("×")} ${env.TERM_PROGRAM || ""}`;
         assert.equal(result.code, 0, `${where}\n${result.plain.slice(-3000)}`);
         assert.match(result.plain, /TUI-CRIATURAS-OK/);
-        // Al elegirla, la que había; otra al terminar la respuesta y otra al pincharla: sus nombres, entre los bordes
-        const names = new Set([...result.plain.matchAll(/│ +(?:★ )?([A-Z][a-zñáéíóú]+) +│/g)].map((match) => match[1]));
-        assert.ok(names.size >= 3, `${where}: criaturas vistas: ${[...names].join(", ")}`);
+        // Al elegirla, la que había; otra al terminar la respuesta y otra al pincharla: sus nombres (entre los bordes) en
+        // el orden en que salen. Seguidas nunca se llaman igual, pero la tercera sí puede llamarse como la primera
+        const seen = [...result.plain.matchAll(/│ +(?:★ )?([A-Z][a-zñáéíóú]+) +│/g)].map((match) => match[1]);
+        const changes = seen.filter((name, index) => name !== seen[index - 1]);
+        assert.ok(changes.length >= 3, `${where}: criaturas vistas: ${changes.join(", ")}`);
         // Se guarda para la próxima vez
         assert.equal(JSON.parse(fs.readFileSync(path.join(ws.home, "config.json"), "utf8")).interfaz, "criaturas");
       } finally {

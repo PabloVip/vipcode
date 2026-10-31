@@ -20,7 +20,7 @@ import { colorPreview } from "../ui.js";
 import { CHECK_MS, checkForUpdate, stepProgress } from "../update.js";
 import { INTERFACES, interfaceFor } from "../interfaces.js";
 import { useConversation } from "./conversation.js";
-import { CreaturePanel, creatureLayout, makeCreature } from "./creatures.js";
+import { CreaturePanel, anotherCreature, creatureLayout, makeCreature } from "./creatures.js";
 import { type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
 import * as E from "./editor.js";
 import { Bullet, type Item, type NewItem, ToolHeader, formatDuration, oneLine, shortTokens, tildify } from "./items.js";
@@ -366,8 +366,10 @@ function Main(props: { app: App; initial: string }) {
   const layout = creatureLayout(columns, rows);
   // Al pincharla sale otra, que se presenta (salvo si es dorada: entonces lo dice)
   const pokeCreature = () => {
-    const next = makeCreature();
-    setCreature(next.rare ? next : { ...next, message: `¡Hola! Soy ${next.name}` });
+    setCreature((current) => {
+      const next = anotherCreature(current);
+      return next.rare ? next : { ...next, message: `¡Hola! Soy ${next.name}` };
+    });
   };
   const side = layout
     ? { width: layout.width, render: (height: number) => <CreaturePanel creature={creature} busy={busy} layout={layout} height={height} />, onClick: pokeCreature }
@@ -540,7 +542,7 @@ function Main(props: { app: App; initial: string }) {
         });
         // Interfaz de criaturas: con cada respuesta, otra
         if (look.interface.pets) {
-          setCreature(makeCreature());
+          setCreature((current) => anotherCreature(current));
         }
       }
       // Si se acaban las peticiones gratis de hoy, la cuenta gratis que más da (una vez por proveedor)

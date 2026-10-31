@@ -8,6 +8,10 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 - **Licencia: pasa de MIT a AGPL-3.0 (o posterior).** Puedes seguir usando vipcode para lo que quieras, también en el trabajo, y cambiarlo para ti. Quien publique una versión modificada, o la ofrezca como servicio por internet, tiene que publicar también su código con la misma licencia. Las versiones hasta la 0.3.2 siguen siendo MIT. `/help` y `vipcode --help` dicen ahora de quién es, que no tiene garantía y con qué licencia se usa, como pide la AGPL.
 
+### Corregido
+
+- En la interfaz de criaturas, la que sale nueva (al acabar una respuesta o al pincharla) ya no puede llamarse igual que la que había: muy de vez en cuando parecía que no había cambiado.
+
 ## [0.3.2] - 2026-10-31
 
 ### Añadido
