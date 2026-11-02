@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.4.0] - 2026-11-02
+
 ### Añadido
 
 - **Comandos en segundo plano.** El agente puede dejar en marcha un servidor o un «watch» y seguir trabajando, mirar lo que escribe y pararlo, en vez de quedarse bloqueado hasta que se acababa el tiempo. Se aprueban como cualquier otro comando, se ven en la barra de abajo y con el nuevo `/procesos` (que también los para), y se paran solos al cerrar vipcode.
@@ -340,7 +342,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.3.6...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/PabloVip/vipcode/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/PabloVip/vipcode/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/PabloVip/vipcode/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/PabloVip/vipcode/compare/v0.3.3...v0.3.4
