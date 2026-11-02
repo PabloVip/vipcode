@@ -10,6 +10,7 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ### Corregido
 
+- **Ya no se pierden teclas al escribir rápido.** Si varias teclas llegaban antes de que la pantalla se volviera a pintar (más fácil en un ordenador lento o al mantener pulsado borrar), algunas se perdían o los borrados no contaban, en la caja de escribir y en los menús, incluido el de pegar una clave.
 - **Windows: pulsar Esc justo cuando arranca un comando en segundo plano ya no debería dejarlo en marcha.** El programa podía seguir funcionando aunque se parara la shell que lo lanzaba. Ahora, antes de pararlo, se le da un momento para arrancar.
 
 ## [0.4.1] - 2026-11-02

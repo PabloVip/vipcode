@@ -1,0 +1,61 @@
+# Teclas que llegan seguidas, sin esperar a que se pinte, en la caja de escribir y en un menú: no se puede perder ninguna (lo lanza
+# test/tui.test.mjs)
+set timeout 30
+log_user 1
+set cli [lindex $argv 0]
+match_max -d 200000
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
+spawn -noecho node $cli
+stty rows 30 columns 110 < $spawn_out(slave,name)
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no arranca" }
+}
+pausa 0.3
+# La caja de escribir: letras y borrados seguidos
+send "h"
+send "o"
+send "l"
+send "x"
+send "\177"
+send "a"
+send "\177\177\177\177"
+send "a"
+send "d"
+send "i"
+send "o"
+send "s"
+pausa 0.3
+send "\r"
+expect {
+  "ECO:adios" {}
+  timeout { falla "se han perdido teclas en la caja de escribir" }
+}
+expect {
+  "Escribe tu mensaje" {}
+  timeout { falla "no vuelve a quedar libre" }
+}
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-TECLAS-OK"
+exit 0

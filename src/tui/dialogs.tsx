@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Pablo Vicente Juan
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { Box, Text, useInput, usePaste } from "ink";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import type { SelectItem } from "../app.js";
 import { type PermissionReply, type PermissionRequest, suggestPattern } from "../permissions.js";
 import { showControl, stripControl } from "../sanitize.js";
@@ -24,6 +24,36 @@ interface Option {
 
 export type PermissionChoice = { reply: PermissionReply; grant?: "kind" | "pattern"; pattern?: string };
 
+// Un valor que está siempre al día aunque lleguen varias teclas antes de volver a pintar (al escribir rápido, o en un ordenador
+// lento): con el de React cada tecla partiría de lo último que se pintó, y se perderían las anteriores
+function useLatest<T>(initial: T): [T, React.MutableRefObject<T>, (change: (current: T) => T) => void] {
+  const [value, setValue] = useState(initial);
+  const latest = useRef(value);
+  const update = (change: (current: T) => T) => {
+    latest.current = change(latest.current);
+    setValue(latest.current);
+  };
+  return [value, latest, update];
+}
+
+// Varias teclas que han llegado juntas: se aplican en orden. Un borrado no es una letra
+export function applyTyped<T>(state: T, input: string, onBackspace: (state: T) => T, onText: (state: T, text: string) => T): T {
+  let next = state;
+  let text = "";
+  for (const letter of input) {
+    if (letter === "\x7f" || letter === "\b") {
+      if (text) {
+        next = onText(next, text);
+        text = "";
+      }
+      next = onBackspace(next);
+    } else if (letter >= " " || letter === "\n") {
+      text += letter;
+    }
+  }
+  return text ? onText(next, text) : next;
+}
+
 // Pregunta antes de editar, ejecutar o salir a internet, enseñando el diff o el comando
 export function PermissionDialog(props: { request: PermissionRequest; agent: string; onDone: (choice: PermissionChoice) => void }) {
   const { request } = props;
@@ -37,9 +67,9 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
   options.push({ key: "n", label: "No" });
   options.push({ key: "e", label: "No, y decirle qué hacer en su lugar" });
 
-  const [selected, setSelected] = useState(0);
+  const [selected, , setSelected] = useLatest(0);
   const [explaining, setExplaining] = useState(false);
-  const [feedback, setFeedback] = useState<EditorState>(EMPTY);
+  const [feedback, latestFeedback, setFeedback] = useLatest<EditorState>(EMPTY);
 
   const choose = (key: string) => {
     if (key === "s") {
@@ -59,28 +89,28 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
     const { text, enter } = splitEnter(input, key.return);
     if (explaining) {
       if (enter) {
-        const value = insert(feedback, text).value;
+        const value = insert(latestFeedback.current, text).value;
         props.onDone({ reply: { allow: false, feedback: value.trim() || undefined } });
       } else if (key.escape) {
         setExplaining(false);
       } else if (key.backspace) {
-        setFeedback(backspace(feedback));
+        setFeedback(backspace);
       } else if (key.leftArrow) {
-        setFeedback(moveLeft(feedback));
+        setFeedback(moveLeft);
       } else if (key.rightArrow) {
-        setFeedback(moveRight(feedback));
+        setFeedback(moveRight);
       } else if (key.ctrl && input === "w") {
-        setFeedback(deleteWordBack(feedback));
+        setFeedback(deleteWordBack);
       } else if (input && !key.ctrl && !key.meta) {
-        setFeedback(insert(feedback, input));
+        setFeedback((current) => applyTyped(current, input, backspace, insert));
       }
       return;
     }
     const letter = text.trim().toLowerCase();
     if (key.upArrow) {
-      setSelected((selected - 1 + options.length) % options.length);
+      setSelected((current) => (current - 1 + options.length) % options.length);
     } else if (key.downArrow || key.tab) {
-      setSelected((selected + 1) % options.length);
+      setSelected((current) => (current + 1) % options.length);
     } else if (key.escape) {
       choose("n");
     } else if (letter && options.some((option) => option.key === letter)) {
@@ -94,7 +124,7 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
 
   usePaste((text) => {
     if (explaining) {
-      setFeedback(insert(feedback, text.replace(/\r?\n/g, " ")));
+      setFeedback((current) => insert(current, text.replace(/\r?\n/g, " ")));
     }
   });
 
@@ -147,8 +177,8 @@ function matches<T>(item: SelectItem<T>, query: string): boolean {
 
 // Lista para elegir (modelos, sesiones, agentes, proveedores); escribir filtra
 export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; onDone: (value: T | null) => void; onPick?: (value: T) => void }) {
-  const [filter, setFilter] = useState("");
-  const [selected, setSelected] = useState(0);
+  const [filter, latestFilter, setFilter] = useLatest("");
+  const [selected, latestSelected, setSelected] = useLatest(0);
   const filtered = useMemo(() => {
     const query = filter.toLowerCase();
     if (!query) {
@@ -161,44 +191,48 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
 
   useInput((input, key) => {
     const { text, enter } = splitEnter(input, key.return);
+    // Lo que hay ahora de verdad, aunque todavía no se haya pintado
+    const current = () => {
+      const query = latestFilter.current.toLowerCase();
+      return query ? props.items.filter((item) => matches(item, query)) : props.items;
+    };
+    const position = () => Math.max(0, Math.min(latestSelected.current, current().length - 1));
     if (key.escape) {
       props.onDone(null);
-    } else if (props.onPick && (enter || input === " ")) {
-      // Con casillas: marca o desmarca y la lista sigue abierta, con su filtro y en el mismo sitio
-      const list = text && enter ? props.items.filter((item) => matches(item, (filter + text).toLowerCase())) : filtered;
-      const item = list[text && enter ? 0 : cursor];
-      if (text && enter) {
-        setFilter(filter + text);
-        setSelected(0);
+    } else if (enter || (props.onPick && input === " ")) {
+      // Si el Enter vino pegado a texto, ese texto también filtra
+      if (enter && text) {
+        setFilter((value) => value + text);
+        setSelected(() => 0);
       }
-      if (item) {
+      const item = current()[position()];
+      if (!props.onPick) {
+        props.onDone(item ? item.value : null);
+      } else if (item) {
+        // Con casillas: marca o desmarca y la lista sigue abierta, con su filtro y en el mismo sitio
         props.onPick(item.value);
       }
-    } else if (enter) {
-      // Si el Enter vino pegado a texto, ese texto también filtra
-      let list = filtered;
-      let index = selected;
-      if (text) {
-        const query = (filter + text).toLowerCase();
-        list = props.items.filter((item) => matches(item, query));
-        index = 0;
-      }
-      const item = list[index];
-      props.onDone(item ? item.value : null);
     } else if (key.upArrow) {
-      setSelected(Math.max(0, selected - 1));
+      setSelected(() => Math.max(0, position() - 1));
     } else if (key.downArrow || key.tab) {
-      setSelected(Math.min(filtered.length - 1, selected + 1));
+      setSelected(() => Math.min(current().length - 1, position() + 1));
     } else if (key.pageUp) {
-      setSelected(Math.max(0, selected - 10));
+      setSelected(() => Math.max(0, position() - 10));
     } else if (key.pageDown) {
-      setSelected(Math.min(filtered.length - 1, selected + 10));
+      setSelected(() => Math.min(current().length - 1, position() + 10));
     } else if (key.backspace) {
-      setFilter(filter.slice(0, previousBoundary(filter, filter.length)));
-      setSelected(0);
+      setFilter((value) => value.slice(0, previousBoundary(value, value.length)));
+      setSelected(() => 0);
     } else if (input && !key.ctrl && !key.meta) {
-      setFilter(filter + input);
-      setSelected(0);
+      setFilter((value) =>
+        applyTyped(
+          value,
+          input,
+          (state) => state.slice(0, previousBoundary(state, state.length)),
+          (state, typed) => state + typed,
+        ),
+      );
+      setSelected(() => 0);
     }
   });
 
@@ -259,29 +293,29 @@ export function ChecklistDialog<T>(props: { title: string; items: () => SelectIt
 
 // Pide un texto (las claves se ven como •••)
 export function PromptDialog(props: { title: string; mask?: boolean; placeholder?: string; onDone: (value: string | null) => void }) {
-  const [state, setState] = useState<EditorState>(EMPTY);
+  const [state, latestState, setState] = useLatest<EditorState>(EMPTY);
 
   useInput((input, key) => {
     const { text, enter } = splitEnter(input, key.return);
     if (key.escape) {
       props.onDone(null);
     } else if (enter) {
-      props.onDone(insert(state, text).value);
+      props.onDone(insert(latestState.current, text).value);
     } else if (key.backspace) {
-      setState(backspace(state));
+      setState(backspace);
     } else if (key.leftArrow) {
-      setState(moveLeft(state));
+      setState(moveLeft);
     } else if (key.rightArrow) {
-      setState(moveRight(state));
+      setState(moveRight);
     } else if (key.ctrl && input === "u") {
-      setState(EMPTY);
+      setState(() => EMPTY);
     } else if (input && !key.ctrl && !key.meta) {
-      setState(insert(state, input));
+      setState((current) => applyTyped(current, input, backspace, insert));
     }
   });
 
   usePaste((text) => {
-    setState(insert(state, text.replace(/\r?\n/g, "").trim()));
+    setState((current) => insert(current, text.replace(/\r?\n/g, "").trim()));
   });
 
   let shown = state.value;

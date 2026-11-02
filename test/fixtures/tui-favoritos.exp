@@ -50,11 +50,13 @@ expect {
 }
 pausa 0.3
 # Sin filtro se marca otro con el espacio, y otra vez para quitarlo: sigue siendo el mismo menú
-for {set i 0} {$i < 3} {incr i} {
-  send "\177"
-  pausa 0.1
-}
-send "a/m"
+# Seguidas y sin esperar a que se pinte, como al escribir rápido en un ordenador lento: no se puede perder ninguna
+send "\177"
+send "\177"
+send "\177"
+send "a"
+send "/"
+send "m"
 pausa 0.3
 send " "
 expect {

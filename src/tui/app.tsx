@@ -24,7 +24,7 @@ import { CHECK_MS, checkForUpdate, stepProgress } from "../update.js";
 import { INTERFACES, interfaceFor } from "../interfaces.js";
 import { useConversation } from "./conversation.js";
 import { CreaturePanel, anotherCreature, creatureLayout, makeCreature } from "./creatures.js";
-import { ChecklistDialog, type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
+import { ChecklistDialog, type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog, applyTyped } from "./dialogs.js";
 import * as E from "./editor.js";
 import { Bullet, type Item, type NewItem, ToolHeader, formatDuration, oneLine, shortTokens, tildify } from "./items.js";
 import { look, setLook } from "./theme.js";
@@ -369,7 +369,14 @@ function Main(props: { app: App; initial: string }) {
   const { columns, rows } = useWindowSize();
   const [items, setItems] = useState<Item[]>([{ id: 0, kind: "banner" }]);
   const nextId = useRef(1);
-  const [editor, setEditor] = useState<E.EditorState>(E.EMPTY);
+  const [editor, paintEditor] = useState<E.EditorState>(E.EMPTY);
+  // Lo que hay de verdad en la caja, aunque todavía no se haya pintado: si llegan varias teclas seguidas, cada una tiene que partir
+  // de la anterior, no de lo último que se pintó
+  const latestEditor = useRef(editor);
+  const setEditor = (next: E.EditorState | ((current: E.EditorState) => E.EditorState)) => {
+    latestEditor.current = typeof next === "function" ? next(latestEditor.current) : next;
+    paintEditor(latestEditor.current);
+  };
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [todos, setTodos] = useState<Todo[]>(app.agent.session.todos);
@@ -1047,6 +1054,7 @@ function Main(props: { app: App; initial: string }) {
   };
 
   useInput((input, key) => {
+    const editor = latestEditor.current;
     // AvPág/RePág y Ctrl+Inicio/Ctrl+Fin mueven la conversación (lo hace el useInput de arriba)
     if (key.pageUp || key.pageDown || (key.ctrl && (key.home || key.end))) {
       return;
@@ -1238,6 +1246,11 @@ function Main(props: { app: App; initial: string }) {
         void submit(E.insert(editor, input.slice(0, -1)).value);
         return;
       }
+      // Una tecla de borrar mantenida puede llegar como varias de golpe, y un borrado no es una letra
+      if (/[\x7f\b]/.test(input)) {
+        update(applyTyped(editor, input.replace(/\r\n?/g, "\n"), E.backspace, E.insert));
+        return;
+      }
       update(E.insert(editor, input.replace(/\r\n?/g, "\n")));
     }
   });
@@ -1257,7 +1270,7 @@ function Main(props: { app: App; initial: string }) {
           return;
         }
       }
-      update(E.insert(editor, text.replace(/\r\n?/g, "\n")));
+      update(E.insert(latestEditor.current, text.replace(/\r\n?/g, "\n")));
     },
     { isActive: !dialog && conversation.searchBar === null },
   );

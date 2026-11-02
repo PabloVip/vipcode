@@ -338,3 +338,17 @@ test("interfaz: /favoritos marca un modelo desde la lista, la barra lo enseña y
     ws.cleanup();
   }
 });
+
+test("interfaz: las teclas que llegan seguidas no se pierden en la caja de escribir", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const mock = await startMock(({ body }) => ({ text: `ECO:${contentText(lastMessage(body).content)}` }));
+  const ws = tempWorkspace();
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  try {
+    const result = await runExpect("tui-teclas.exp", ws);
+    assert.equal(result.code, 0, result.plain.slice(-2000));
+    assert.match(result.plain, /TUI-TECLAS-OK/);
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
+});
