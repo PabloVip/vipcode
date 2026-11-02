@@ -1913,6 +1913,12 @@ test("/favoritos: añadir, quitar y borrar se guardan, avisa si son pocos y no a
   await app.handleCommand("/favoritos añadir no/existe", adapter);
   assert.match(out.error.at(-1), /No hay ningún modelo que encaje con «no\/existe»/);
   assert.deepEqual(saved(), []);
+  // En el menú de comandos, que solo enseña la descripción, se ven las opciones
+  const listed = app.commandSuggestions().find((command) => command.name === "favoritos").description;
+  for (const option of ["add", "quitar", "on", "off", "borrar"]) {
+    assert.ok(listed.includes(option), option);
+  }
+  assert.ok(`/favoritos ${listed}`.length <= 100, "tiene que caber en una línea");
   // Sin menú (vipcode run…) hay que decir cuál
   await app.handleCommand("/favoritos añadir", adapter);
   assert.match(out.error.at(-1), /Escribe qué modelo/);
