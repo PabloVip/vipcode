@@ -1357,6 +1357,35 @@ test("agente: si cambia de modelo a mitad de tarea, el nuevo recibe la nota de r
   ws.cleanup();
 });
 
+test("agente: un modelo lento no pierde la tarea por stickyWaitMs: solo cuenta firstResponseMs", async () => {
+  let aCalls = 0;
+  const mock = await startMock(async ({ path: url }) => {
+    if (url.startsWith("/a/")) {
+      aCalls++;
+      if (aCalls === 1) {
+        return { tools: [{ name: "list_dir", args: {} }] };
+      }
+      // Tarda bastante más que stickyWaitMs en empezar a contestar, pero menos que firstResponseMs
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      return { text: "A LENTO" };
+    }
+    return { text: "B" };
+  });
+  const ws = tempWorkspace();
+  const { app, events } = makeApp(ws, mock.url, {
+    providers: [provider("a", mock.url, ["m"]), provider("b", mock.url, ["m"])],
+    enabledProviders: ["a", "b"],
+    firstResponseMs: 10000,
+    stickyWaitMs: 100,
+  });
+  await app.runPrompt({ text: "mira" }, {});
+  assert.match(events.text, /A LENTO/);
+  assert.ok(!mock.chats().some((r) => r.path.startsWith("/b/")));
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
 test("subagente: si acaba anunciando lo que iba a hacer, el informe dice que está INCOMPLETO", async () => {
   const mock = await startMock(({ body }) => {
     const last = lastMessage(body);

@@ -25,7 +25,7 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - **Atascos:** si la misma herramienta falla tres veces sobre lo mismo (por ejemplo, editar el mismo fichero), se le pide al modelo que cambie de estrategia; si sigue atascado después de varios avisos, vipcode para y te dice el último error en vez de gastar los pasos (y tu cupo) en nada.
 - **Respuestas que se quedan en «Voy a…»:** si el modelo termina anunciando lo que va a hacer sin llamar a ninguna herramienta, se le pide que lo haga (como mucho dos veces por mensaje).
 - **Subagentes incompletos:** si un subagente acaba anunciando lo que iba a hacer o se queda sin pasos, su informe empieza por `[Subagente INCOMPLETO …]`, para que el agente principal no dé por hecha esa parte.
-- **Relevo entre modelos:** si a mitad de una tarea contesta otro modelo, recibe una nota con las tareas pendientes y los ficheros ya cambiados. Y si el modelo de la tarea solo se queda sin cupo un rato corto, se le espera (`stickyWaitMs`, 90 s por defecto) en vez de pasarle la tarea a medias a otro.
+- **Relevo entre modelos:** si a mitad de una tarea contesta otro modelo, recibe una nota con las tareas pendientes y los ficheros ya cambiados. Y si el modelo de la tarea solo se queda sin cupo un rato corto, se le espera (`stickyWaitMs`, 30 s por defecto) en vez de pasarle la tarea a medias a otro.
 - **Al llegar al máximo de pasos** se dice qué tareas quedan y cuál fue el último error.
 - **El modelo sabe qué es vipcode:** sus /comandos y sus agentes van en el prompt, así que ya no busca por el disco para averiguarlo. Si vipcode se abre en tu carpeta personal, se le avisa de que no es un proyecto.
 

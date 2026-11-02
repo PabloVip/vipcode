@@ -662,7 +662,7 @@ export class Agent {
     let printedText = false;
     let stickyWaitMs = 0;
     if (relay.previousSlot) {
-      stickyWaitMs = this.deps.config.stickyWaitMs ?? 90000;
+      stickyWaitMs = this.deps.config.stickyWaitMs ?? 30000;
     }
     const result = await this.deps.router.chat(
       {
