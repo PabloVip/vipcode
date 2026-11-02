@@ -222,8 +222,9 @@ function powershell(file: string): Shell {
     name: "PowerShell",
     file,
     flavor,
-    // -OutputFormat Text: sin él, con -EncodedCommand los errores salen en CLIXML («#< CLIXML <Objs…»), ilegibles para
-    // el modelo. Va codificado para que las comillas del comando lleguen tal cual
+    // -OutputFormat Text: sin él, con -EncodedCommand PowerShell 7 saca los errores en CLIXML («#< CLIXML <Objs…»), ilegibles
+    // para el modelo. Windows PowerShell 5.1 los saca así de todos modos: los decodifica decodeClixml. Va codificado para
+    // que las comillas del comando lleguen tal cual
     args: (command) => [
       "-NoProfile",
       "-NonInteractive",
@@ -238,7 +239,7 @@ function powershell(file: string): Shell {
   };
 }
 
-// Por si algún PowerShell manda los errores en CLIXML de todos modos: el texto de los errores, decodificado
+// Windows PowerShell 5.1 manda los errores en CLIXML aunque se le pida texto: el texto de los errores, decodificado
 export function decodeClixml(text: string): string {
   if (!text.includes("#< CLIXML")) {
     return text;

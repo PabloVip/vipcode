@@ -161,7 +161,8 @@ test("PowerShell: sintaxis comprobada antes de ejecutar, en UTF-8, sin CLIXML y 
   const real = shell.detectShell({ PATH: process.env.PATH, VIPCODE_SHELL: pwsh }, process.platform);
   const exec = (command) => {
     const r = spawnSync(real.file, real.args(command), { encoding: "utf8" });
-    return { code: r.status, out: `${r.stdout}${r.stderr}` };
+    // Windows PowerShell 5.1 manda los errores en CLIXML aun con -OutputFormat Text: bash los decodifica, y esto también
+    return { code: r.status, out: shell.decodeClixml(`${r.stdout}${r.stderr}`) };
   };
   let r = exec("Write-Output 'hola ñ'; exit 4");
   assert.equal(r.code, 4);
@@ -308,7 +309,9 @@ test("seguridad: lo aprobado para una carpeta no vale en otra con workdir, y .gi
   if (process.platform !== "win32") {
     fs.symlinkSync(".git", path.join(root, "enlace"));
   }
-  for (const workdir of [".git", ".git/hooks", ".GIT/hooks", ...(process.platform === "win32" ? [] : ["enlace/hooks"])]) {
+  // .GIT solo existe si el disco no distingue mayúsculas (Windows y macOS)
+  const inGit = [".git", ".git/hooks", ".GIT/hooks", "enlace/hooks"].filter((workdir) => fs.existsSync(path.join(root, workdir)));
+  for (const workdir of inGit) {
     const result = await run(ctx, "bash", { command: "echo x > pre-commit", workdir });
     assert.match(result.output, /dentro de \.git/, workdir);
   }
