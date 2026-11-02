@@ -13,6 +13,8 @@ export const MAX_RUNNING = 5;
 const MAX_KEPT = 200000;
 // Los que ya han terminado que se recuerdan, para poder ver cómo acabaron
 const MAX_FINISHED = 20;
+// Lo que se espera en Windows antes de parar un comando que acaba de arrancar
+const START_GRACE_MS = 1500;
 
 export interface BackgroundJob {
   id: string;
@@ -200,6 +202,12 @@ export async function stopJob(job: BackgroundJob): Promise<void> {
     return;
   }
   job.stopped = true;
+  // En Windows no hay grupos de procesos: taskkill /T para lo que ve en ese momento, y la shell puede estar todavía lanzando el
+  // programa, que se quedaría en marcha para siempre. Se le da tiempo a arrancar
+  const young = START_GRACE_MS - (Date.now() - job.started);
+  if (process.platform === "win32" && young > 0) {
+    await new Promise((resolve) => setTimeout(resolve, young));
+  }
   killTree(job.child);
   await waitForJob(job, 4000, undefined, false);
 }

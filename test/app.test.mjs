@@ -448,11 +448,17 @@ test("un subagente lanzado desde el modo plan tampoco puede editar", async () =>
 });
 
 test("varios task seguidos se ejecutan a la vez", async () => {
+  let running = 0;
+  let most = 0;
   const mock = await startMock(async ({ body }) => {
     const system = contentText(body.messages[0].content);
     const last = lastMessage(body);
     if (system.includes("exploration subagent")) {
+      // Se cuenta cuántos hay a la vez: medir el tiempo fallaba en los ordenadores lentos
+      running++;
+      most = Math.max(most, running);
       await new Promise((resolve) => setTimeout(resolve, 300));
+      running--;
       return { text: `informe de ${lastUserText(body)}` };
     }
     if (last.role === "user") {
@@ -468,10 +474,8 @@ test("varios task seguidos se ejecutan a la vez", async () => {
   });
   const ws = tempWorkspace();
   const { app } = makeApp(ws, mock.url);
-  const started = Date.now();
   await app.runPrompt({ text: "reparte" }, {});
-  const elapsed = Date.now() - started;
-  assert.ok(elapsed < 850, `tardó ${elapsed} ms`);
+  assert.equal(most, 3);
   const tools = app.agent.session.messages.filter((m) => m.role === "tool").map((m) => m.content);
   assert.deepEqual(tools, ["informe de A", "informe de B", "informe de C"]);
   await app.shutdown();
