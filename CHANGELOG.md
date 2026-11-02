@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.4.1] - 2026-11-02
+
 ### Seguridad
 
 - **Lo que se aprueba solo ya no sale del proyecto.** Algunos `git diff` y `ls` con la ruta escrita dando un rodeo se aprobaban sin preguntar y podían leer ficheros de fuera, incluidas tus claves. Ahora se pregunta, y lo que se aprueba solo es una lista cerrada de lo que no puede llevar a otro sitio.
@@ -355,7 +357,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.4.0...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/PabloVip/vipcode/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/PabloVip/vipcode/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/PabloVip/vipcode/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/PabloVip/vipcode/compare/v0.3.4...v0.3.5
