@@ -1,13 +1,17 @@
 // Copyright (C) 2026 Pablo Vicente Juan
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { isUtf8 } from "node:buffer";
 import dns from "node:dns/promises";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { Worker } from "node:worker_threads";
 import fg from "fast-glob";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
+import { debugLog } from "./debug.js";
 import { isImagePath, toDataUrl } from "./images.js";
+import { isSecretPath } from "./secrets.js";
 import { MAX_RUNNING, type BackgroundJob, allJobs, findJob, jobState, readJob, runningJobs, startJob, stopJob, waitForJob } from "./background.js";
 import type { Permission, PermissionReply, PermissionRequest } from "./permissions.js";
 import { stripControl } from "./sanitize.js";
@@ -193,8 +197,8 @@ function rejected(reply: PermissionReply, what: string): string {
 // Historial para /undo cuando no hay git: un grupo por cada mensaje del usuario, con el contenido previo de cada fichero
 interface Change {
   file: string;
-  // null si el fichero no existía antes
-  previous: string | null;
+  // null si el fichero no existía antes. Los bytes tal cual: como texto se perdería lo que no esté en UTF-8
+  previous: Buffer | null;
 }
 const undoStack: Change[][] = [];
 
@@ -202,7 +206,7 @@ export function beginTurn() {
   undoStack.push([]);
 }
 
-function recordChange(file: string, previous: string | null) {
+function recordChange(file: string, previous: Buffer | null) {
   if (undoStack.length === 0) {
     undoStack.push([]);
   }
@@ -391,7 +395,7 @@ function readNumbered(file: string, label: string, offset?: number, maxLines?: n
   if (buffer.includes(0)) {
     return `${label} parece un fichero binario; no se muestra.`;
   }
-  const lines = buffer.toString("utf8").split(/\r?\n/);
+  const lines = decodeText(buffer).text.split(/\r?\n/);
   // El salto de línea del final no es otra línea: un fichero «hola\nmundo\n» tiene 2
   if (lines.length > 1 && lines[lines.length - 1] === "") {
     lines.pop();
@@ -421,6 +425,65 @@ function markRead(ctx: ToolContext, file: string) {
   }
 }
 
+// Los modelos flojos mandan a veces los booleanos como texto, y «"false"» no puede contar como verdadero
+export function isTrue(value: unknown): boolean {
+  return value === true || value === 1 || (typeof value === "string" && /^(true|1)$/i.test(value.trim()));
+}
+
+// Muchos ficheros antiguos no están en UTF-8 sino en Windows-1252 (con ñ y tildes). Leídos como UTF-8, esas letras se
+// convierten en «�» y al guardar se perderían para siempre. Se leen y se escriben byte a byte en su codificación
+const CP1252_HIGH = "€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008dŽ\u008f\u0090‘’“”•–—˜™š›œ\u009džŸ";
+
+function decodeText(buffer: Buffer): { text: string; legacy: boolean } {
+  if (isUtf8(buffer)) {
+    return { text: buffer.toString("utf8"), legacy: false };
+  }
+  let text = "";
+  for (const byte of buffer) {
+    text += byte >= 0x80 && byte < 0xa0 ? CP1252_HIGH[byte - 0x80] : String.fromCharCode(byte);
+  }
+  return { text, legacy: true };
+}
+
+// Los bytes de un texto en Windows-1252, o null si lleva algo que no existe en esa codificación
+function encodeLegacy(text: string): Buffer | null {
+  const bytes: number[] = [];
+  for (const letter of text) {
+    const code = letter.codePointAt(0)!;
+    if (code < 0x80 || (code >= 0xa0 && code <= 0xff)) {
+      bytes.push(code);
+    } else {
+      const high = CP1252_HIGH.indexOf(letter);
+      if (high < 0) {
+        return null;
+      }
+      bytes.push(0x80 + high);
+    }
+  }
+  return Buffer.from(bytes);
+}
+
+function legacyError(name: string): string {
+  return `Error: ${name} está en Windows-1252, no en UTF-8, y lo que quieres escribir lleva caracteres que no existen en esa codificación. No se ha cambiado nada: usa solo los que existen en ella (letras con tilde, ñ, €…).`;
+}
+
+// Antes de leer un fichero que puede guardar claves se pregunta, porque lo que se lee se manda al modelo. Devuelve el rechazo,
+// o null si se puede leer. Un enlace a un secreto es un secreto; si ya lo has dejado leer, no se vuelve a preguntar
+async function secretRefused(ctx: ToolContext, file: string): Promise<string | null> {
+  const name = rel(ctx.root, file);
+  const real = path.relative(realPathOf(ctx.root), realPathOf(file));
+  if ((!isSecretPath(name) && !isSecretPath(real)) || ctx.readTimes.has(file)) {
+    return null;
+  }
+  const reply = await ctx.ask({
+    kind: "secrets",
+    title: `Leer ${name}`,
+    preview: `${name} puede guardar claves o contraseñas.\nLo que se lee se envía al modelo que esté contestando, que puede ser de un proveedor sin cuenta.`,
+    subject: name,
+  });
+  return reply.allow ? null : rejected(reply, "leer el fichero");
+}
+
 // Antes de modificar un fichero que ya existe hay que haberlo leído, y no debe haber cambiado desde entonces
 // Si no lo había leído (por ejemplo lo vio con cat en bash) y es pequeño, se le enseña en el propio error y cuenta como
 // leído: así no gasta otro paso en read_file
@@ -430,6 +493,10 @@ function checkFresh(ctx: ToolContext, file: string): string | null {
   const readAt = ctx.readTimes.get(file);
   const name = rel(ctx.root, file);
   if (readAt === undefined) {
+    // Un fichero con secretos se lee con read_file, que pregunta: aquí no se enseña
+    if (isSecretPath(name) || isSecretPath(path.relative(realPathOf(ctx.root), realPathOf(file)))) {
+      return `Error: lee ${name} con read_file antes de modificarlo.`;
+    }
     try {
       const text = fs.readFileSync(file, "utf8");
       const lines = text.split(/\r?\n/).length;
@@ -482,6 +549,10 @@ const readFile: Tool = {
   readOnly: true,
   async run(args, ctx) {
     const file = resolvePath(ctx.root, args.path);
+    const refused = await secretRefused(ctx, file);
+    if (refused) {
+      return refused;
+    }
     if (isImagePath(file)) {
       const image = toDataUrl(file);
       return { output: `Imagen ${rel(ctx.root, file)} adjuntada a continuación para que la veas.`, images: [image] };
@@ -508,11 +579,16 @@ const writeFile: Tool = {
   async run(args, ctx) {
     const file = resolvePath(ctx.root, args.path, { write: true });
     let content = String(args.content ?? "");
+    const exists = fs.existsSync(file);
+    const before = exists ? fs.readFileSync(file) : null;
+    const old = before ? decodeText(before) : null;
+    // Si ya existe y no está en UTF-8, sigue en su codificación (salvo un binario, que se sustituye entero)
+    const legacy = Boolean(old?.legacy) && !before?.includes(0);
     // Windows PowerShell 5.1 lee los .ps1 sin BOM como ANSI: «está» saldría «estÃ¡». Con BOM los lee en UTF-8
-    if (process.platform === "win32" && /\.(ps1|psm1|psd1)$/i.test(file) && !content.startsWith("\uFEFF") && /[^\x00-\x7f]/.test(content)) {
+    if (!legacy && process.platform === "win32" && /\.(ps1|psm1|psd1)$/i.test(file) && !content.startsWith("\uFEFF") && /[^\x00-\x7f]/.test(content)) {
       content = `\uFEFF${content}`;
     }
-    const exists = fs.existsSync(file);
+    const bytes = legacy ? encodeLegacy(content) : Buffer.from(content);
     let previous: string | null = null;
     let title = `Crear ${rel(ctx.root, file)}`;
     const newLines = content.split("\n");
@@ -529,7 +605,10 @@ const writeFile: Tool = {
       if (stale) {
         return { output: stale, isError: true };
       }
-      previous = fs.readFileSync(file, "utf8");
+      if (!bytes) {
+        return { output: legacyError(rel(ctx.root, file)), isError: true };
+      }
+      previous = old!.text;
       title = `Sobrescribir ${rel(ctx.root, file)}`;
       preview = unifiedDiff(previous, content);
       stats = diffCounts(previous, content);
@@ -538,9 +617,9 @@ const writeFile: Tool = {
     if (!reply.allow) {
       return rejected(reply, "escribir el fichero");
     }
-    recordChange(file, previous);
+    recordChange(file, before);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, content);
+    fs.writeFileSync(file, bytes!);
     markRead(ctx, file);
     const output = await withDiagnostics(ctx, file, `Escrito ${rel(ctx.root, file)} (${content.split("\n").length} líneas).`);
     return { output, display: preview, stats };
@@ -802,7 +881,11 @@ const editFile: Tool = {
     if (stale) {
       return { output: stale, isError: true };
     }
-    const original = fs.readFileSync(file, "utf8");
+    const before = fs.readFileSync(file);
+    if (before.includes(0)) {
+      return { output: `Error: ${rel(ctx.root, file)} parece un fichero binario: no se puede editar sin estropearlo.`, isError: true };
+    }
+    const { text: original, legacy } = decodeText(before);
     const oldString = String(args.old_string ?? "");
     const newString = String(args.new_string ?? "");
     if (oldString === "") {
@@ -815,7 +898,7 @@ const editFile: Tool = {
       }
       return { output: "Error: old_string y new_string son iguales; no hay nada que cambiar.", isError: true };
     }
-    const result = replaceInText(original, oldString, newString, Boolean(args.replace_all));
+    const result = replaceInText(original, oldString, newString, isTrue(args.replace_all));
     if ("error" in result) {
       if (result.error.startsWith("Error: old_string no aparece")) {
         const { message, applied } = notFoundMessage(original, stripLineNumbers(oldString), stripLineNumbers(newString));
@@ -823,13 +906,17 @@ const editFile: Tool = {
       }
       return { output: result.error, isError: true };
     }
+    const bytes = legacy ? encodeLegacy(result.updated) : Buffer.from(result.updated);
+    if (!bytes) {
+      return { output: legacyError(rel(ctx.root, file)), isError: true };
+    }
     const diff = unifiedDiff(original, result.updated);
     const reply = await ctx.ask({ kind: "write", title: `Editar ${rel(ctx.root, file)}`, preview: diff, subject: rel(ctx.root, file) });
     if (!reply.allow) {
       return rejected(reply, "la edición");
     }
-    recordChange(file, original);
-    fs.writeFileSync(file, result.updated);
+    recordChange(file, before);
+    fs.writeFileSync(file, bytes);
     markRead(ctx, file);
     const output = await withDiagnostics(ctx, file, `Editado ${rel(ctx.root, file)} (${result.count} sustitución/es)${result.note}.`);
     return { output, display: diff, stats: diffCounts(original, result.updated) };
@@ -985,9 +1072,35 @@ const grepTool: Tool = {
     } catch {
       return `Error: ${args.path} no existe.`;
     }
+    // Pedir un fichero con secretos por su nombre se pregunta, como al leerlo
+    if (single) {
+      const refused = await secretRefused(ctx, target);
+      if (refused) {
+        return refused;
+      }
+    }
     // Lo que devuelve la búsqueda va relativo a «dir»; el modelo lo ve relativo a la raíz
     const prefix = rel(ctx.root, dir);
     const fromRoot = (file: string) => (prefix === "." ? file : `${prefix}/${file}`);
+    // Lo que sale de los ficheros con secretos no se enseña (salvo si lo has pedido por su nombre), pero se dice que hay más
+    const hideSecrets = (lines: string[]): string[] => {
+      if (single) {
+        return lines;
+      }
+      const hidden = new Set<string>();
+      const shown = lines.filter((line) => {
+        const file = /^([^:]+):\d+:/.exec(line)?.[1] || "";
+        if (isSecretPath(file)) {
+          hidden.add(file);
+          return false;
+        }
+        return true;
+      });
+      if (hidden.size > 0) {
+        shown.push(`[se ha omitido ${hidden.size} fichero${hidden.size > 1 ? "s" : ""} que puede${hidden.size > 1 ? "n" : ""} guardar claves: ${[...hidden].slice(0, 5).join(", ")}. Léelo${hidden.size > 1 ? "s" : ""} con read_file si hace falta]`);
+      }
+      return shown;
+    };
 
     if (ripgrepProgram()) {
       // --crlf: en los ficheros con saltos de línea de Windows, $ también encaja antes del \r\n
@@ -995,7 +1108,7 @@ const grepTool: Tool = {
       if (process.platform === "win32") {
         rgArgs.push("--path-separator", "/");
       }
-      if (args.ignore_case) {
+      if (isTrue(args.ignore_case)) {
         rgArgs.push("-i");
       }
       if (args.include) {
@@ -1015,20 +1128,17 @@ const grepTool: Tool = {
           .split("\n")
           .filter((line) => line.length > 0)
           .map((line) => line.replace(/\r$/, "").replace(/^\.\//, "").replace(/^([^:]+):(\d+):/, (_, file: string, n: string) => `${fromRoot(file)}:${n}: `));
-        if (lines.length > 200) {
-          return `${lines.slice(0, 200).join("\n")}\n[… limitado a 200 resultados]`;
+        const shown = hideSecrets(lines);
+        if (shown.length > 200) {
+          return `${shown.slice(0, 200).join("\n")}\n[… limitado a 200 resultados]`;
         }
-        return lines.join("\n");
+        return shown.length > 0 ? shown.join("\n") : "Sin coincidencias.";
       }
     }
 
-    let flags = "";
-    if (args.ignore_case) {
-      flags = "i";
-    }
-    let regex: RegExp;
+    const flags = isTrue(args.ignore_case) ? "i" : "";
     try {
-      regex = new RegExp(pattern, flags);
+      new RegExp(pattern, flags);
     } catch (err) {
       return `Expresión regular inválida: ${(err as Error).message}`;
     }
@@ -1047,44 +1157,132 @@ const grepTool: Tool = {
         await fg(include, { cwd: dir, ignore: [...IGNORE, ...protectedIgnore(dir)], dot: false, onlyFiles: true, followSymbolicLinks: false, suppressErrors: true }),
       );
     }
-    const results: string[] = [];
-    for (const file of files) {
-      const abs = path.join(dir, file);
-      let stat;
-      try {
-        stat = fs.statSync(abs);
-      } catch {
-        continue;
-      }
-      if (stat.size > 1024 * 1024) {
-        continue;
-      }
-      let buffer: Buffer;
-      try {
-        buffer = fs.readFileSync(abs);
-      } catch {
-        // sin permiso para leerlo: se salta
-        continue;
-      }
-      if (buffer.includes(0)) {
-        continue;
-      }
-      const lines = buffer.toString("utf8").split(/\r?\n/);
-      for (let i = 0; i < lines.length; i++) {
-        if (regex.test(lines[i])) {
-          results.push(`${rel(ctx.root, abs)}:${i + 1}: ${lines[i].slice(0, 300)}`);
-          if (results.length >= 200) {
-            return results.join("\n") + "\n[… limitado a 200 resultados]";
-          }
-        }
-      }
+    const found = await searchInWorker(dir, files, pattern, flags, ctx.signal);
+    const results = hideSecrets(found.matches.map((match) => `${rel(ctx.root, path.join(dir, match.file))}:${match.line}: ${match.text}`));
+    if (found.cancelled) {
+      return ["Cancelado por el usuario", ...results].join("\n");
+    }
+    if (found.stalled) {
+      const note = `la expresión regular tarda demasiado (la búsqueda se ha parado en ${rel(ctx.root, path.join(dir, found.stalled))}): prueba con una más sencilla`;
+      return results.length > 0 ? `${results.join("\n")}\n[… ${note}]` : `Error: ${note}.`;
     }
     if (results.length === 0) {
       return "Sin coincidencias.";
     }
-    return results.join("\n");
+    return results.join("\n") + (found.limited ? "\n[… limitado a 200 resultados]" : "");
   },
 };
+
+// La búsqueda sin rg va en otro hilo. Una expresión regular mal escrita, como (a+)+$, puede tardar años en una sola línea, y
+// en el hilo principal dejaría vipcode colgado para siempre, sin que funcione ni Esc. Rg no tiene ese problema
+const SEARCH_WORKER = `
+const { parentPort, workerData } = require("node:worker_threads");
+const fs = require("node:fs");
+const path = require("node:path");
+const { dir, files, pattern, flags, limit } = workerData;
+const regex = new RegExp(pattern, flags);
+function search() {
+  let found = 0;
+  for (const file of files) {
+    parentPort.postMessage({ at: file });
+    const abs = path.join(dir, file);
+    let buffer;
+    try {
+      if (fs.statSync(abs).size > 1024 * 1024) {
+        continue;
+      }
+      buffer = fs.readFileSync(abs);
+    } catch {
+      // sin permiso para leerlo: se salta
+      continue;
+    }
+    if (buffer.includes(0)) {
+      continue;
+    }
+    const lines = buffer.toString("utf8").split(/\\r?\\n/);
+    for (let i = 0; i < lines.length; i++) {
+      if (regex.test(lines[i])) {
+        parentPort.postMessage({ file, line: i + 1, text: lines[i].slice(0, 300) });
+        if (++found >= limit) {
+          parentPort.postMessage({ limited: true });
+          return;
+        }
+      }
+    }
+  }
+}
+search();
+parentPort.postMessage({ done: true });
+`;
+// Sin noticias de un fichero en este tiempo (ocupan como mucho 1 MB) es que la expresión no va a terminar
+const SEARCH_STALL_MS = 10000;
+
+interface WorkerSearch {
+  matches: { file: string; line: number; text: string }[];
+  limited: boolean;
+  // El fichero en el que se ha quedado, si la expresión tarda demasiado
+  stalled: string | null;
+  cancelled: boolean;
+}
+
+function searchInWorker(dir: string, files: string[], pattern: string, flags: string, signal?: AbortSignal): Promise<WorkerSearch> {
+  const result: WorkerSearch = { matches: [], limited: false, stalled: null, cancelled: false };
+  if (files.length === 0) {
+    return Promise.resolve(result);
+  }
+  return new Promise((resolve) => {
+    const worker = new Worker(SEARCH_WORKER, { eval: true, workerData: { dir, files, pattern, flags, limit: 200 } });
+    const stallMs = Number(process.env.VIPCODE_GREP_STALL_MS) || SEARCH_STALL_MS;
+    let current = files[0];
+    let timer: NodeJS.Timeout;
+    let finished = false;
+    const finish = () => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+      void worker.terminate();
+      resolve(result);
+    };
+    const cancel = () => {
+      result.cancelled = true;
+      finish();
+    };
+    const watch = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        result.stalled = current;
+        finish();
+      }, stallMs);
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    if (signal?.aborted) {
+      cancel();
+      return;
+    }
+    watch();
+    worker.on("message", (message: { at?: string; file?: string; line?: number; text?: string; limited?: boolean; done?: boolean }) => {
+      if (message.at !== undefined) {
+        current = message.at;
+        watch();
+      } else if (message.file !== undefined) {
+        result.matches.push({ file: message.file, line: message.line!, text: message.text! });
+      } else if (message.limited) {
+        result.limited = true;
+        finish();
+      } else if (message.done) {
+        finish();
+      }
+    });
+    worker.on("error", (err) => {
+      debugLog("grep", err);
+      finish();
+    });
+    worker.on("exit", finish);
+  });
+}
 
 // Un .git/config con core.fsmonitor ejecutaría un programa en cada «git status» (que se aprueba solo)
 function gitSafetyEnv(): Record<string, string> {
@@ -1129,7 +1327,7 @@ const bashTool: Tool = {
         return "Error: workdir no puede estar dentro de .git.";
       }
     }
-    const background = args.background === true || args.background === "true";
+    const background = isTrue(args.background);
     if (background && runningJobs().length >= MAX_RUNNING) {
       return `Error: ya hay ${MAX_RUNNING} comandos en segundo plano. Para alguno con la herramienta background antes de lanzar otro.`;
     }
@@ -1759,7 +1957,7 @@ export function describeCall(name: string, rawArgs: string): string {
       if (lines.length > 1) {
         text += " …";
       }
-      if (args.background === true || args.background === "true") {
+      if (isTrue(args.background)) {
         text = `(en segundo plano) ${text}`;
       }
       if (args.workdir && String(args.workdir).trim() !== "" && String(args.workdir).trim() !== ".") {

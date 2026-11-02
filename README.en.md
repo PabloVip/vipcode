@@ -201,7 +201,7 @@ The bottom bar shows the agent, the model, how much of its free plan is left and
 | `/usage` | Tokens used and what happened in the conversation: models, model switches, stuck models and errors (just counts) |
 | `/procesos [parar [id]]` | What the agent left running in the background, like a server: see it and stop it |
 | `/mcp [login\|logout <server>]`, `/lsp` | Status of MCP and language servers; sign in or out of the MCP servers that require it |
-| `/yolo [on\|off]` | Approve everything without asking for the session |
+| `/yolo [on\|off]` | Approve everything without asking for the session (except reading files with secrets) |
 | `/reset-limits` | Forget the saved provider pauses |
 | `/update` | Update vipcode |
 | `/init` | Creates or improves `AGENTS.md` with the project's instructions |
@@ -254,7 +254,7 @@ Yours is in `~/.vipcode/config.json`, and a project can bring its own in `vipcod
 
 - **order**: models that go first. **disabledProviders**: providers you don't want to use.
 - **providers**: a server of yours compatible with the OpenAI API (or changes to the models of a catalog provider).
-- **permission**: `allow`, `ask` or `deny` for `edit`, `bash`, `webfetch` and `mcp`; in `bash` and `mcp` the most specific pattern wins. `deny` rules apply even with `--yolo`. Think twice before setting `webfetch` to `allow`: a malicious text could make the model send your data to a website without asking.
+- **permission**: `allow`, `ask` or `deny` for `edit`, `bash`, `webfetch`, `mcp` and `secrets` (reading files that usually hold keys); in `bash` and `mcp` the most specific pattern wins. `deny` rules apply even with `--yolo`. Think twice before setting `webfetch` to `allow`: a malicious text could make the model send your data to a website without asking.
 - **mcp**: local (`command`) or remote (`url`) MCP servers; if a remote one requires signing in, `/mcp` says so and `/mcp login <server>` does it in your browser. The session is remembered and renewed by itself, and vipcode never opens the browser or registers with a server unless you ask. If a server doesn't allow registering automatically, create your own app on that service and put it in `"oauth": { "clientId": "…", "clientSecret": "{env:NAME}", "scope": "…", "callbackPort": 3334 }`; with your own `Authorization` header or `"oauth": false`, vipcode stays out of it. A local server doesn't get your environment variables (or your keys), only what it needs to start: put whatever it needs in `environment`. There, in `headers` and in `oauth`, `{env:NAME}` is replaced by that variable of yours. Its tools are named `server_tool`; if two end up with the same name, the second gets `_2` appended.
 - **keyless**: `false` to never use the keyless providers. **checkUpdates**: `false` to not look for new versions.
 - **interfaz**: the one you choose with `/interfaz` (`completa`, `compacta`, `zen` or `criaturas`). The classic and high-contrast ones (and the old `"fullscreen": false`) no longer exist: if you had them, vipcode tells you once and uses full screen.
@@ -340,6 +340,7 @@ After every edit, it passes the model the errors found by the language server: f
 - **Files and the internet.** It only reads, searches and writes inside the project folder, and can't read or change your keys or its own configuration. Before visiting an address on your computer or your network (your router, `localhost`…) it always asks, even with `webfetch` set to `allow`.
 - **Your keys.** The MCP and language servers vipcode starts don't get your keys: if one of their packages were compromised, it couldn't take them. "Always yes to this command" doesn't apply either if the command writes to a file (`>`) or contains `$(…)`: that's always asked.
 - **Summaries.** Long-conversation summaries are written by a model from everything before (including websites or command outputs), so they're marked as context, not as your instructions.
+- **Files with secrets.** What the agent reads is sent to the model, which may belong to a provider with no account. So `.env`, `.ssh`, `.aws`, `.npmrc`, `*.pem`, `*.key` and the like aren't read without asking, not even with `/yolo` (`permission.secrets` changes this), and `grep` doesn't show what's in them. If you attach them yourself with `@`, it doesn't ask: you're the one asking.
 - **Background commands.** What the agent leaves running (a server, a watcher) is approved like any other command, shows in the bottom bar and in `/procesos`, and stops when you close vipcode. What you approved for one folder doesn't apply to another.
 - **Your data.** vipcode sends no usage data: the counts in `/usage` stay on your computer and `/bug` only puts them in the form that you review and send. It only talks to the AI providers you use, the websites the agent looks up, your MCP servers, LLM Stats if you give it your key and, at most once an hour, npm and GitHub to check for a new version.
 - **Free plans.** Keyless providers and several free plans may store what you send or use it to train their models. Don't send passwords or confidential code; for that, use a local model (Ollama, LM Studio) and set `"keyless": false` in the configuration.

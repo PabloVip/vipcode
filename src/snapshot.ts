@@ -47,9 +47,9 @@ export class Snapshots {
     this.gitDir = path.join(SNAPSHOTS_DIR, hash);
   }
 
-  private git(args: string[], timeoutMs = 30000): Promise<GitResult> {
+  private git(args: string[], timeoutMs = 30000, input?: string): Promise<GitResult> {
     return new Promise((resolve) => {
-      execFile(
+      const child = execFile(
         findProgram("git") || "git",
         ["--git-dir", this.gitDir, "--work-tree", this.root, "-c", "core.autocrlf=false", "-c", "core.quotepath=false", ...args],
         {
@@ -66,6 +66,9 @@ export class Snapshots {
           resolve({ code, stdout: String(stdout), stderr: String(stderr) });
         },
       );
+      if (input !== undefined) {
+        child.stdin?.end(input);
+      }
     });
   }
 
@@ -152,17 +155,18 @@ export class Snapshots {
     if (changes.length === 0) {
       return [];
     }
-    const toCheckout: string[] = [];
-    for (const change of changes) {
-      if (change.status === "A") {
-        // No existía en la instantánea: se borra
-        const abs = path.join(this.root, change.file);
-        fs.rmSync(abs, { force: true });
-        this.removeEmptyParents(path.dirname(abs));
-      } else {
-        toCheckout.push(change.file);
-      }
+    const remove = (file: string) => {
+      const abs = path.join(this.root, file);
+      fs.rmSync(abs, { force: true });
+      this.removeEmptyParents(path.dirname(abs));
+    };
+    const added = changes.filter((change) => change.status === "A").map((change) => change.file);
+    // Primero el .gitignore tal como estaba: lo que aparece como nuevo puede ser solo lo que ignoraba, si el modelo lo ha
+    // reescrito. Eso no es de esta tarea (tu .env, tus datos) y no está en la instantánea: borrarlo sería perderlo
+    for (const file of added.filter((name) => path.basename(name) === ".gitignore")) {
+      remove(file);
     }
+    const toCheckout = changes.filter((change) => change.status !== "A").map((change) => change.file);
     // De 200 en 200 para no pasarnos del límite de argumentos
     for (let i = 0; i < toCheckout.length; i += 200) {
       const result = await this.git(["checkout", tree, "--", ...toCheckout.slice(i, i + 200)]);
@@ -170,7 +174,29 @@ export class Snapshots {
         throw new Error(`git checkout falló: ${result.stderr.trim()}`);
       }
     }
-    return changes.map((change) => change.file);
+    const ignored = await this.ignored(added.filter((name) => path.basename(name) !== ".gitignore"));
+    for (const file of added) {
+      if (path.basename(file) !== ".gitignore" && !ignored.has(file)) {
+        remove(file);
+      }
+    }
+    // Lo ignorado no se queda en las instantáneas siguientes
+    await this.git(["read-tree", tree]);
+    return changes.map((change) => change.file).filter((file) => !ignored.has(file));
+  }
+
+  // Cuáles de estos ficheros ignoran las reglas de ahora
+  private async ignored(files: string[]): Promise<Set<string>> {
+    if (files.length === 0) {
+      return new Set();
+    }
+    const result = await this.git(["check-ignore", "--no-index", "--stdin", "-z"], 30000, `${files.join("\0")}\0`);
+    // 0: alguno lo está; 1: ninguno. Con cualquier otra cosa no se puede saber: mejor no borrar nada
+    if (result.code !== 0 && result.code !== 1) {
+      debugLog("snapshot check-ignore", result.stderr);
+      return new Set(files);
+    }
+    return new Set(result.stdout.split("\0").filter(Boolean));
   }
 
   private removeEmptyParents(dir: string) {

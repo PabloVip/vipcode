@@ -4,6 +4,19 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Seguridad
+
+- **Lo que se aprueba solo ya no sale del proyecto.** Algunos `git diff` y `ls` con la ruta escrita dando un rodeo se aprobaban sin preguntar y podían leer ficheros de fuera, incluidas tus claves. Ahora se pregunta, y lo que se aprueba solo es una lista cerrada de lo que no puede llevar a otro sitio.
+- **PowerShell:** lo que va entre paréntesis se ejecuta, así que un comando que los lleve fuera de las comillas se pregunta siempre, también si le habías dicho «sí siempre».
+- **Ficheros con secretos:** `.env`, `.ssh`, `.aws`, `.npmrc`, `*.pem`, `*.key` y otros parecidos ya no se leen sin preguntar, ni siquiera con `/yolo`, porque lo que se lee se envía al modelo. `grep` no enseña lo que contienen, y un comando que los nombre no se aprueba solo. Se puede cambiar con `permission.secrets`.
+
+### Corregido
+
+- **`/undo` ya no borra lo que estaba ignorado.** Si el modelo había reescrito el `.gitignore`, `/undo` borraba para siempre lo que ese fichero ignoraba, como tu `.env` o una carpeta de datos.
+- **`edit_file` ya no estropea los ficheros que no están en UTF-8.** En uno en Windows-1252, la `ñ` y las tildes de todo el fichero se convertían en `�`. Ahora se leen bien y conservan su codificación. Un fichero binario no se edita.
+- **`replace_all: "false"` ya no lo reemplaza todo.** Si un modelo mandaba un `"false"` como texto, contaba como verdadero. Lo mismo pasaba con `ignore_case`.
+- **`grep` ya no puede colgar vipcode.** Sin `rg` instalado, una expresión regular mal escrita lo dejaba colgado para siempre, sin que funcionara ni Esc. Ahora busca en otro hilo, y a los 10 s sin avanzar para y dice lo que pasa.
+
 ## [0.4.0] - 2026-11-02
 
 ### Añadido

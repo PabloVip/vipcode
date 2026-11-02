@@ -14,6 +14,7 @@ const KIND_LABEL: Record<string, string> = {
   bash: "comandos",
   web: "accesos a internet",
   mcp: "herramientas MCP",
+  secrets: "ficheros con secretos",
 };
 
 interface Option {

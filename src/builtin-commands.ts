@@ -35,7 +35,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "usage", description: "tokens gastados en esta sesión" },
   { name: "mcp", args: "[login|logout <servidor>]", description: "estado de los servidores MCP; iniciar o cerrar sesión en los que lo piden" },
   { name: "lsp", description: "servidores de lenguaje (diagnósticos)" },
-  { name: "yolo", args: "[on|off]", description: "aprobar todo sin preguntar en esta sesión" },
+  { name: "yolo", args: "[on|off]", description: "aprobar todo sin preguntar en esta sesión (menos leer ficheros con secretos)" },
   { name: "reset-limits", description: "olvidar las pausas guardadas de los proveedores" },
   { name: "config", description: "rutas de configuración" },
   { name: "update", description: "actualiza vipcode a lo último del repositorio o a la última versión publicada" },

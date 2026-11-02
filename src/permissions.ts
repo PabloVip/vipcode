@@ -6,10 +6,11 @@ import path from "node:path";
 import { type PermissionAction, type PermissionConfig, deepMerge } from "./config.js";
 import { wildcardMatch } from "./match.js";
 import { HOME_DIR, INSTALL_DIR } from "./paths.js";
+import { mentionsSecret } from "./secrets.js";
 import { splitArgs } from "./shell.js";
 
 // Tipo de acción con riesgo; "web" y "none" no modifican nada, así que valen en modo plan
-export type Permission = "none" | "write" | "bash" | "web" | "mcp";
+export type Permission = "none" | "write" | "bash" | "web" | "mcp" | "secrets";
 
 export interface PermissionRequest {
   kind: Permission;
@@ -81,15 +82,123 @@ export function splitCommand(command: string): string[] {
 // pasaría por «ls*», o «echo x > fichero» por un «sí siempre» a echo
 export function alwaysAsk(command: string): boolean {
   const writes = /[<>]\(|>/.test(command.replace(HARMLESS_REDIRECTS, " ")) || /--output\b|\r/.test(command);
-  if (writes || /\$\(|`/.test(command) || RISKY_GIT.test(command)) {
+  if (writes || /\$\(|`/.test(command) || RISKY_GIT.test(command) || hasBareParentheses(command)) {
     return true;
   }
   // Los que se aprueban solos (git status/diff/log/show, ls) no pueden mirar fuera del proyecto: «git diff /dev/null
   // ~/.ssh/id_rsa» enseña la clave (git compara ficheros sueltos si uno está fuera del repositorio)
   return splitCommand(command).some((part) => {
-    const words = splitArgs(part);
-    return (words[0] === "git" || words[0] === "ls") && words.slice(1).some((word) => OUTSIDE_PATH.test(word));
+    const first = splitArgs(part)[0];
+    return (first === "git" || first === "ls") && reachesOutside(part);
   });
+}
+
+// ¿Hay paréntesis fuera de las comillas? PowerShell ejecuta lo que llevan dentro: «ls (Remove-Item x)». Se mira de todas las
+// formas en las que se puede entender un comando, porque las shells no leen igual las comillas: para PowerShell una comilla
+// tipográfica cierra como una normal y \" no es ningún escape
+function hasBareParentheses(command: string): boolean {
+  const curly = command.replace(/[\u201c\u201d\u201e]/g, '"').replace(/[\u2018\u2019\u201a\u201b]/g, "'");
+  return [command, curly].some((text) => [true, false].some((escapes) => outsideQuotes(text, escapes).includes("(") || outsideQuotes(text, escapes).includes(")")));
+}
+
+function outsideQuotes(text: string, escapes: boolean): string {
+  let result = "";
+  let quote = "";
+  for (let i = 0; i < text.length; i++) {
+    const letter = text[i];
+    if (quote) {
+      if (letter === quote) {
+        quote = "";
+      }
+    } else if (escapes && letter === "\\") {
+      i++;
+    } else if (letter === '"' || letter === "'") {
+      quote = letter;
+    } else {
+      result += letter;
+    }
+  }
+  return result;
+}
+
+// Las palabras de un comando tal como le llegarán al programa, sin comillas, o null si lleva algo que la shell puede convertir
+// en otra cosa: variables, llaves, corchetes… Es una lista de lo que se deja pasar, no de lo que se prohíbe, porque «."."/x» o
+// «.{.,}/x» son «../x» y hay demasiadas formas de escribirlo
+function shellWords(text: string): string[] | null {
+  const words: string[] = [];
+  let word = "";
+  let started = false;
+  let quote = "";
+  for (let i = 0; i < text.length; i++) {
+    const letter = text[i];
+    if (quote === "'") {
+      if (letter === "'") {
+        quote = "";
+      } else {
+        word += letter;
+      }
+    } else if (quote === '"') {
+      if (letter === '"') {
+        quote = "";
+      } else if (letter === "$" || letter === "`") {
+        return null;
+      } else {
+        word += letter;
+      }
+    } else if (letter === "'" || letter === '"') {
+      quote = letter;
+      started = true;
+    } else if (/\s/.test(letter)) {
+      if (started) {
+        words.push(word);
+      }
+      word = "";
+      started = false;
+    } else if (letter === "{" && /[@^]$/.test(word)) {
+      // Revisiones de git: stash@{0}, HEAD^{tree}
+      const end = text.indexOf("}", i);
+      if (end < 0 || /[,.$`]/.test(text.slice(i, end))) {
+        return null;
+      }
+      word += text.slice(i, end + 1);
+      i = end;
+    } else if (/[$`(){}[\]<>\u2018-\u201f]/.test(letter)) {
+      return null;
+    } else {
+      word += letter;
+      started = true;
+    }
+  }
+  if (quote) {
+    return null;
+  }
+  if (started) {
+    words.push(word);
+  }
+  return words;
+}
+
+// ¿Puede llevar fuera del proyecto? La barra \ es un separador en Windows y un escape en bash: «..\x» y «.\./x» son «../x»
+function leavesProject(word: string): boolean {
+  return [word.replace(/\\/g, "/"), word.replace(/\\/g, "")].some((form) => {
+    const value = form.slice(form.indexOf("=") + 1);
+    return (
+      OUTSIDE_PATH.test(form) ||
+      OUTSIDE_PATH.test(value) ||
+      // Un «..» como parte de una ruta (main..feature es otra cosa)
+      /\.\.\/|(^|[/=:])\.\.$/.test(form) ||
+      /^[a-z]:\.\./i.test(form) ||
+      // Comodines que encajan con «..»: «.?/x»
+      /(^|\/)\.[^/]*[*?]/.test(form) ||
+      // Variables de cmd (%h%n% en un --format es otra cosa)
+      (!/^--(format|pretty|date)\b/.test(form) && /%[a-z_][a-z0-9_]+%/i.test(form))
+    );
+  });
+}
+
+function reachesOutside(part: string): boolean {
+  const words = shellWords(part);
+  return words === null || words.slice(1).some(leavesProject);
 }
 
 // git que ejecuta programas o lee ficheros de fuera aunque parezca de solo lectura: «git difftool -x orden» ejecuta
@@ -139,6 +248,9 @@ export function evaluate(config: PermissionConfig, kind: Permission, subject: st
   if (kind === "web") {
     return config.webfetch || "ask";
   }
+  if (kind === "secrets") {
+    return config.secrets || "ask";
+  }
   if (kind === "mcp") {
     return matchRules(config.mcp, subject, "ask");
   }
@@ -184,6 +296,11 @@ export class SessionGrants {
     this.kinds.add(kind);
   }
 
+  // «Sí a todo» para este tipo de acción
+  allowsAll(kind: Permission): boolean {
+    return this.kinds.has(kind);
+  }
+
   allowPattern(kind: Permission, pattern: string, workdir?: string) {
     this.patterns.push({ kind, pattern, workdir });
   }
@@ -223,6 +340,11 @@ export function touchesVipcode(command: string): boolean {
     }
   }
   const text = normalize(command);
+  // También dando un rodeo: «cat ../../.vipcode/auth.json», «cd ~ && cat .vipcode/auth.json»
+  const folder = normalize(path.basename(HOME_DIR)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`(^|[\\s"'=/:])${folder}([\\s"'/]|$)`).test(text) && /\.\.\/|~|\$|%|\bcd\b/.test(text)) {
+    return true;
+  }
   return names.some((name) => {
     const clean = normalize(name);
     // C:\Users\… también se escribe /c/Users/… en el bash de Git para Windows
@@ -249,6 +371,10 @@ export function createAsker(
     }
     if (request.force) {
       return prompt(request);
+    }
+    // Un comando que nombra un fichero con secretos no se aprueba solo: «git show HEAD:.env» lo enseñaría. «Sí a todo» sí vale
+    if (request.kind === "bash" && mentionsSecret(request.subject) && !grants.allowsAll("bash") && evaluate(getConfig(), "secrets", "") !== "allow") {
+      return prompt({ ...request, title: `${request.title} (nombra un fichero que puede guardar claves)` });
     }
     // Las reglas allow se piensan para la raíz del proyecto; en otra carpeta solo vale lo aprobado para esa carpeta
     if ((action === "allow" && !request.workdir) || grants.allows(request.kind, request.subject, request.workdir)) {

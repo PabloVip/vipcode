@@ -135,6 +135,9 @@ function newAllows(permission: unknown, mine: Json): string[] {
   if (permission.webfetch === "allow" && now.webfetch !== "allow") {
     found.push("entrará en páginas web sin preguntarte");
   }
+  if (permission.secrets === "allow" && now.secrets !== "allow") {
+    found.push("leerá sin preguntarte ficheros que pueden guardar claves");
+  }
   const kinds: [string, string, string][] = [
     ["bash", "ejecutará cualquier comando sin preguntarte", "ejecutará sin preguntarte"],
     ["mcp", "usará las herramientas de los servidores MCP sin preguntarte", "usará sin preguntarte las herramientas MCP"],

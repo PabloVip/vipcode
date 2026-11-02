@@ -107,6 +107,8 @@ export interface PermissionConfig {
   bash?: PermissionAction | Record<string, PermissionAction>;
   webfetch?: PermissionAction;
   mcp?: PermissionAction | Record<string, PermissionAction>;
+  // Leer ficheros que suelen guardar claves (.env, .ssh, *.pem…): se pregunta siempre, también con «sí a todo», salvo que digas otra cosa
+  secrets?: PermissionAction;
 }
 
 export interface McpServerConfig {
