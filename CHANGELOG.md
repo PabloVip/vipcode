@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.4.2] - 2026-11-02
+
 ### Añadido
 
 - **Modelos favoritos.** `/favoritos` (o `/favoritos add`) abre un menú donde marcas y desmarcas con qué modelos trabajar, y solo se usan esos, también para los subagentes y los resúmenes, para que una tarea compleja no acabe en un modelo flojo. Si se agotan, vipcode espera si vuelven pronto y, si no, para y te dice cuándo vuelven, en vez de pasar a otro; `/favoritos off` usa todos durante esa sesión. También con `favorites` en la configuración.
@@ -366,7 +368,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.4.1...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/PabloVip/vipcode/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/PabloVip/vipcode/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/PabloVip/vipcode/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/PabloVip/vipcode/compare/v0.3.5...v0.3.6
