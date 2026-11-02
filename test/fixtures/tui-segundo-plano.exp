@@ -50,11 +50,12 @@ expect {
   "SERVIDOR-LANZADO" {}
   timeout { falla "no sigue después de aprobarlo" }
 }
+# En ese orden: en la pantalla, la barra de abajo va después de la caja. Al revés, si la caja ya salió, se esperaría para siempre
+libre
 expect {
   "1 en segundo plano" {}
   timeout { falla "la barra de abajo no enseña lo que hay en segundo plano" }
 }
-libre
 send "/procesos\r"
 expect {
   "en marcha desde hace" {}

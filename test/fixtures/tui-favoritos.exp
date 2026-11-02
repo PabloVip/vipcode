@@ -1,0 +1,93 @@
+# /favoritos en la pantalla completa: se marca desde la lista, la barra de abajo lo enseña y solo contesta ese modelo (lo lanza
+# test/tui.test.mjs)
+set timeout 30
+log_user 1
+set cli [lindex $argv 0]
+match_max -d 200000
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+# Espera sin dejar de leer la pantalla
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
+proc libre {} {
+  expect {
+    "Escribe tu mensaje" {}
+    timeout { falla "no vuelve a quedar libre" }
+  }
+}
+
+spawn -noecho node $cli
+stty rows 30 columns 110 < $spawn_out(slave,name)
+libre
+
+send "/favoritos add\r"
+expect {
+  "Tus modelos favoritos" {}
+  timeout { falla "/favoritos add no abre el menú" }
+}
+pausa 0.3
+# Se filtra por el nombre y Enter lo marca: el menú sigue abierto y con el filtro
+send "b/m"
+pausa 0.3
+send "\r"
+expect {
+  -re "Filtro: b/m.*♥ b/m" {}
+  timeout { falla "no se marca el favorito, o el menú se ha cerrado o ha perdido el filtro" }
+}
+pausa 0.3
+# Sin filtro se marca otro con el espacio, y otra vez para quitarlo: sigue siendo el mismo menú
+for {set i 0} {$i < 3} {incr i} {
+  send "\177"
+  pausa 0.1
+}
+send "a/m"
+pausa 0.3
+send " "
+expect {
+  "♥ a/m" {}
+  timeout { falla "el espacio no marca" }
+}
+pausa 0.3
+send " "
+expect {
+  "  a/m" {}
+  timeout { falla "el espacio no desmarca" }
+}
+pausa 0.3
+send "\033"
+expect {
+  "Favoritos: solo se usan estos" {}
+  timeout { falla "al salir de la lista no enseña los favoritos" }
+}
+libre
+expect {
+  "♥ 1/1 favoritos" {}
+  timeout { falla "la barra de abajo no enseña los favoritos" }
+}
+send "hola\r"
+expect {
+  "CONTESTA-B" {}
+  timeout { falla "no contesta el favorito" }
+}
+libre
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-FAVORITOS-OK"
+exit 0

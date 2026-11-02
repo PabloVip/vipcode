@@ -135,11 +135,16 @@ export async function doctorReport(app: App): Promise<string> {
   }
 
   // Proveedores: ¿responden y funcionan tus claves?
-  const slots = app.router.slots;
+  const slots = app.router.allSlots;
   const providers = [...new Set(slots.map((slot) => slot.provider))];
   lines.push("", pc.bold(`Modelos: ${slots.length} de ${providers.length} proveedor${providers.length === 1 ? "" : "es"}`) + pc.dim(` (${app.router.availableCount()} disponibles ahora)`));
   if (providers.length === 0) {
     lines.push(bad("No hay ningún modelo: añade una clave gratis con /connect (o vipcode auth login)"));
+  }
+  // Cuántos, sin nombres: un proveedor propio puede decir algo de ti, y este informe se puede pegar en un aviso público
+  if (app.router.favoritesActive()) {
+    const active = app.router.slots.length;
+    lines.push(active > 0 ? note(`Favoritos: solo se usan ${active} modelo${active === 1 ? "" : "s"} (/favoritos)`) : bad("Ninguno de tus favoritos se puede usar: cámbialos con /favoritos"));
   }
   const probes = await Promise.all(providers.filter((provider) => !provider.local).map((provider) => probe(provider)));
   lines.push(...probes);

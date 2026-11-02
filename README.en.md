@@ -121,7 +121,9 @@ vipcode starts with the best free models you have available and switches between
 - **Models that disappear.** If a model no longer exists or doesn't support tools, it's dropped. New free models published by providers are added automatically every day.
 - **Quality.** With a free [LLM Stats](https://llm-stats.com/developer) key (`vipcode auth login llm-stats`), models are ranked by its leaderboard, with extra weight on coding and tool use.
 
-`/models` shows each model and its status (available, paused until…, slow, stuck), `/model <provider/model>` pins one and `/model auto` goes back to rotation. In the [configuration](#configuration), `order` puts your favorites first.
+For a complex task you may not want just any model to step in: with **`/favoritos`** you choose which ones to work with and only those are used, for subagents and summaries too. If they run out, vipcode waits if they're back soon and, if not, stops and tells you when they return, instead of handing your task to another model; `/favoritos off` uses them all for that session. Better 3 or more models from at least 2 providers: the fewer they are, the sooner the free quota runs out.
+
+`/models` shows each model and its status (available, paused until…, slow, stuck) with a ♥ on your favorites, `/model <provider/model>` pins one and `/model auto` goes back to rotation. In the [configuration](#configuration), `order` puts your favorites first.
 
 ## Long conversations
 
@@ -192,6 +194,7 @@ The bottom bar shows the agent, the model, how much of its free plan is left and
 | `/skills` | Installed skills; pick one to use it (or type `/skill-name task`) |
 | `/compact` | Summarize the conversation |
 | `/new`, `/sessions`, `/load <n>`, `/delete <n>`, `/export` | Conversations |
+| `/favoritos`, `/favoritos add`, `/favoritos quitar [model]`, `/favoritos on\|off\|borrar` | Work only with the models you choose: a menu opens to tick and untick them; if they run out, it stops and tells you |
 | `/limites` | How much of each free plan is left today |
 | `/copiar [código]` | Copies the last answer (or its last code block) to the clipboard |
 | `/doctor` | Checks that everything works and tells you how to fix what's missing |
@@ -252,6 +255,7 @@ Yours is in `~/.vipcode/config.json`, and a project can bring its own in `vipcod
 }
 ```
 
+- **favorites**: if there are any, only these models are used, in this order (`"favorites": ["gemini/gemini-3-flash", "kilo/*", "groq"]`: wildcards and provider names work). The same as `/favoritos`.
 - **order**: models that go first. **disabledProviders**: providers you don't want to use.
 - **providers**: a server of yours compatible with the OpenAI API (or changes to the models of a catalog provider).
 - **permission**: `allow`, `ask` or `deny` for `edit`, `bash`, `webfetch`, `mcp` and `secrets` (reading files that usually hold keys); in `bash` and `mcp` the most specific pattern wins. `deny` rules apply even with `--yolo`. Think twice before setting `webfetch` to `allow`: a malicious text could make the model send your data to a website without asking.

@@ -23,6 +23,7 @@ type Json = Record<string, unknown>;
 const SETTINGS: Record<string, string> = {
   model: "el modelo",
   order: "el orden de los modelos",
+  favorites: "qué modelos se usan",
   enabledProviders: "qué IAs se usan",
   disabledProviders: "qué IAs se usan",
   maxSteps: "los pasos por mensaje",

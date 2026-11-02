@@ -146,7 +146,7 @@ function matches<T>(item: SelectItem<T>, query: string): boolean {
 }
 
 // Lista para elegir (modelos, sesiones, agentes, proveedores); escribir filtra
-export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; onDone: (value: T | null) => void }) {
+export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; onDone: (value: T | null) => void; onPick?: (value: T) => void }) {
   const [filter, setFilter] = useState("");
   const [selected, setSelected] = useState(0);
   const filtered = useMemo(() => {
@@ -156,11 +156,24 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
     }
     return props.items.filter((item) => matches(item, query));
   }, [filter, props.items]);
+  // Al marcar con un filtro puesto, la lista puede encoger
+  const cursor = Math.max(0, Math.min(selected, filtered.length - 1));
 
   useInput((input, key) => {
     const { text, enter } = splitEnter(input, key.return);
     if (key.escape) {
       props.onDone(null);
+    } else if (props.onPick && (enter || input === " ")) {
+      // Con casillas: marca o desmarca y la lista sigue abierta, con su filtro y en el mismo sitio
+      const list = text && enter ? props.items.filter((item) => matches(item, (filter + text).toLowerCase())) : filtered;
+      const item = list[text && enter ? 0 : cursor];
+      if (text && enter) {
+        setFilter(filter + text);
+        setSelected(0);
+      }
+      if (item) {
+        props.onPick(item.value);
+      }
     } else if (enter) {
       // Si el Enter vino pegado a texto, ese texto también filtra
       let list = filtered;
@@ -190,7 +203,7 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
   });
 
   const windowSize = 12;
-  const start = Math.max(0, Math.min(selected - Math.floor(windowSize / 2), filtered.length - windowSize));
+  const start = Math.max(0, Math.min(cursor - Math.floor(windowSize / 2), filtered.length - windowSize));
   const visible = filtered.slice(start, start + windowSize);
   // La primera línea del título va destacada; las siguientes, si las hay, explican la pregunta
   const [heading, ...body] = props.title.split("\n");
@@ -206,11 +219,11 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
         </Box>
       ) : null}
       <Text dimColor>
-        {filter ? `Filtro: ${filter}` : "Escribe para filtrar · ↑↓ elegir · Enter aceptar · Esc salir"}
+        {filter ? `Filtro: ${filter}` : props.onPick ? "Escribe para filtrar · ↑↓ elegir · Enter o espacio marca y desmarca · Esc termina" : "Escribe para filtrar · ↑↓ elegir · Enter aceptar · Esc salir"}
       </Text>
       {visible.length === 0 ? <Text dimColor>(nada coincide)</Text> : null}
       {visible.map((item, index) => {
-        const active = start + index === selected;
+        const active = start + index === cursor;
         return (
           <Text key={`${start + index}-${item.label}`} color={active ? "cyan" : undefined} wrap="truncate-end">
             {active ? "❯ " : "  "}
@@ -221,10 +234,26 @@ export function SelectDialog<T>(props: { title: string; items: SelectItem<T>[]; 
       })}
       {filtered.length > windowSize ? (
         <Text dimColor>
-          {selected + 1}/{filtered.length}
+          {cursor + 1}/{filtered.length}
         </Text>
       ) : null}
     </Box>
+  );
+}
+
+// Lista con casillas: marcas y desmarcas varios sin que se cierre, y Esc termina
+export function ChecklistDialog<T>(props: { title: string; items: () => SelectItem<T>[]; onToggle: (value: T) => void; onDone: () => void }) {
+  const [items, setItems] = useState(props.items);
+  return (
+    <SelectDialog
+      title={props.title}
+      items={items}
+      onDone={() => props.onDone()}
+      onPick={(value) => {
+        props.onToggle(value);
+        setItems(props.items());
+      }}
+    />
   );
 }
 

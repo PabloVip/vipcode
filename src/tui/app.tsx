@@ -24,7 +24,7 @@ import { CHECK_MS, checkForUpdate, stepProgress } from "../update.js";
 import { INTERFACES, interfaceFor } from "../interfaces.js";
 import { useConversation } from "./conversation.js";
 import { CreaturePanel, anotherCreature, creatureLayout, makeCreature } from "./creatures.js";
-import { type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
+import { ChecklistDialog, type PermissionChoice, PermissionDialog, PromptDialog, SelectDialog } from "./dialogs.js";
 import * as E from "./editor.js";
 import { Bullet, type Item, type NewItem, ToolHeader, formatDuration, oneLine, shortTokens, tildify } from "./items.js";
 import { look, setLook } from "./theme.js";
@@ -32,6 +32,7 @@ import { look, setLook } from "./theme.js";
 type Dialog =
   | { kind: "permission"; request: PermissionRequest; agent: string; resolve: (choice: PermissionChoice) => void }
   | { kind: "select"; title: string; items: SelectItem<unknown>[]; resolve: (value: unknown) => void }
+  | { kind: "checklist"; title: string; items: () => SelectItem<unknown>[]; toggle: (value: unknown) => void; resolve: () => void }
   | { kind: "prompt"; title: string; mask?: boolean; placeholder?: string; resolve: (value: string | null) => void };
 
 interface Suggestion {
@@ -249,6 +250,13 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   const slot = app.router.slotFor(current);
   const context = app.router.slotFor(app.agent.lastSlot)?.model.context || 0;
   const available = app.router.availableCount();
+  // Con favoritos se ve siempre con cuántos se trabaja (y si los has apagado en esta sesión)
+  let modelsText = ` · ${available}/${app.router.slots.length} modelos`;
+  if (app.router.favoritesActive()) {
+    modelsText = ` · ♥ ${available}/${app.router.slots.length} favoritos`;
+  } else if (app.router.favorites().length > 0) {
+    modelsText = `${modelsText} · favoritos apagados`;
+  }
   const usage = app.agent.session.usage;
   const spent = usage.prompt + usage.completion;
   const queued = app.agent.queue.length;
@@ -296,7 +304,7 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
     model().length +
     (quota ? quotaText().length + 3 : 0) +
     (gauge() ? 12 + gaugeLabel(app.agent.lastTokens, context, fit.detail).length : 0) +
-    (fit.models ? ` · ${available}/${app.router.slots.length} modelos`.length : 0) +
+    (fit.models ? modelsText.length : 0) +
     (fit.tokens ? ` · ${shortTokens(spent)} tokens`.length : 0) +
     (queued > 0 ? ` · ${queued} en cola`.length : 0) +
     (jobs > 0 ? ` · ${jobs} en segundo plano`.length : 0) +
@@ -339,7 +347,7 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
         ) : null}
         {gauge() ? <ContextGauge used={app.agent.lastTokens} total={context} detail={fit.detail} /> : null}
         <Text dimColor>
-          {fit.models ? ` · ${available}/${app.router.slots.length} modelos` : ""}
+          {fit.models ? modelsText : ""}
           {fit.tokens ? ` · ${shortTokens(spent)} tokens` : ""}
           {queued > 0 ? ` · ${queued} en cola` : ""}
         </Text>
@@ -452,6 +460,19 @@ function Main(props: { app: App; initial: string }) {
             resolve: (value) => {
               setDialog(null);
               resolve(value as T | null);
+            },
+          });
+        }),
+      checklist: <T,>(title: string, list: () => SelectItem<T>[], toggle: (value: T) => void) =>
+        new Promise<void>((resolve) => {
+          setDialog({
+            kind: "checklist",
+            title,
+            items: list as () => SelectItem<unknown>[],
+            toggle: toggle as (value: unknown) => void,
+            resolve: () => {
+              setDialog(null);
+              resolve();
             },
           });
         }),
@@ -703,7 +724,7 @@ function Main(props: { app: App; initial: string }) {
     } else if (choice === "off") {
       app.disableKeyless();
       push({ kind: "info", text: 'Hecho: solo usaré las cuentas que conectes. Si cambias de idea, pon "keyless": true en tu configuración (/config te dice dónde está).' });
-      if (app.router.slots.length === 0) {
+      if (app.router.allSlots.length === 0) {
         await app.connect(adapter, "");
       }
     }
@@ -875,7 +896,10 @@ function Main(props: { app: App; initial: string }) {
     if (app.agent.session.log.length > 0) {
       replay(app.agent.session);
     }
-    if (app.router.slots.length === 0) {
+    if (app.router.allSlots.length > 0 && app.router.slots.length === 0) {
+      push({ kind: "notice", text: "Ninguno de tus favoritos se puede usar ahora mismo. Cámbialos con /favoritos, o escribe /favoritos off para usar los demás modelos en esta sesión." });
+    }
+    if (app.router.allSlots.length === 0) {
       push({
         kind: "notice",
         text: "Para empezar, conecta una IA gratuita: elige una de la lista y sigue los pasos (puedes repetirlo cuando quieras con /connect).",
@@ -1260,6 +1284,8 @@ function Main(props: { app: App; initial: string }) {
     dialogView = <PermissionDialog key="permission" request={request} agent={dialog.agent} onDone={dialog.resolve} />;
   } else if (dialog?.kind === "select") {
     dialogView = <SelectDialog key="select" title={dialog.title} items={dialog.items} onDone={dialog.resolve} />;
+  } else if (dialog?.kind === "checklist") {
+    dialogView = <ChecklistDialog key="checklist" title={dialog.title} items={dialog.items} onToggle={dialog.toggle} onDone={dialog.resolve} />;
   } else if (dialog?.kind === "prompt") {
     dialogView = <PromptDialog key="prompt" title={dialog.title} mask={dialog.mask} placeholder={dialog.placeholder} onDone={dialog.resolve} />;
   }

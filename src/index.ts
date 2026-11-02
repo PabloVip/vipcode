@@ -616,7 +616,11 @@ async function main() {
     return;
   }
   if (options.model) {
-    app.router.pinned = options.model;
+    if (app.router.slotFor(options.model) && !app.router.slots.some((slot) => slot.key === options.model)) {
+      ui.notice(`${options.model} no está en tus favoritos: no se usa. Añádelo con /favoritos o usa /favoritos off.`);
+    } else {
+      app.router.pinned = options.model;
+    }
   }
   app.setYolo(options.yolo);
   await app.detectLocalModels();
@@ -664,7 +668,7 @@ async function main() {
     return;
   }
 
-  if (!interactive && app.router.slots.length === 0) {
+  if (!interactive && app.router.allSlots.length === 0) {
     noModelsHelp();
     process.exitCode = 1;
     return;

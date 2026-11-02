@@ -6,6 +6,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "help", description: "esta ayuda" },
   { name: "models", args: "[refresh]", description: "estado de cada modelo; elige uno o busca modelos nuevos" },
   { name: "model", args: "<p/m|auto>", description: "fijar un modelo como preferido (auto = rotación)" },
+  { name: "favoritos", args: "[add|quitar [modelo]] [on|off|borrar]", description: "trabajar solo con los modelos que elijas: abre un menú para marcarlos; si se agotan, para y avisa en vez de pasar a otros" },
   { name: "connect", args: "[proveedor]", description: "añadir la clave de un proveedor gratuito (en OpenRouter, iniciando sesión)" },
   { name: "disconnect", args: "<proveedor>", description: "borrar la clave guardada de un proveedor" },
   { name: "providers", description: "proveedores gratuitos, si tienes clave y dónde conseguirla" },

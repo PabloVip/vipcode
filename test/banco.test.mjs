@@ -185,6 +185,26 @@ export function maximo(lista) { return Math.max(...lista); }
   assert.match(bench.stdout, /Resueltas: 0 de 0/);
 });
 
+test("banco: --modelos prueba cada modelo sin pasar a otros y da una tabla por modelo", { skip: noSandbox }, async () => {
+  const mock = await startMock(({ path: url }) => (url.startsWith("/bueno/") ? { text: "pagos.mjs no existe." } : { text: "Hecho: arreglado." }));
+  const ws = tempWorkspace();
+  const out = path.join(ws.dir, "resultado.json");
+  const config = { providers: [provider("bueno", mock.url, ["m"]), provider("malo", mock.url, ["m"]), provider("otro", mock.url, ["m"])], enabledProviders: ["bueno", "malo", "otro"], autoUpdateModels: false };
+  const result = await new Promise((resolve) => {
+    const proc = spawn(process.execPath, [SCRIPT, "--tareas", "no-existe", "--modelos", "bueno/m,malo/m", "--out", out, "--config", JSON.stringify(config)], { env: systemEnv(ws.home), stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    proc.stdout.on("data", (data) => (stdout += data));
+    proc.on("close", (code) => resolve({ code, stdout }));
+  });
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /## Por modelo/);
+  assert.match(result.stdout, /\| bueno\/m \| 1 de 1 \(100 %\) \| 0 \|/);
+  assert.match(result.stdout, /\| malo\/m \| 0 de 1 \(0 %\) \| 1 \|/);
+  assert.ok(!mock.chats().some((chat) => chat.path.startsWith("/otro/")));
+  await mock.close();
+  ws.cleanup();
+});
+
 test("banco: --lista y --comparar no ejecutan nada, y una tarea que no existe se dice", () => {
   const list = spawnSync(process.execPath, [SCRIPT, "--lista"], { encoding: "utf8" });
   assert.match(list.stdout, /arregla-calculos/);

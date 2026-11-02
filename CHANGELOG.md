@@ -4,6 +4,10 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- **Modelos favoritos.** `/favoritos` (o `/favoritos add`) abre un menú donde marcas y desmarcas con qué modelos trabajar, y solo se usan esos, también para los subagentes y los resúmenes, para que una tarea compleja no acabe en un modelo flojo. Si se agotan, vipcode espera si vuelven pronto y, si no, para y te dice cuándo vuelven, en vez de pasar a otro; `/favoritos off` usa todos durante esa sesión. También con `favorites` en la configuración.
+
 ## [0.4.1] - 2026-11-02
 
 ### Seguridad

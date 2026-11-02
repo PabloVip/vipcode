@@ -9,7 +9,8 @@
 //   node scripts/banco-tareas.mjs --lista               qué tareas hay
 //   node scripts/banco-tareas.mjs --tareas a,b          solo esas
 //   node scripts/banco-tareas.mjs --veces 3             cada tarea 3 veces: los modelos gratis varían mucho de una a otra
-//   node scripts/banco-tareas.mjs --modelo p/modelo     con ese modelo y sin rotar (para ver cómo trabaja uno que no sea el primero)
+//   node scripts/banco-tareas.mjs --modelo p/modelo     solo con ese modelo: si se agota, no pasa a otros
+//   node scripts/banco-tareas.mjs --modelos a/x,b/y     uno detrás de otro y con una tabla por modelo: para elegir tus /favoritos
 //   node scripts/banco-tareas.mjs --out antes.json      además guarda el resultado
 //   node scripts/banco-tareas.mjs --config '{"verifyCode":false}'    con otra configuración (para comparar)
 //   node scripts/banco-tareas.mjs --comparar antes.json despues.json    qué ha cambiado entre dos resultados
@@ -41,7 +42,7 @@ const TASK_MS = 5 * 60 * 1000;
 const TEST_MS = 20 * 1000;
 const MAX_STEPS = 30;
 // No hay modelos gratis que contesten: no dice nada de cómo trabajan. Quedarse sin tiempo sí, si ha llegado a contestar
-const NO_MODELS = /agotados o en pausa|ha podido contestar|ningún proveedor configurado/i;
+const NO_MODELS = /agotados o en pausa|ha podido contestar|ningún proveedor configurado|ninguno de tus favoritos/i;
 // El modelo dice que está hecho…
 const CLAIMS_DONE = /\b(hecho|listo|arreglad[oa]s?|corregid[oa]s?|solucionad[oa]s?|resuelt[oa]s?|completad[oa]s?|funciona|funcionan|pasan|done|fixed|solved|works|passing|passes|completed)\b/i;
 // …salvo si a la vez dice que no ha podido o que está sin comprobar
@@ -798,7 +799,10 @@ export async function runTask(task, extra = {}, model = null) {
   // Solo leer y editar en esa carpeta, y el comando de las pruebas; lo demás, no (ni los que se aprueban solos por defecto)
   app.config.permission = { ...app.config.permission, edit: "allow", webfetch: "deny", mcp: "deny", bash: { "*": "deny", [TEST_COMMAND]: "allow" } };
   app.promptPermission = async () => ({ allow: false, feedback: "aquí solo se puede ejecutar el comando de las pruebas" });
-  if (model) {
+  // Como un favorito: si se agota no pasa a otro, que entonces no se mediría este (en versiones sin favoritos, fijado)
+  if (model && app.router.setFavorites) {
+    app.router.setFavorites([model]);
+  } else if (model) {
     app.router.pinned = model;
   }
   const models = new Set();
@@ -837,6 +841,7 @@ export async function runTask(task, extra = {}, model = null) {
     const problem = error || verifyTask(task, project, answer);
     return {
       id: task.id,
+      chosen: model,
       ok: !problem,
       problem: problem || null,
       noModels,
@@ -904,6 +909,15 @@ export function renderReport(result) {
   for (const run of result.runs) {
     const state = run.noModels ? "sin modelos" : run.ok ? "✓" : run.falseClaim ? "✗ (dijo que sí)" : "✗";
     lines.push(`| ${run.id} | ${state} | ${run.models.join(", ").replace(/\|/g, "/") || "-"} | ${run.steps} | ${run.stuck} | ${run.ranTests ? "sí" : "no"} | ${run.seconds} s |`);
+  }
+  // Con varios modelos, una fila por cada uno: es lo que sirve para elegir tus /favoritos
+  const chosen = [...new Set(result.runs.map((run) => run.chosen).filter(Boolean))];
+  if (chosen.length > 1) {
+    lines.push("", "## Por modelo", "", "| Modelo | Resueltas | Dijo que estaba hecho sin estarlo | Sin cupo | Tiempo |", "|---|---|---|---|---|");
+    for (const model of chosen) {
+      const one = summarize(result.runs.filter((run) => run.chosen === model));
+      lines.push(`| ${model} | ${one.solved} de ${one.runs} (${percent(one.solved, one.runs)}) | ${one.falseClaims} | ${one.noModels} | ${one.seconds} s |`);
+    }
   }
   const failed = result.runs.filter((run) => !run.ok && !run.noModels);
   if (failed.length > 0) {
@@ -974,18 +988,21 @@ async function main() {
   const times = Math.max(1, Number(valueOf("--veces")) || 1);
   const configText = valueOf("--config");
   const extra = configText ? JSON.parse(configText) : {};
-  const model = valueOf("--modelo");
+  const models = (valueOf("--modelos") || valueOf("--modelo") || "").split(",").map((name) => name.trim()).filter(Boolean);
   prepareEnvironment(extra);
   const { VERSION } = await load("meta.js");
   const runs = [];
-  for (let round = 1; round <= times; round++) {
-    for (const task of tasks) {
-      const run = await runTask(task, extra, model);
-      runs.push(run);
-      console.error(`${runs.length}/${tasks.length * times} ${task.id}: ${run.noModels ? "sin modelos" : run.ok ? "✓" : "✗"} (${run.seconds} s)`);
+  const total = tasks.length * times * Math.max(1, models.length);
+  for (const model of models.length > 0 ? models : [null]) {
+    for (let round = 1; round <= times; round++) {
+      for (const task of tasks) {
+        const run = await runTask(task, extra, model);
+        runs.push(run);
+        console.error(`${runs.length}/${total} ${model ? `${model} ` : ""}${task.id}: ${run.noModels ? "sin modelos" : run.ok ? "✓" : "✗"} (${run.seconds} s)`);
+      }
     }
   }
-  const result = { date: new Date().toISOString(), version: VERSION, config: [model ? `modelo ${model}` : "", configText || ""].filter(Boolean).join(" · "), runs };
+  const result = { date: new Date().toISOString(), version: VERSION, config: [models.length === 1 ? `modelo ${models[0]}` : "", configText || ""].filter(Boolean).join(" · "), runs };
   console.log(renderReport(result));
   const out = valueOf("--out");
   if (out) {

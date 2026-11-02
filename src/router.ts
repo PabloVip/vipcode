@@ -74,6 +74,8 @@ interface Classified {
 }
 
 export interface SlotRow {
+  // Está en tu lista de favoritos
+  favorite: boolean;
   key: string;
   label: string;
   status: string;
@@ -479,7 +481,11 @@ export function readLimitHeaders(headers: unknown, provider: ProviderConfig, now
 }
 
 export class Router {
+  // Todos los modelos que se pueden usar, y los que se usan de verdad: esos mismos o, con favoritos, solo los de tu lista
+  allSlots: Slot[] = [];
   slots: Slot[] = [];
+  // /favoritos off: se usan todos, solo mientras dure esta sesión
+  favoritesOff = false;
   // Hasta cuándo está en pausa cada slot (se guarda en disco para recordar límites diarios)
   cooldowns: Record<string, number> = {};
   unsupported: Record<string, number> = {};
@@ -557,7 +563,56 @@ export class Router {
         });
       }
     }
-    this.slots = this.sortSlots(slots);
+    this.allSlots = this.sortSlots(slots);
+    this.applyFavorites();
+  }
+
+  favorites(): string[] {
+    const list: unknown = this.config.favorites;
+    return Array.isArray(list) ? list.map(String).filter((pattern) => pattern !== "") : [];
+  }
+
+  // Hay una lista y está en uso: solo se trabaja con esos modelos y, si se agotan, se para y se avisa
+  favoritesActive(): boolean {
+    return !this.favoritesOff && this.favorites().length > 0;
+  }
+
+  // Dónde está en tu lista (por su nombre, con comodines como kilo/* o por el nombre del proveedor), o -1
+  private favoriteRank(slot: Slot): number {
+    return this.favorites().findIndex((pattern) => pattern === slot.provider.name || wildcardMatch(pattern, slot.key));
+  }
+
+  isFavorite(key: string): boolean {
+    const slot = this.allSlots.find((one) => one.key === key);
+    return slot !== undefined && this.favoriteRank(slot) >= 0;
+  }
+
+  // Todo lo demás del router (qué se pregunta, cuánto contexto hay, cuánto falta para que vuelvan…) mira «slots», así que basta
+  // con filtrar aquí para que valga también para los subagentes y los resúmenes. Van en el orden de tu lista
+  private applyFavorites() {
+    if (!this.favoritesActive()) {
+      this.slots = this.allSlots;
+      return;
+    }
+    this.slots = this.allSlots
+      .map((slot) => ({ slot, rank: this.favoriteRank(slot) }))
+      .filter((entry) => entry.rank >= 0)
+      .sort((a, b) => a.rank - b.rank)
+      .map((entry) => entry.slot);
+    // Uno fijado que ya no se puede usar no se queda en la barra de abajo como si fuera a contestar
+    if (this.pinned && !this.slots.some((slot) => slot.key === this.pinned)) {
+      this.pinned = null;
+    }
+  }
+
+  setFavorites(list: string[]) {
+    this.config.favorites = list;
+    this.applyFavorites();
+  }
+
+  setFavoritesOff(off: boolean) {
+    this.favoritesOff = off;
+    this.applyFavorites();
   }
 
   // Orden de la rotación: primero los patrones de "order" del config; después tus proveedores propios
@@ -785,13 +840,13 @@ export class Router {
   }
 
   slotFor(key: string): Slot | undefined {
-    return this.slots.find((slot) => slot.key === key);
+    return this.allSlots.find((slot) => slot.key === key);
   }
 
   // Estado legible de cada slot para /models
-  describe(): SlotRow[] {
+  describe(all = false): SlotRow[] {
     const now = Date.now();
-    return this.slots.map((slot) => {
+    return (all ? this.allSlots : this.slots).map((slot) => {
       let status = "disponible";
       let available = true;
       const until = this.cooldowns[slot.key] || 0;
@@ -816,7 +871,13 @@ export class Router {
       if (this.pinned === slot.key) {
         status += " (fijado)";
       }
+      // Con favoritos, los demás no se usan aunque estén libres
+      if (!this.slots.includes(slot)) {
+        status = "fuera de tus favoritos";
+        available = false;
+      }
       return {
+        favorite: this.favoriteRank(slot) >= 0,
         key: slot.key,
         label: slot.provider.label || slot.provider.name,
         status,
@@ -922,6 +983,9 @@ export class Router {
   }
 
   async chat(request: ChatRequest, signal: AbortSignal | undefined, handlers: ChatHandlers = {}): Promise<ChatResult> {
+    if (this.slots.length === 0 && this.favoritesActive()) {
+      throw new NoSlotError(`Ninguno de tus favoritos se puede usar en este ordenador (${this.favorites().join(", ")}). Cámbialos con /favoritos, o escribe /favoritos off para usar los demás modelos en esta sesión.`);
+    }
     if (this.slots.length === 0) {
       throw new NoSlotError("No hay ningún proveedor configurado. Añade una clave con «vipcode auth login» o exporta, por ejemplo, GEMINI_API_KEY.");
     }
@@ -948,7 +1012,7 @@ export class Router {
       if (list.length === 0) {
         const wait = this.soonestReturn(estTokens, excluded, needsVision, needsTools);
         if (wait > 0 && wait <= this.config.maxWaitMs) {
-          handlers.onNotice?.(`Todos los proveedores están en pausa; espero ${Math.ceil(wait / 1000)} s…`);
+          handlers.onNotice?.(`Todos ${this.favoritesActive() ? "tus favoritos" : "los proveedores"} están en pausa; espero ${Math.ceil(wait / 1000)} s…`);
           await sleep(wait + 500, signal);
           continue;
         }
@@ -963,13 +1027,18 @@ export class Router {
         // Solo es que la conversación es demasiado larga si no cabe en ninguno; si cabe, es que todos han fallado (cada
         // uno ha dicho por qué en su aviso)
         const fits = this.slots.some((slot) => this.effectiveContext(slot) >= estTokens && !(needsTools && slot.model.tools === false));
-        let reason = "Todos los proveedores están agotados o en pausa.";
+        const favorites = this.favoritesActive();
+        let reason = favorites ? "Tus favoritos están agotados o en pausa." : "Todos los proveedores están agotados o en pausa.";
         if (!fits) {
-          reason = `Ningún modelo admite una conversación de ~${Math.round(estTokens * this.tokenScale())} tokens. Usa /compact o /new.`;
+          reason = `Ningún ${favorites ? "favorito" : "modelo"} admite una conversación de ~${Math.round(estTokens * this.tokenScale())} tokens. Usa /compact o /new.`;
         } else if (wait === Infinity) {
-          reason = "Ningún modelo ha podido contestar: arriba está lo que ha fallado en cada uno (/models dice cómo está cada uno).";
+          reason = `Ningún ${favorites ? "favorito" : "modelo"} ha podido contestar: arriba está lo que ha fallado en cada uno (/models dice cómo está cada uno).`;
         } else if (wait > 0) {
           reason += ` El primero vuelve a las ${new Date(Date.now() + wait).toLocaleTimeString()}.`;
+        }
+        // Es lo que has pedido: que una tarea no pase a otro modelo. Se para y se dice, y tú decides
+        if (favorites) {
+          reason += " No sigo con otros modelos porque tienes una lista de favoritos: espera, o escribe /favoritos off para usar los demás en esta sesión.";
         }
         throw new NoSlotError(reason);
       }

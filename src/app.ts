@@ -31,6 +31,7 @@ import { type UpdateStep, compareVersions, updateVipcode } from "./update.js";
 import { type TutorialCard, type TutorialEvent, isTutorialDir, tutorialCard, tutorialDone } from "./tutorial.js";
 import { INTERFACES, interfaceFor } from "./interfaces.js";
 import { formatTodos, resolvePath, truncate } from "./tools.js";
+import { wildcardMatch } from "./match.js";
 import { showControl, showLine } from "./sanitize.js";
 import { type ProjectTrust, projectTrust } from "./trust.js";
 import { joinList } from "./trustinfo.js";
@@ -49,6 +50,8 @@ export interface UiAdapter {
   // Texto preformateado (tablas, diffs, ayuda)
   block(text: string): void;
   select?<T>(title: string, items: SelectItem<T>[]): Promise<T | null>;
+  // Lista con casillas que se queda abierta: «toggle» marca o desmarca, y se vuelven a pedir los «items» para enseñarlo
+  checklist?<T>(title: string, items: () => SelectItem<T>[], toggle: (value: T) => void): Promise<void>;
   prompt?(title: string, options?: { mask?: boolean; placeholder?: string }): Promise<string | null>;
   // Vuelve a poner un texto en la caja de escritura (tras /undo)
   setInput?(text: string): void;
@@ -628,7 +631,7 @@ export class App {
   }
 
   modelsTable(): string {
-    const rows = this.router.describe();
+    const rows = this.router.describe(true);
     if (rows.length === 0) {
       return "No hay modelos: añade una clave con /connect o «vipcode auth login».";
     }
@@ -644,9 +647,105 @@ export class App {
       if (this.ranking) {
         score = `${row.score !== null ? pc.cyan(String(row.score).padStart(4)) : pc.dim("   —")}  `;
       }
-      lines.push(`  ${score}${row.key.padEnd(52)} ${color(row.status)} ${pc.dim(`${shortContext(row.context)}${vision}`)}`);
+      lines.push(`  ${score}${row.favorite ? "♥ " : "  "}${row.key.padEnd(52)} ${color(row.status)} ${pc.dim(`${shortContext(row.context)}${vision}`)}`);
     }
-    lines.push("", pc.dim(`${this.router.availableCount()} de ${rows.length} disponibles ahora · /models refresh busca modelos gratis nuevos`));
+    const total = this.router.favoritesActive() ? `${this.router.slots.length} favoritos` : String(rows.length);
+    lines.push("", pc.dim(`${this.router.availableCount()} de ${total} disponibles ahora · /models refresh busca modelos gratis nuevos · /favoritos elige con cuáles trabajar`));
+    return lines.join("\n");
+  }
+
+  // /favoritos: con qué modelos se trabaja. Se guarda en tu configuración; «off» dura solo esta sesión
+  private async favoritesCommand(rest: string[], ui: UiAdapter) {
+    const router = this.router;
+    const [action, ...patterns] = rest;
+    const save = (list: string[]) => {
+      setGlobalConfigValue("favorites", list);
+      router.setFavorites(list);
+    };
+    // Sin decir cuál, el menú: /favoritos, /favoritos add o /favoritos quitar
+    const adding = action === "añadir" || action === "anadir" || action === "add";
+    const removing = action === "quitar" || action === "remove";
+    if ((action === undefined || ((adding || removing) && patterns.length === 0)) && (ui.checklist || ui.select) && router.allSlots.length > 0) {
+      await this.favoritesMenu(ui, save);
+      ui.block(this.favoritesReport());
+      return;
+    }
+    if (action === "off") {
+      router.setFavoritesOff(true);
+      ui.info(router.favorites().length > 0 ? "En esta sesión se usan todos los modelos. /favoritos on vuelve a tu lista (y al abrir vipcode otra vez, también)." : "No tienes favoritos: ya se usan todos los modelos.");
+    } else if (action === "on") {
+      router.setFavoritesOff(false);
+      ui.block(this.favoritesReport());
+    } else if (action === "borrar" || action === "clear") {
+      save([]);
+      ui.info("Lista de favoritos borrada: se usan todos los modelos.");
+    } else if (adding) {
+      const unknown = patterns.filter((pattern) => !router.allSlots.some((slot) => pattern === slot.provider.name || wildcardMatch(pattern, slot.key)));
+      if (patterns.length === 0 || unknown.length > 0) {
+        ui.error(patterns.length === 0 ? "Escribe qué modelo: /favoritos añadir proveedor/modelo (también kilo/* o el nombre de un proveedor)." : `No hay ningún modelo que encaje con ${unknown.map((one) => `«${showControl(one)}»`).join(", ")}. /models enseña los que hay.`);
+        return;
+      }
+      save([...new Set([...router.favorites(), ...patterns])]);
+      ui.block(this.favoritesReport());
+    } else if (removing) {
+      const unknown = patterns.filter((pattern) => !router.favorites().includes(pattern));
+      if (patterns.length === 0 || unknown.length > 0) {
+        ui.error(patterns.length === 0 ? "Escribe cuál: /favoritos quitar proveedor/modelo." : `${unknown.map((one) => `«${showControl(one)}»`).join(", ")} no está en tu lista, que es: ${router.favorites().join(", ") || "(vacía)"}.`);
+        return;
+      }
+      save(router.favorites().filter((pattern) => !patterns.includes(pattern)));
+      ui.block(this.favoritesReport());
+    } else if (action !== undefined && action !== "ver" && action !== "list") {
+      ui.error("Uso: /favoritos · /favoritos añadir <modelo> · /favoritos quitar <modelo> · /favoritos on · /favoritos off · /favoritos borrar");
+    } else {
+      ui.block(this.favoritesReport());
+    }
+  }
+
+  // El menú para marcar y desmarcar. En la interfaz de texto simple, que no tiene casillas, se pregunta uno a uno
+  private async favoritesMenu(ui: UiAdapter, save: (list: string[]) => void) {
+    const router = this.router;
+    const title = "Tus modelos favoritos\nSolo se usan los que marques. Si se agotan, vipcode para y te avisa.";
+    const items = () => router.describe(true).map((row) => ({ label: `${row.favorite ? "♥" : " "} ${row.key}`, description: `${row.status} · ${shortContext(row.context)}`, value: row.key }));
+    const toggle = (key: string) => {
+      const list = router.favorites();
+      if (list.includes(key)) {
+        save(list.filter((pattern) => pattern !== key));
+      } else if (router.isFavorite(key)) {
+        ui.notice(`${key} está en tu lista por un patrón. Para quitarlo: /favoritos quitar ${list.find((pattern) => pattern === router.slotFor(key)?.provider.name || wildcardMatch(pattern, key))}`);
+      } else {
+        save([...list, key]);
+      }
+    };
+    if (ui.checklist) {
+      await ui.checklist(title, items, toggle);
+      return;
+    }
+    for (let choice = await ui.select!<string>(title, items()); choice; choice = await ui.select!<string>(title, items())) {
+      toggle(choice);
+    }
+  }
+
+  favoritesReport(): string {
+    const router = this.router;
+    const list = router.favorites();
+    if (list.length === 0) {
+      return "No tienes favoritos: se usan todos los modelos. /favoritos para elegirlos.";
+    }
+    const lines = [router.favoritesActive() ? "Favoritos: solo se usan estos, en este orden." : "Tienes favoritos, pero en esta sesión se usan todos los modelos (/favoritos on vuelve a tu lista)."];
+    const rows = router.describe(true).filter((row) => row.favorite);
+    for (const row of router.favoritesActive() ? router.describe() : rows) {
+      lines.push(`  ♥ ${row.key.padEnd(52)} ${row.status} ${pc.dim(shortContext(row.context))}`);
+    }
+    const empty = list.filter((pattern) => !router.allSlots.some((slot) => pattern === slot.provider.name || wildcardMatch(pattern, slot.key)));
+    for (const pattern of empty) {
+      lines.push(`  ${pc.yellow(`⚠ «${showControl(pattern)}» no encaja con ningún modelo disponible`)}`);
+    }
+    const chosen = router.allSlots.filter((slot) => router.isFavorite(slot.key));
+    if (chosen.length < 3 || new Set(chosen.map((slot) => slot.provider.name)).size < 2) {
+      lines.push("", pc.yellow("Son pocos: el cupo gratis se acaba antes y, si se agotan, vipcode para. Recomiendo al menos 3 modelos de 2 proveedores distintos."));
+    }
+    lines.push("", pc.dim("/favoritos añadir <modelo> · /favoritos quitar <modelo> · /favoritos off (solo esta sesión) · /favoritos borrar"));
     return lines.join("\n");
   }
 
@@ -883,12 +982,12 @@ export class App {
           }
           return {};
         }
-        if (ui.select && this.router.slots.length > 0) {
-          const rows = this.router.describe();
+        if (ui.select && this.router.allSlots.length > 0) {
+          const rows = this.router.describe(true);
           const choice = await ui.select<string>("Elige el modelo preferido (Esc para salir)", [
             { label: "auto", description: "rotación automática: los mejores primero según LLM Stats", value: "auto" },
             ...rows.map((row) => ({
-              label: row.key,
+              label: `${row.favorite ? "♥ " : ""}${row.key}`,
               description: `${row.score !== null ? `★${row.score} · ` : ""}${row.status} · ${shortContext(row.context)}${row.vision ? " · imagen" : ""}`,
               value: row.key,
             })),
@@ -908,11 +1007,17 @@ export class App {
         } else if (this.router.slots.some((slot) => slot.key === arg)) {
           this.router.pinned = arg;
           ui.info(`Preferido: ${arg}`);
+        } else if (this.router.slotFor(arg)) {
+          ui.error(`${arg} no está en tus favoritos. Añádelo con /favoritos añadir ${arg}, o escribe /favoritos off para usar todos.`);
         } else {
           ui.error(`No existe ${arg}. Mira /models`);
         }
         return {};
       }
+      case "/favoritos":
+      case "/favorites":
+        await this.favoritesCommand(rest, ui);
+        return {};
       case "/connect": {
         const [providerName, key] = rest;
         await this.connect(ui, providerName || "", key);

@@ -167,6 +167,8 @@ export interface Config {
   enabledProviders: string[];
   // Prioridad: patrones de "proveedor/modelo" que van primero, por ejemplo ["groq/*", "gemini/*"]
   order: string[];
+  // Si hay alguno, solo se usan estos modelos (admite comodines y nombres de proveedor). Si se agotan, vipcode para y avisa
+  favorites: string[];
   // Modelo preferido ("" = rotación automática)
   model: string;
   // Máximo de pasos (llamadas al modelo) por cada mensaje tuyo
@@ -234,6 +236,7 @@ export const DEFAULT_CONFIG: Config = {
   disabledProviders: [],
   enabledProviders: [],
   order: [],
+  favorites: [],
   model: "",
   maxSteps: 50,
   autoCompactTokens: 90000,
@@ -267,6 +270,7 @@ export function isAnonymous(provider: ProviderConfig): boolean {
 const TEMPLATE = {
   model: "",
   order: [],
+  favorites: [],
   disabledProviders: [],
   providers: [],
   permission: DEFAULT_PERMISSION,

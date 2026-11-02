@@ -322,3 +322,19 @@ test("interfaz: un comando en segundo plano se aprueba para su carpeta, se ve en
     ws.cleanup();
   }
 });
+
+test("interfaz: /favoritos marca un modelo desde la lista, la barra lo enseña y solo contesta ese", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const mock = await startMock(({ path: url }) => ({ text: `CONTESTA-${url.split("/")[1].toUpperCase()}` }));
+  const ws = tempWorkspace();
+  ws.writeConfig({ providers: [provider("a", mock.url, ["m"]), provider("b", mock.url, ["m"])], enabledProviders: ["a", "b"], autoUpdateModels: false, checkUpdates: false });
+  try {
+    const result = await runExpect("tui-favoritos.exp", ws);
+    assert.equal(result.code, 0, result.plain.slice(-3000));
+    assert.match(result.plain, /TUI-FAVORITOS-OK/);
+    assert.ok(!mock.chats().some((chat) => chat.path.startsWith("/a/")));
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ws.home, "config.json"), "utf8")).favorites, ["b/m"]);
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
+});

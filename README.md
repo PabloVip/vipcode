@@ -119,7 +119,9 @@ vipcode empieza por los mejores modelos gratis que tienes disponibles y va cambi
 - **Modelos que desaparecen.** Si un modelo ya no existe o no admite herramientas, lo descarta. Cada día añade solos los modelos gratis nuevos que publican los proveedores.
 - **Calidad.** Con una clave gratuita de [LLM Stats](https://llm-stats.com/developer) (`vipcode auth login llm-stats`) los ordena por su ranking, dando más peso a programar y a usar herramientas.
 
-`/models` enseña cada modelo con su estado (disponible, en pausa hasta…, lento, atascado), `/model <proveedor/modelo>` fija uno y `/model auto` vuelve a la rotación. En la [configuración](#configuración), `order` pone primero los que prefieras.
+Para una tarea compleja puede que prefieras que no entre cualquier modelo: con **`/favoritos`** eliges con cuáles trabajar y solo se usan esos, también para los subagentes y los resúmenes. Si se agotan, vipcode espera si vuelven pronto y, si no, para y te dice cuándo vuelven, en vez de pasarle tu tarea a otro modelo; `/favoritos off` usa todos durante esa sesión. Mejor 3 modelos o más, de al menos 2 proveedores: el cupo gratis se acaba antes cuantos menos sean.
+
+`/models` enseña cada modelo con su estado (disponible, en pausa hasta…, lento, atascado) y un ♥ en tus favoritos, `/model <proveedor/modelo>` fija uno y `/model auto` vuelve a la rotación. En la [configuración](#configuración), `order` pone primero los que prefieras.
 
 ## Conversaciones largas
 
@@ -190,6 +192,7 @@ La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan grat
 | `/skills` | Skills instaladas; elige una para usarla (o escribe `/nombre-de-la-skill tarea`) |
 | `/compact` | Resumir la conversación |
 | `/new`, `/sessions`, `/load <n>`, `/delete <n>`, `/export` | Conversaciones |
+| `/favoritos`, `/favoritos add`, `/favoritos quitar [modelo]`, `/favoritos on\|off\|borrar` | Trabajar solo con los modelos que elijas: se abre un menú para marcarlos y desmarcarlos; si se agotan, para y avisa |
 | `/limites` | Cuánto te queda hoy de cada plan gratis |
 | `/copiar [código]` | Copia la última respuesta (o su último bloque de código) al portapapeles |
 | `/doctor` | Comprueba que todo funciona y dice cómo arreglar lo que falte |
@@ -250,6 +253,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 }
 ```
 
+- **favorites**: si hay alguno, solo se usan estos modelos, en este orden (`"favorites": ["gemini/gemini-3-flash", "kilo/*", "groq"]`: admite comodines y nombres de proveedor). Lo mismo que `/favoritos`.
 - **order**: modelos que van primero. **disabledProviders**: proveedores que no quieres usar.
 - **providers**: un servidor tuyo compatible con la API de OpenAI (o cambios en los modelos de uno del catálogo).
 - **permission**: `allow`, `ask` o `deny` para `edit`, `bash`, `webfetch`, `mcp` y `secrets` (leer ficheros que suelen guardar claves); en `bash` y `mcp` gana el patrón más concreto. Las reglas `deny` se respetan incluso con `--yolo`. Piénsatelo antes de poner `webfetch` en `allow`: un texto malicioso podría hacer que el modelo mande tus datos a una web sin preguntarte.

@@ -81,7 +81,8 @@ La prueba real dice si vipcode funciona; el banco mide **cómo de bien termina e
 
 ```bash
 npm run banco                                            # todas las tareas
-node scripts/banco-tareas.mjs --modelo proveedor/modelo  # con un modelo concreto
+node scripts/banco-tareas.mjs --modelo proveedor/modelo  # solo con ese modelo, sin pasar a otros
+node scripts/banco-tareas.mjs --modelos a/x,b/y          # varios, con una tabla por modelo (para elegir tus /favoritos)
 node scripts/banco-tareas.mjs --out antes.json           # guarda el resultado
 node scripts/banco-tareas.mjs --comparar antes.json despues.json
 ```

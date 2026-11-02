@@ -1785,3 +1785,198 @@ test("agente: si le llega una y otra vez lo mismo al buscar se le dice que da vu
   await patient.close();
   quiet.cleanup();
 });
+
+test("favoritos: solo se usan esos y en su orden, también en subagentes y resúmenes, y /model no se los salta", async () => {
+  const mock = await startMock(({ path: url, body }) => {
+    const last = lastMessage(body);
+    const name = url.split("/")[1];
+    if (contentText(body.messages[0].content).includes("You are a subagent") || contentText(last.content).includes("Summarize")) {
+      return { text: `informe de ${name}` };
+    }
+    if (last.role === "user" && contentText(last.content).startsWith("reparte")) {
+      return { tools: [{ name: "task", args: { subagent_type: "ayudante", description: "uno", prompt: "mira" } }] };
+    }
+    return { text: `contesta ${name}` };
+  });
+  const providers = [provider("a", mock.url, ["uno", "dos"]), provider("b", mock.url, ["uno"]), provider("c", mock.url, ["uno"])];
+  const ws = tempWorkspace();
+  const base = { providers, enabledProviders: ["a", "b", "c"] };
+
+  // Sin lista, como siempre
+  let { app, events } = makeApp(ws, mock.url, base);
+  assert.equal(app.router.favoritesActive(), false);
+  assert.equal(app.router.slots.length, 4);
+  await app.runPrompt({ text: "hola" }, {});
+  assert.match(events.text, /contesta a/);
+  await app.shutdown();
+
+  // Solo los de la lista, en su orden (por nombre, con comodines o por proveedor), y también el subagente
+  ({ app, events } = makeApp(ws, mock.url, { ...base, favorites: ["c/uno", "b"] }));
+  assert.deepEqual(app.router.slots.map((slot) => slot.key), ["c/uno", "b/uno"]);
+  const before = mock.chats().length;
+  await app.runPrompt({ text: "reparte" }, {});
+  const used = mock.chats().slice(before).map((chat) => chat.path.split("/")[1]);
+  assert.ok(used.length >= 3);
+  assert.ok(used.every((name) => name === "c"), used.join(","));
+  assert.match(events.text, /contesta c/);
+  // /models los enseña todos, /model no deja saltárselos y lo fijado fuera de la lista no se queda
+  const { out, adapter } = capture();
+  await app.handleCommand("/models", adapter);
+  assert.match(out.block.join("\n"), /♥ c\/uno/);
+  assert.match(out.block.join("\n"), /a\/uno\s+.*fuera de tus favoritos/);
+  await app.handleCommand("/model a/uno", adapter);
+  assert.match(out.error.at(-1), /no está en tus favoritos/);
+  assert.equal(app.router.pinned, null);
+  await app.handleCommand("/model b/uno", adapter);
+  assert.equal(app.router.pinned, "b/uno");
+  await app.runPrompt({ text: "otra" }, {});
+  assert.match(events.text, /contesta b/);
+  app.router.setFavorites(["c/uno"]);
+  assert.equal(app.router.pinned, null);
+  await app.shutdown();
+
+  // El contexto que se tiene en cuenta es el de la lista: si no cabe en el favorito, se le resume, no se pasa a uno más grande
+  const small = [provider("grande", mock.url, [{ id: "m", context: 500000 }]), provider("pequeno", mock.url, [{ id: "m", context: 8000 }])];
+  ({ app, events } = makeApp(ws, mock.url, { providers: small, enabledProviders: ["grande", "pequeno"], favorites: ["pequeno/m"] }));
+  app.agent.session.messages.push({ role: "user", content: "x".repeat(60000) }, { role: "assistant", content: "vale" });
+  const start = mock.chats().length;
+  await app.runPrompt({ text: "sigue con esto" }, {});
+  const calls = mock.chats().slice(start);
+  assert.ok(calls.length >= 2, "debería haber pedido el resumen y contestado");
+  assert.ok(calls.every((chat) => chat.path.startsWith("/pequeno/")), calls.map((chat) => chat.path).join(","));
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("favoritos: si se agotan espera un poco y, si tardan, para y avisa, sin pasar nunca a otro modelo", async () => {
+  let retryAfter = "1";
+  let busy = 1;
+  const mock = await startMock(({ path: url }) => {
+    if (url.startsWith("/fav/") && busy > 0) {
+      busy--;
+      return { status: 429, json: { error: { message: "rate limit" } }, headers: { "retry-after": retryAfter } };
+    }
+    return { text: `contesta ${url.split("/")[1]}` };
+  });
+  const providers = [provider("fav", mock.url, ["m"]), provider("otro", mock.url, ["m"])];
+  const ws = tempWorkspace();
+  let { app, events } = makeApp(ws, mock.url, { providers, enabledProviders: ["fav", "otro"], favorites: ["fav/m"], stickyWaitMs: 0 });
+  app.router.resetCooldowns();
+  // Vuelve pronto: se le espera, y nadie más contesta
+  await app.runPrompt({ text: "hola" }, {});
+  assert.match(events.text, /contesta fav/);
+  assert.ok(events.notices.some((notice) => /Todos tus favoritos están en pausa; espero/.test(notice)), events.notices.join("\n"));
+  assert.ok(!mock.chats().some((chat) => chat.path.startsWith("/otro/")));
+  // Tarda mucho: para y dice cuándo vuelve y qué se puede hacer
+  retryAfter = "3000";
+  busy = 1;
+  await assert.rejects(app.runPrompt({ text: "otra" }, {}), (err) => {
+    assert.match(err.message, /Tus favoritos están agotados o en pausa/);
+    assert.match(err.message, /El primero vuelve a las/);
+    assert.match(err.message, /\/favoritos off/);
+    return true;
+  });
+  assert.ok(!mock.chats().some((chat) => chat.path.startsWith("/otro/")));
+  // /favoritos off: esta sesión con todos, y lo dice la barra. /favoritos on vuelve. Al abrir vipcode otra vez, también
+  const { out, adapter } = capture();
+  await app.handleCommand("/favoritos off", adapter);
+  assert.match(out.info.at(-1), /se usan todos los modelos/);
+  await app.runPrompt({ text: "y otra" }, {});
+  assert.match(events.text, /contesta otro/);
+  await app.handleCommand("/favoritos on", adapter);
+  assert.equal(app.router.favoritesActive(), true);
+  await app.handleCommand("/favoritos off", adapter);
+  await app.shutdown();
+  ({ app, events } = makeApp(ws, mock.url, { providers, enabledProviders: ["fav", "otro"], favorites: ["fav/m"] }));
+  assert.equal(app.router.favoritesActive(), true);
+  await app.shutdown();
+  // Ninguno se puede usar: lo dice, y no lo confunde con no tener modelos
+  ({ app, events } = makeApp(ws, mock.url, { providers, enabledProviders: ["fav", "otro"], favorites: ["ya/no-existe"] }));
+  assert.equal(app.router.slots.length, 0);
+  assert.equal(app.router.allSlots.length, 2);
+  await assert.rejects(app.runPrompt({ text: "hola" }, {}), /Ninguno de tus favoritos se puede usar.*ya\/no-existe/);
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("/favoritos: añadir, quitar y borrar se guardan, avisa si son pocos y no acepta lo que no existe", async () => {
+  const mock = await startMock(() => ({ text: "ok" }));
+  const providers = [provider("a", mock.url, ["uno", "dos"]), provider("b", mock.url, ["uno"])];
+  const ws = tempWorkspace();
+  const saved = () => JSON.parse(fs.readFileSync(path.join(shared.home, "config.json"), "utf8")).favorites ?? [];
+  const { app } = makeApp(ws, mock.url, { providers, enabledProviders: ["a", "b"] });
+  const { out, adapter } = capture();
+  await app.handleCommand("/favoritos", adapter);
+  assert.match(out.block.at(-1), /No tienes favoritos: se usan todos/);
+  await app.handleCommand("/favoritos añadir no/existe", adapter);
+  assert.match(out.error.at(-1), /No hay ningún modelo que encaje con «no\/existe»/);
+  assert.deepEqual(saved(), []);
+  // Sin menú (vipcode run…) hay que decir cuál
+  await app.handleCommand("/favoritos añadir", adapter);
+  assert.match(out.error.at(-1), /Escribe qué modelo/);
+  // Con menú, /favoritos, /favoritos add y /favoritos quitar lo abren; se queda abierto y cada marca se guarda al momento
+  for (const command of ["/favoritos", "/favoritos add", "/favoritos añadir", "/favoritos quitar"]) {
+    let opened = false;
+    await app.handleCommand(command, {
+      ...adapter,
+      checklist: async (title, items, toggle) => {
+        opened = true;
+        assert.match(title, /Solo se usan los que marques/);
+        assert.deepEqual(items().map((item) => item.label), ["  a/uno", "  a/dos", "  b/uno"]);
+        toggle("a/uno");
+        assert.deepEqual(saved(), ["a/uno"]);
+        assert.equal(items()[0].label, "♥ a/uno");
+        toggle("b/uno");
+        assert.deepEqual(saved(), ["a/uno", "b/uno"]);
+        toggle("a/uno");
+        toggle("b/uno");
+        assert.deepEqual(saved(), []);
+      },
+    });
+    assert.ok(opened, command);
+  }
+  // Uno solo: se avisa de que son pocos
+  await app.handleCommand("/favoritos añadir a/uno", adapter);
+  assert.deepEqual(saved(), ["a/uno"]);
+  assert.match(out.block.at(-1), /♥ a\/uno/);
+  assert.match(out.block.at(-1), /Son pocos/);
+  assert.deepEqual(app.router.slots.map((slot) => slot.key), ["a/uno"]);
+  // 3 de 2 proveedores: ya no; sin repetir, con comodines y con el nombre del proveedor
+  await app.handleCommand("/favoritos anadir a/* a/uno", adapter);
+  await app.handleCommand("/favoritos add b", adapter);
+  assert.deepEqual(saved(), ["a/uno", "a/*", "b"]);
+  assert.doesNotMatch(out.block.at(-1), /Son pocos/);
+  assert.equal(app.router.slots.length, 3);
+  await app.handleCommand("/favoritos quitar c/nada", adapter);
+  assert.match(out.error.at(-1), /no está en tu lista/);
+  await app.handleCommand("/favoritos quitar a/* b", adapter);
+  assert.deepEqual(saved(), ["a/uno"]);
+  await app.handleCommand("/favoritos raro", adapter);
+  assert.match(out.error.at(-1), /Uso: \/favoritos/);
+  await app.handleCommand("/favoritos borrar", adapter);
+  assert.deepEqual(saved(), []);
+  assert.equal(app.router.favoritesActive(), false);
+  assert.equal(app.router.slots.length, 3);
+  // Con la lista para elegir: Enter marca o desmarca, Esc termina, y un patrón no se quita marcando uno de sus modelos
+  const answers = ["a/uno", "b/uno", "a/uno", null];
+  const titles = [];
+  await app.handleCommand("/favoritos", { ...adapter, select: async (title) => (titles.push(title), answers.shift()) });
+  assert.deepEqual(saved(), ["b/uno"]);
+  assert.match(titles[0], /Solo se usan los que marques/);
+  await app.handleCommand("/favoritos añadir a/*", adapter);
+  const more = ["a/dos", null];
+  await app.handleCommand("/favoritos", { ...adapter, select: async () => more.shift() });
+  assert.match(out.notice.at(-1), /por un patrón.*\/favoritos quitar a\/\*/);
+  assert.deepEqual(saved(), ["b/uno", "a/*"]);
+  // Un proyecto que los cambia se te cuenta antes de confiar en él
+  const { describeTrust } = await import("../dist/trustinfo.js");
+  const { projectTrust } = await import("../dist/trust.js");
+  const project = tempWorkspace({ "vipcode.json": JSON.stringify({ favorites: ["x/y"] }) });
+  assert.match(describeTrust(projectTrust(project.proj)).settings.join("\n"), /qué modelos se usan/);
+  project.cleanup();
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
