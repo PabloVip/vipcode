@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Edición del cuadro de texto: funciones puras sobre el texto y la posición del cursor
 
 export interface EditorState {

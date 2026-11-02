@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { isRemoteSession } from "./login.js";

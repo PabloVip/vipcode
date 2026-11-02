@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import hljs from "highlight.js/lib/common";
 import { type Token, type Tokens, marked } from "marked";
 import pc from "picocolors";

@@ -36,7 +36,8 @@ Es TypeScript (Node.js 22 o superior, módulos ES) y la interfaz está hecha con
 | `src/tools.ts` | Las herramientas del agente: leer, editar, buscar, ejecutar, consultar la web… |
 | `src/permissions.ts`, `src/trust.ts` | Qué se pregunta antes de hacer, y la confianza en la configuración de cada carpeta |
 | `src/session.ts`, `src/snapshot.ts` | Conversaciones guardadas, y las instantáneas de `/undo` |
-| `src/mcp.ts`, `src/lsp.ts`, `src/skills.ts` | Servidores MCP, servidores de lenguaje y skills |
+| `src/background.ts` | Los comandos que siguen en marcha en segundo plano |
+| `src/mcp.ts`, `src/mcp-auth.ts`, `src/lsp.ts`, `src/skills.ts` | Servidores MCP y sus sesiones, servidores de lenguaje y skills |
 | `src/tui/` | La interfaz de pantalla completa: conversación, ratón, diálogos, estilos y criaturas |
 
 ## Pruebas
@@ -73,3 +74,19 @@ Para verlo en tu ordenador (con las claves que tengas en el entorno): `npm run v
 Que los modelos contesten no basta: tienen que saber trabajar con vipcode. Por eso la misma tarea tiene una conversación de verdad con los modelos gratis que no piden clave (`scripts/prueba-real.mjs`), como la de alguien que acaba de instalarlo: lee tres ficheros con datos concretos, la conversación deja de caber entera (se limita a 8.000 tokens para que vipcode tenga que resumirla), pregunta de memoria lo que leyó al principio y edita un fichero. Si algo sale mal dos veces seguidas, abre un aviso con la etiqueta `prueba-real` (y lo cierra cuando vuelve a ir bien). Si no hay modelos gratis que contesten a tiempo no dice nada: eso ya lo vigila la otra comprobación.
 
 Los modelos solo pueden leer y editar en una carpeta temporal (los comandos, la web y MCP están prohibidos) y no ven ninguna clave ni el token de GitHub, que solo usa el paso que abre el aviso. Para hacerla en tu ordenador (no toca tu `~/.vipcode`): `npm run prueba-real`.
+
+## Banco de tareas
+
+La prueba real dice si vipcode funciona; el banco mide **cómo de bien termina el trabajo**. `scripts/banco-tareas.mjs` da a los modelos gratis pequeñas tareas de programación (arreglar un fallo, renombrar en varios ficheros, un caso con trampa, algo que no existe…) y comprueba el resultado con pruebas que decide el script, no el modelo. Cuenta cuántas resuelve y, lo más importante, cuántas veces dice que está hecho sin estarlo.
+
+```bash
+npm run banco                                            # todas las tareas
+node scripts/banco-tareas.mjs --modelo proveedor/modelo  # con un modelo concreto
+node scripts/banco-tareas.mjs --out antes.json           # guarda el resultado
+node scripts/banco-tareas.mjs --comparar antes.json despues.json
+```
+
+Antes de dar por buena una mejora del agente, pásalo antes y después: si no mejora nada, quizá no haga falta. Los modelos gratis cambian mucho de un día a otro, así que una o dos tareas de diferencia pueden ser casualidad: usa `--veces` y compara el mismo día. Una vez a la semana lo pasa GitHub (`.github/workflows/banco.yml`), y el informe sale en el resumen de la tarea.
+
+Aquí se ejecuta código escrito por modelos de fuera. El script deja el entorno sin nada que no haga falta, el único comando permitido es el de las pruebas, y ese código va con el modelo de permisos de Node (sin leer fuera de su carpeta, escribir, lanzar programas ni, desde Node 25, salir a internet). Si añades una tarea, ponle su solución de referencia: `test/banco.test.mjs` comprueba que de partida falla y que con la solución pasa.
+

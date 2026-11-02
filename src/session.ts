@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import fs from "node:fs";
 import path from "node:path";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
@@ -32,6 +34,45 @@ export interface LogEntry {
   images?: number;
 }
 
+// Lo que ha ido pasando en una conversación, para /usage y /bug. Solo cuentas: nunca lo que se ha dicho, ni ficheros ni
+// comandos. Los modelos de tus proveedores propios y las herramientas de MCP van sin nombre (pueden decir algo de ti)
+export interface SessionStats {
+  // Peticiones al modelo, cuántas ha contestado cada uno y cuántas veces ha cambiado a mitad de una tarea
+  steps: number;
+  models: Record<string, number>;
+  switches: number;
+  // Llamadas y errores de cada herramienta
+  tools: Record<string, number>;
+  toolErrors: Record<string, number>;
+  // Avisos de atasco, veces que vipcode ha parado por eso, respuestas que se quedaban en «Voy a…» y código sin comprobar
+  stuck: number;
+  stopped: number;
+  announced: number;
+  unchecked: number;
+}
+
+export function newStats(): SessionStats {
+  return { steps: 0, models: {}, switches: 0, tools: {}, toolErrors: {}, stuck: 0, stopped: 0, announced: 0, unchecked: 0 };
+}
+
+// Las cuentas en texto (vacío si todavía no ha pasado nada)
+export function statsReport(stats: SessionStats | undefined): string[] {
+  if (!stats || stats.steps === 0) {
+    return [];
+  }
+  const byCount = (table: Record<string, number>) => Object.entries(table).sort((a, b) => b[1] - a[1]);
+  const models = byCount(stats.models);
+  const tools = byCount(stats.tools);
+  const lines = [`Esta conversación: ${stats.steps} peticiones al modelo y ${stats.switches} cambios de modelo a mitad de una tarea`];
+  lines.push(`Modelos: ${models.slice(0, 8).map(([name, count]) => `${name} (${count})`).join(", ")}${models.length > 8 ? ` y ${models.length - 8} más` : ""}`);
+  if (tools.length > 0) {
+    const errors = (name: string) => (stats.toolErrors[name] ? `, ${stats.toolErrors[name]} con error` : "");
+    lines.push(`Herramientas: ${tools.map(([name, count]) => `${name} ${count}${errors(name)}`).join(" · ")}`);
+  }
+  lines.push(`Atascos: ${stats.stuck} · paradas por atasco: ${stats.stopped} · anuncios sin hacerlo: ${stats.announced} · código sin comprobar: ${stats.unchecked}`);
+  return lines;
+}
+
 export interface Session {
   id: string;
   title: string;
@@ -49,6 +90,7 @@ export interface Session {
   // Resumen de los primeros mensajes para los modelos en los que la conversación no cabe entera (src/context.ts). Los
   // mensajes siguen enteros en «messages»
   summary?: ContextSummary;
+  stats?: SessionStats;
 }
 
 export function newSession(cwd: string): Session {
@@ -156,6 +198,7 @@ function normalize(data: Partial<Session>): Session {
     agent: data.agent,
     log: Array.isArray(data.log) ? data.log : logFromMessages(messages, data.updated || Date.now()),
     summary: data.summary && typeof data.summary.text === "string" && typeof data.summary.hash === "string" ? data.summary : undefined,
+    stats: data.stats && typeof data.stats.steps === "number" ? { ...newStats(), ...data.stats } : undefined,
   };
 }
 

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -156,6 +158,9 @@ export function systemPrompt(root: string, options: PromptOptions): string {
       scriptRule(),
       "Every bash call starts again in the working directory: a cd in one call does not carry over to the next. Use the workdir argument (a folder relative to the project) instead of cd.",
     );
+  }
+  if (has("background")) {
+    rules.push("To start something that keeps running (a dev server, a watcher), use bash with background: true, then check it with the background tool (action \"output\", with wait_ms to give it time to start). Stop it when you no longer need it.");
   }
   rules.push(
     "Call several tools in one turn when they are independent.",

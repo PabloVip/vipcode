@@ -23,7 +23,7 @@ const sessions = await import("../dist/session.js");
 function makeApp(ws, url, extra = {}) {
   fs.writeFileSync(
     path.join(shared.home, "config.json"),
-    JSON.stringify({ providers: [provider("p", url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, ...extra }),
+    JSON.stringify({ providers: [provider("p", url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, verifyCode: false, ...extra }),
   );
   const app = new App(ws.proj);
   app.setYolo(true);
@@ -1284,7 +1284,7 @@ test("agente: si una herramienta falla una y otra vez sobre lo mismo, se le avis
   assert.doesNotMatch(notes[0], /no aparece/);
   // Tras varios avisos sin salir del atasco, para mucho antes de gastar los 40 pasos
   assert.ok(mock.chats().length < 20, String(mock.chats().length));
-  assert.ok(events.notices.some((notice) => /He parado: el modelo sigue fallando/.test(notice)), events.notices.join("\n"));
+  assert.ok(events.notices.some((notice) => /He parado: el modelo sigue atascado/.test(notice)), events.notices.join("\n"));
   await app.shutdown();
   await mock.close();
   ws.cleanup();
@@ -1405,4 +1405,383 @@ test("subagente: si acaba anunciando lo que iba a hacer, el informe dice que est
   await app.shutdown();
   await mock.close();
   ws.cleanup();
+});
+
+// Un modelo que escribe un fichero y luego hace lo que digan «steps» (uno por petición) hasta contestar con texto
+function scripted(steps) {
+  let index = 0;
+  return () => {
+    const step = steps[Math.min(index, steps.length - 1)];
+    index++;
+    return step;
+  };
+}
+
+test("comprobación: si cambia código y termina sin ejecutar nada, se le pide que lo compruebe (una vez)", async () => {
+  const nudge = /Has cambiado código y no has ejecutado nada después/;
+  const seen = [];
+  const run = async (steps, extra = {}, prompt = "haz el cambio") => {
+    const next = scripted(steps);
+    const mock = await startMock(({ body }) => {
+      seen.push(contentText(lastMessage(body).content));
+      return next();
+    });
+    const ws = tempWorkspace();
+    const { app, events } = makeApp(ws, mock.url, { verifyCode: true, ...extra });
+    await app.runPrompt({ text: prompt }, {});
+    const chats = mock.chats().length;
+    const nudged = app.agent.session.messages.some((message) => message.role === "user" && nudge.test(contentText(message.content)));
+    const stats = app.agent.session.stats;
+    await app.shutdown();
+    await mock.close();
+    ws.cleanup();
+    return { chats, nudged, events, stats };
+  };
+  const write = { tools: [{ name: "write_file", args: { path: "a.js", content: "export const a = 1;\n" } }] };
+  const done = { text: "Hecho: ya funciona." };
+
+  // Código sin ejecutar: se le pide, y no se le vuelve a pedir aunque siga sin hacerlo
+  let result = await run([write, done, done]);
+  assert.ok(result.nudged);
+  assert.equal(result.chats, 3);
+  assert.equal(result.stats.unchecked, 1);
+  assert.ok(result.events.infos.some((info) => /sin comprobarlo/.test(info)), result.events.infos.join("\n"));
+
+  // Lo ejecuta después de pedírselo: una petición más y a contestar
+  const test = { tools: [{ name: "bash", args: { command: "node -e \"console.log(1)\"" } }] };
+  result = await run([write, done, test, { text: "Pasan las pruebas." }]);
+  assert.equal(result.chats, 4);
+
+  // Ya lo había ejecutado después de cambiarlo: nada que pedir
+  result = await run([write, test, done]);
+  assert.ok(!result.nudged);
+  // Ejecutado antes de cambiarlo, o solo un ls después: sigue sin comprobar
+  assert.ok((await run([test, write, done, done])).nudged);
+  assert.ok((await run([write, { tools: [{ name: "bash", args: { command: "ls -la" } }] }, done, done])).nudged);
+  // Un «cat x && node y» sí comprueba
+  assert.ok(!(await run([write, { tools: [{ name: "bash", args: { command: "cat a.js && node a.js" } }] }, done])).nudged);
+
+  // Lo ejecuta y falla, y aun así dice que está hecho: se le pide que lo arregle (también una vez)
+  const failed = /lo último que has ejecutado para comprobarlo ha fallado/;
+  const fails = { tools: [{ name: "bash", args: { command: 'node -e "process.exit(1)"' } }] };
+  result = await run([write, fails, done, done]);
+  assert.ok(!result.nudged);
+  assert.equal(result.chats, 4);
+  assert.ok(seen.some((text) => failed.test(text)));
+  assert.ok(result.events.infos.some((info) => /la comprobación ha fallado/.test(info)), result.events.infos.join("\n"));
+  // Si dice que sigue fallando, o la última vez ha ido bien, no; ni si solo se ha preguntado algo y no ha cambiado código
+  seen.length = 0;
+  assert.equal((await run([write, fails, { text: "No funciona: las pruebas siguen fallando." }])).chats, 3);
+  assert.equal((await run([write, fails, test, done])).chats, 4);
+  assert.equal((await run([fails, { text: "Hecho: las pruebas fallan porque falta un fichero." }])).chats, 2);
+  assert.ok(!seen.some((text) => failed.test(text)));
+
+  // Lo que no es código no se comprueba
+  assert.ok(!(await run([{ tools: [{ name: "write_file", args: { path: "notas.md", content: "hola\n" } }] }, done])).nudged);
+  // Ya dice que está sin comprobar
+  assert.ok(!(await run([write, { text: "Listo, aunque no he podido ejecutar las pruebas." }])).nudged);
+  assert.ok(!(await run([write, { text: "Done, but it is untested." }])).nudged);
+  // Si está desactivado o no se le deja ejecutar nada, no se le pide
+  assert.ok(!(await run([write, done], { verifyCode: false })).nudged);
+  assert.ok(!(await run([write, done], { permission: { edit: "allow", bash: "deny" } })).nudged);
+  assert.ok(!(await run([write, done], { permission: { edit: "allow", bash: { "*": "deny" } } })).nudged);
+  // Pero sí si se le deja ejecutar algo concreto
+  assert.ok((await run([write, done, done], { permission: { edit: "allow", bash: { "*": "deny", "npm test": "allow" } } })).nudged);
+  // Con el modo de solo lectura no hay nada que comprobar: no ha podido escribir
+  await assert.doesNotReject(run([write, done], { permission: { edit: "deny", bash: "ask" } }));
+  assert.ok(!(await run([write, done], { permission: { edit: "deny", bash: "ask" } })).nudged);
+});
+
+test("comprobación: si le dices que no a un comando no se le insiste, y lo de un subagente también cuenta", async () => {
+  const nudge = /Has cambiado código y no has ejecutado nada después/;
+  const write = { tools: [{ name: "write_file", args: { path: "a.js", content: "export const a = 1;\n" } }] };
+  const done = { text: "Hecho." };
+
+  // Sin nadie que apruebe: el comando se rechaza y no se le vuelve a pedir que ejecute nada
+  let next = scripted([write, { tools: [{ name: "bash", args: { command: "npm test" } }] }, done]);
+  let mock = await startMock(() => next());
+  let ws = tempWorkspace();
+  let { app } = makeApp(ws, mock.url, { verifyCode: true, permission: { edit: "allow", bash: "ask" } });
+  app.setYolo(false);
+  app.promptPermission = async () => ({ allow: false });
+  await app.runPrompt({ text: "haz el cambio" }, {});
+  assert.equal(mock.chats().length, 3);
+  assert.ok(!app.agent.session.messages.some((message) => message.role === "user" && nudge.test(contentText(message.content))));
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+
+  // Un subagente cambia código y no lo ejecuta: el informe lo dice y a quien lo lanzó se le pide que lo compruebe
+  let report = "";
+  mock = await startMock(({ body }) => {
+    const system = contentText(body.messages[0].content);
+    if (system.includes("You are a subagent")) {
+      const asked = body.messages.some((message) => message.role === "tool");
+      return asked ? { text: "He cambiado a.js." } : write;
+    }
+    const result = body.messages.find((message) => message.role === "tool");
+    if (!result) {
+      return { tools: [{ name: "task", args: { subagent_type: "ayudante", description: "cambia", prompt: "cambia a.js" } }] };
+    }
+    report = contentText(result.content);
+    return { text: "Hecho." };
+  });
+  ws = tempWorkspace();
+  ({ app } = makeApp(ws, mock.url, { verifyCode: true }));
+  await app.runPrompt({ text: "encárgaselo a un subagente" }, {});
+  assert.match(report, /está sin comprobar/);
+  assert.ok(app.agent.session.messages.some((message) => message.role === "user" && nudge.test(contentText(message.content))));
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("modelos atascados: pasan detrás de los demás, el siguiente recibe la nota de relevo, y /model manda", async () => {
+  const mock = await startMock(({ path: url, body }) => {
+    if (url.startsWith("/a/")) {
+      // «a» falla siempre en lo mismo
+      return { tools: [{ name: "edit_file", args: { path: "a.go", old_string: `no existe ${body.messages.length}`, new_string: "x" } }] };
+    }
+    return { text: `sistema: ${contentText(body.messages[0].content).includes("# Relevo") ? "con relevo" : "sin relevo"}` };
+  });
+  const ws = tempWorkspace({ "a.go": "package main\n" });
+  let { app, events } = makeApp(ws, mock.url, { providers: [provider("a", mock.url, ["m"]), provider("b", mock.url, ["m"])], enabledProviders: ["a", "b"], maxSteps: 20 });
+  await app.runPrompt({ text: "@a.go cambia algo" }, {});
+  // Tres fallos seguidos de «a» y el cuarto paso ya lo hace «b», que sabe que coge la tarea a medias
+  assert.deepEqual(mock.chats().map((chat) => chat.path.split("/")[1]), ["a", "a", "a", "b"]);
+  assert.match(events.text, /con relevo/);
+  assert.ok(events.infos.some((info) => /a\/m se ha atascado: lo intenta otro modelo/.test(info)), events.infos.join("\n"));
+  assert.equal(app.agent.session.stats.stuck, 1);
+  assert.match(app.router.describe().find((row) => row.key === "a/m").status, /se atascó hace poco/);
+  // Sigue detrás en el siguiente mensaje, y al volver a abrir vipcode (se guarda)
+  await app.runPrompt({ text: "otra cosa" }, {});
+  assert.equal(mock.chats().at(-1).path.split("/")[1], "b");
+  await app.shutdown();
+  ({ app, events } = makeApp(ws, mock.url, { providers: [provider("a", mock.url, ["m"]), provider("b", mock.url, ["m"])], enabledProviders: ["a", "b"], maxSteps: 3 }));
+  await app.runPrompt({ text: "y otra" }, {});
+  assert.equal(mock.chats().at(-1).path.split("/")[1], "b");
+  // Si lo has fijado con /model, manda lo que has elegido, y no se dice que lo intenta otro
+  app.router.pinned = "a/m";
+  const before = mock.chats().length;
+  await app.runPrompt({ text: "con el fijado" }, {});
+  assert.ok(mock.chats().slice(before).every((chat) => chat.path.startsWith("/a/")));
+  assert.equal(app.router.noteStuck("a/m"), false);
+  app.router.pinned = null;
+  // Con /reset-limits se le da otra oportunidad
+  app.router.resetCooldowns();
+  assert.doesNotMatch(app.router.describe().find((row) => row.key === "a/m").status, /se atascó/);
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("/usage y /bug: las cuentas de la conversación, sin lo que se ha dicho, ni ficheros, ni tus proveedores ni tus MCP", async () => {
+  const sessions_ = await import("../dist/session.js");
+  assert.deepEqual(sessions_.statsReport(undefined), []);
+  assert.deepEqual(sessions_.statsReport(sessions_.newStats()), []);
+  let call = 0;
+  const mock = await startMock(() => {
+    call++;
+    if (call === 1) {
+      return {
+        tools: [
+          { name: "read_file", args: { path: "datos-secretos.txt" } },
+          { name: "read_file", args: { path: "no-existe-secreto.txt" } },
+        ],
+      };
+    }
+    return { text: "TEXTO-PRIVADO-DE-LA-RESPUESTA" };
+  });
+  const ws = tempWorkspace({ "datos-secretos.txt": "clave-de-mi-casa\n" });
+  const { app } = makeApp(ws, mock.url, { providers: [provider("mi-empresa-secreta", mock.url, ["modelo-interno"], { custom: true })], enabledProviders: ["mi-empresa-secreta"] });
+  await app.runPrompt({ text: "MENSAJE-PRIVADO-DEL-USUARIO" }, {});
+  const { out, adapter } = capture();
+  await app.handleCommand("/usage", adapter);
+  const report = out.block.join("\n");
+  assert.match(report, /2 peticiones al modelo/);
+  assert.match(report, /Herramientas: read_file 2, 1 con error/);
+  assert.match(report, /modelo propio \(2\)/);
+  for (const secret of ["PRIVADO", "secreto", "secretos", "mi-empresa", "modelo-interno", "clave-de-mi-casa"]) {
+    assert.ok(!report.includes(secret), `${secret} no debería salir: ${report}`);
+  }
+  // Se guardan con la conversación
+  sessions.saveSession(app.agent.session);
+  assert.equal(sessions.loadSession(app.agent.session.id).stats.steps, 2);
+  // Y van en el enlace de /bug, antes que nada para que no se recorten
+  const browser = path.join(ws.dir, "url.txt");
+  fs.writeFileSync(path.join(ws.dir, "abre.sh"), `#!/bin/sh\nprintf '%s' "$1" > "${browser.replace(/\\/g, "/")}"\n`, { mode: 0o755 });
+  if (process.platform !== "win32") {
+    process.env.VIPCODE_BROWSER = path.join(ws.dir, "abre.sh");
+    await app.handleCommand("/bug algo ha fallado", adapter);
+    delete process.env.VIPCODE_BROWSER;
+    for (let i = 0; i < 100 && !fs.existsSync(browser); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const body = decodeURIComponent(new URL(fs.readFileSync(browser, "utf8")).searchParams.get("body"));
+    assert.match(body, /Esta conversación: 2 peticiones/);
+    assert.ok(body.indexOf("Esta conversación") < body.indexOf("vipcode 0") || !body.includes("vipcode 0"));
+    for (const secret of ["PRIVADO", "datos-secretos", "clave-de-mi-casa", "modelo-interno"]) {
+      assert.ok(!body.includes(secret), `${secret} no debería salir`);
+    }
+  }
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("/procesos: enseña y para lo que hay en segundo plano, y al cerrar vipcode no queda nada en marcha", async () => {
+  let call = 0;
+  // Cuando contesta, los programas ya han arrancado (en un ordenador lento pueden tardar)
+  const started = async (name) => {
+    for (let i = 0; i < 200 && !ws.exists(name); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
+  const mock = await startMock(async () => {
+    call++;
+    if (call === 1) {
+      return { tools: [{ name: "bash", args: { command: "node srv.cjs uno", background: true } }] };
+    }
+    if (call === 2) {
+      await started("pid-uno.txt");
+      return { tools: [{ name: "bash", args: { command: "node srv.cjs dos", background: true } }] };
+    }
+    await started("pid-dos.txt");
+    return { text: "Servidores en marcha." };
+  });
+  const server = 'require("node:fs").writeFileSync("pid-" + process.argv[2] + ".txt", String(process.pid)); setInterval(() => {}, 1000);';
+  const ws = tempWorkspace({ "srv.cjs": server });
+  const { app } = makeApp(ws, mock.url);
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const gone = async (pid) => {
+    for (let i = 0; i < 160 && alive(pid); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return !alive(pid);
+  };
+  const { out, adapter } = capture();
+  await app.handleCommand("/procesos", adapter);
+  assert.match(out.info.at(-1), /No hay nada en segundo plano/);
+  await app.runPrompt({ text: "arranca los servidores" }, {});
+  const uno = Number(ws.read("pid-uno.txt"));
+  const dos = Number(ws.read("pid-dos.txt"));
+  assert.ok(alive(uno) && alive(dos));
+  await app.handleCommand("/procesos", adapter);
+  assert.match(out.block.at(-1), /en marcha desde hace .*node srv\.cjs uno/);
+  const id = /(bg\d+)\s+en marcha.*srv\.cjs uno/.exec(out.block.at(-1))[1];
+  assert.match(out.info.at(-1), /se paran solos/);
+  await app.handleCommand("/procesos parar bg99999", adapter);
+  assert.match(out.info.at(-1), /No hay ningún comando bg99999/);
+  await app.handleCommand(`/procesos parar ${id}`, adapter);
+  assert.match(out.info.at(-1), new RegExp(`Parado: ${id}`));
+  assert.ok(await gone(uno));
+  assert.ok(alive(dos));
+  // También sale en /help y lo conoce el modelo
+  assert.ok(app.commandSuggestions().some((command) => command.name === "procesos"));
+  await app.shutdown();
+  assert.ok(await gone(dos), "sigue en marcha después de cerrar vipcode");
+  await mock.close();
+  ws.cleanup();
+});
+
+test("clic en una ruta: solo lo que está en el proyecto, nunca fuera ni tus datos de vipcode", async () => {
+  const mock = await startMock(() => ({ text: "ok" }));
+  const ws = tempWorkspace({ "src/a.ts": "x", "b.md": "y" });
+  fs.writeFileSync(path.join(ws.dir, "fuera.txt"), "secreto");
+  const { app } = makeApp(ws, mock.url);
+  assert.equal(app.projectPath("src/a.ts"), "src/a.ts");
+  assert.equal(app.projectPath("./b.md"), "b.md");
+  assert.equal(app.projectPath(path.join(ws.proj, "b.md")), "b.md");
+  assert.equal(app.projectPath("src"), "src");
+  assert.equal(app.projectPath("no-existe.ts"), null);
+  assert.equal(app.projectPath("../fuera.txt"), null);
+  assert.equal(app.projectPath(path.join(ws.dir, "fuera.txt")), null);
+  assert.equal(app.projectPath(path.join(shared.home, "config.json")), null);
+  assert.equal(app.projectPath("."), null);
+  if (process.platform !== "win32") {
+    fs.symlinkSync(path.join(ws.dir, "fuera.txt"), path.join(ws.proj, "enlace.txt"));
+    assert.equal(app.projectPath("enlace.txt"), null);
+  }
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
+test("agente: si le llega una y otra vez lo mismo al buscar se le dice que da vueltas, y lo intenta otro modelo", async () => {
+  const notes = [];
+  let index = 0;
+  // Llamadas siempre distintas (el detector de llamadas repetidas no las ve) y siempre el mismo resultado
+  const calls = [
+    { name: "list_dir", args: { path: "." } },
+    { name: "glob", args: { pattern: "*" } },
+    { name: "list_dir", args: {} },
+  ];
+  const mock = await startMock(({ path: url, body }) => {
+    const last = lastMessage(body);
+    if (last.role === "user" && /mismo resultado/.test(contentText(last.content))) {
+      notes.push(contentText(last.content));
+    }
+    if (url.startsWith("/b/")) {
+      return { text: "pagos.mjs no existe." };
+    }
+    return { tools: [calls[index++ % calls.length]] };
+  });
+  const ws = tempWorkspace({ "calculos.mjs": "x\n" });
+  const { app, events } = makeApp(ws, mock.url, { providers: [provider("a", mock.url, ["m"]), provider("b", mock.url, ["m"])], enabledProviders: ["a", "b"], maxSteps: 20 });
+  await app.runPrompt({ text: "arregla pagos.mjs" }, {});
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /no existe o no lo encuentras, dilo/);
+  assert.deepEqual(mock.chats().map((chat) => chat.path.split("/")[1]), ["a", "a", "a", "b"]);
+  assert.match(events.text, /no existe/);
+  assert.equal(app.agent.session.stats.stuck, 1);
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+
+  // Si entre medias hace otra cosa no está dando vueltas: ver la carpeta tres veces mientras trabaja está bien
+  let turn = 0;
+  const working = await startMock(({ body }) => {
+    turn++;
+    if (turn % 2 === 1 && turn < 7) {
+      return { tools: [{ name: "list_dir", args: { path: "." } }] };
+    }
+    if (turn < 7) {
+      return { tools: [{ name: "todowrite", args: { todos: [{ content: `paso ${turn}`, status: "in_progress" }] } }] };
+    }
+    return { text: body.messages.some((message) => message.role === "user" && contentText(message.content).includes("mismo resultado")) ? "AVISADO" : "SIN AVISO" };
+  });
+  const busy = tempWorkspace({ "a.md": "x\n" });
+  const third = makeApp(busy, working.url);
+  await third.app.runPrompt({ text: "trabaja" }, {});
+  assert.match(third.events.text, /SIN AVISO/);
+  await third.app.shutdown();
+  await working.close();
+  busy.cleanup();
+
+  // Buscar cosas distintas sin encontrarlas es normal unas cuantas veces, y leer ficheros distintos también
+  let count = 0;
+  const patient = await startMock(({ body }) => {
+    count++;
+    if (count <= 5) {
+      return { tools: [{ name: "grep", args: { pattern: `no-esta-${count}` } }] };
+    }
+    if (count <= 8) {
+      return { tools: [{ name: "read_file", args: { path: `f${count}.txt` } }] };
+    }
+    return { text: contentText(lastMessage(body).content).includes("mismo resultado") ? "AVISADO" : "SIN AVISO" };
+  });
+  const quiet = tempWorkspace({ "f6.txt": "uno\n", "f7.txt": "dos\n", "f8.txt": "tres\n" });
+  const second = makeApp(quiet, patient.url);
+  await second.app.runPrompt({ text: "busca" }, {});
+  assert.match(second.events.text, /SIN AVISO/);
+  await second.app.shutdown();
+  await patient.close();
+  quiet.cleanup();
 });

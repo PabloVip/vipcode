@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Prueba real: una conversación de verdad con los modelos gratis que no piden clave, como la de alguien que acaba de
 // instalar vipcode. Lee tres ficheros con datos concretos, hace que la conversación deje de caber entera (para que
 // vipcode tenga que resumirla), pregunta de memoria lo que leyó al principio y edita un fichero. Así se ve si algo deja

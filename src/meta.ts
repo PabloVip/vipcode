@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { createRequire } from "node:module";
 
 // La versión sale de package.json, para que al publicar solo haya que cambiarla allí

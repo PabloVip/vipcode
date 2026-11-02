@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import fs from "node:fs";
 import path from "node:path";
 import { CATALOG } from "./catalog.js";
@@ -29,6 +31,7 @@ const SETTINGS: Record<string, string> = {
   maxWaitMs: "cuánto se espera a una IA ocupada",
   firstResponseMs: "cuánto se espera a que una IA empiece a contestar",
   stickyWaitMs: "cuánto se espera al modelo de la tarea antes de cambiar a otro",
+  verifyCode: "si se le pide al modelo que compruebe el código que cambia",
   autoUpdateModels: "la búsqueda de modelos nuevos",
   checkUpdates: "los avisos de versiones nuevas",
   ranking: "el orden por puntuación",

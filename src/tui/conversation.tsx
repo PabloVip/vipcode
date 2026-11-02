@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import fs from "node:fs";
 import { Box, type DOMElement, Text, renderToString, useBoxMetrics, useInput } from "ink";
 import pc from "picocolors";
@@ -8,7 +10,7 @@ import { copyToClipboard } from "../clipboard.js";
 import { openBrowser } from "../login.js";
 import { stripControl } from "../sanitize.js";
 import { type Item, ItemView, itemText } from "./items.js";
-import { MOUSE_OFF, MOUSE_ON, type TextPos, commandAt, lineColumns, mouseEvents, selectedColumns, selectedText, urlAt, urlsIn, wordAt } from "./mouse.js";
+import { MOUSE_OFF, MOUSE_ON, type TextPos, commandAt, pathAt, lineColumns, mouseEvents, selectedColumns, selectedText, urlAt, urlsIn, wordAt } from "./mouse.js";
 import { type Match, findMatches, scrollThumb } from "./view.js";
 import { look } from "./theme.js";
 
@@ -73,10 +75,14 @@ export function useConversation(props: {
   side?: { width: number; render: (height: number) => ReactNode; onClick: () => void } | null;
   // Un clic en un /comando del texto: se escribe en la caja
   onCommand?: (command: string) => void;
+  // Un clic en la ruta de un fichero del proyecto: se añade a la caja como @ruta
+  onMention?: (file: string) => void;
 }): Conversation {
   const { app, items, rows, dialog, interfaceId, side } = props;
   const onCommandRef = useRef(props.onCommand);
   onCommandRef.current = props.onCommand;
+  const onMentionRef = useRef(props.onMention);
+  onMentionRef.current = props.onMention;
   // El ancho de la conversación, con su barra de desplazamiento
   const columns = props.columns - (side?.width ?? 0);
   const dialogRef = useRef(dialog);
@@ -352,8 +358,8 @@ export function useConversation(props: {
       }
     };
     // Lo que se puede pinchar: la última línea si has subido («↓ N líneas más», baja al final), la primera línea de una
-    // herramienta y «y más» de las novedades (las despliegan o las pliegan), un enlace (se abre en el navegador) y un
-    // /comando (se escribe en la caja)
+    // herramienta y «y más» de las novedades (las despliegan o las pliegan), un enlace (se abre en el navegador), un
+    // /comando (se escribe en la caja) y la ruta de un fichero del proyecto (se añade a la caja como @ruta)
     const clickAction = (pos: TextPos, y: number): (() => void) | null => {
       const { lines, owners, height, more } = view.current;
       if (more && y === height - 1) {
@@ -396,6 +402,13 @@ export function useConversation(props: {
         return () => {
           onCommandRef.current?.(command);
           showFlash(`${command} en la caja: pulsa Enter`);
+        };
+      }
+      const file = pathAt(lines[pos.line] || "", pos.col, (candidate) => app.projectPath(candidate));
+      if (file && onMentionRef.current) {
+        return () => {
+          onMentionRef.current?.(file);
+          showFlash(`@${file} en la caja`);
         };
       }
       return null;

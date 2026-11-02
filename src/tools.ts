@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import dns from "node:dns/promises";
 import fs from "node:fs";
 import net from "node:net";
@@ -6,6 +8,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fg from "fast-glob";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { isImagePath, toDataUrl } from "./images.js";
+import { MAX_RUNNING, type BackgroundJob, allJobs, findJob, jobState, readJob, runningJobs, startJob, stopJob, waitForJob } from "./background.js";
 import type { Permission, PermissionReply, PermissionRequest } from "./permissions.js";
 import { stripControl } from "./sanitize.js";
 import { isInside, protectedDirs } from "./paths.js";
@@ -1089,10 +1092,15 @@ function gitSafetyEnv(): Record<string, string> {
   return { GIT_CONFIG_COUNT: String(count + 1), [`GIT_CONFIG_KEY_${count}`]: "core.fsmonitor", [`GIT_CONFIG_VALUE_${count}`]: "false" };
 }
 
+// Lo que se espera a un comando en segundo plano antes de dar por bueno que ha arrancado: si falla enseguida (no existe, el
+// puerto está ocupado…) el agente lo sabe ya
+const BACKGROUND_START_MS = 2000;
+const BACKGROUND_WAIT_MS = 30000;
+
 const bashTool: Tool = {
   name: "bash",
   description:
-    "Ejecuta un comando de shell (tests, git, instalar dependencias…). Cada llamada empieza de nuevo en la raíz del proyecto: un cd no se conserva para la siguiente; para trabajar en una subcarpeta usa workdir. No lo uses para leer o editar ficheros: para eso están las otras herramientas. No es interactivo: evita comandos que esperen que escribas algo.",
+    "Ejecuta un comando de shell (tests, git, instalar dependencias…). Cada llamada empieza de nuevo en la raíz del proyecto: un cd no se conserva para la siguiente; para trabajar en una subcarpeta usa workdir. No lo uses para leer o editar ficheros: para eso están las otras herramientas. No es interactivo: evita comandos que esperen que escribas algo. Lo que se queda en marcha (un servidor, un «watch») lánzalo con background: true: si no, bloquea hasta que se acabe el tiempo.",
   parameters: {
     type: "object",
     properties: {
@@ -1100,6 +1108,7 @@ const bashTool: Tool = {
       workdir: { type: "string", description: "Carpeta donde ejecutarlo, relativa a la raíz del proyecto (por defecto, la raíz)" },
       description: { type: "string", description: "Qué hace el comando, en 5-10 palabras" },
       timeout_ms: { type: "number", description: "Tiempo máximo en milisegundos (máximo 600000)" },
+      background: { type: "boolean", description: "Déjalo en marcha y sigue trabajando; se mira y se para con la herramienta background" },
     },
     required: ["command"],
   },
@@ -1120,12 +1129,16 @@ const bashTool: Tool = {
         return "Error: workdir no puede estar dentro de .git.";
       }
     }
-    let title = "Ejecutar comando";
+    const background = args.background === true || args.background === "true";
+    if (background && runningJobs().length >= MAX_RUNNING) {
+      return `Error: ya hay ${MAX_RUNNING} comandos en segundo plano. Para alguno con la herramienta background antes de lanzar otro.`;
+    }
+    let title = background ? "Ejecutar en segundo plano" : "Ejecutar comando";
     if (args.description) {
-      title = `Ejecutar: ${String(args.description).slice(0, 80)}`;
+      title = `${title}: ${String(args.description).slice(0, 80)}`;
     }
     const workdir = cwd === ctx.root ? undefined : rel(ctx.root, cwd);
-    const where = workdir ? `(en ${workdir}) ` : "";
+    const where = `${background ? "(en segundo plano) " : ""}${workdir ? `(en ${workdir}) ` : ""}`;
     const reply = await ctx.ask({ kind: "bash", title, preview: `${where}$ ${command}`, subject: command, workdir });
     if (!reply.allow) {
       return rejected(reply, "ejecutar el comando");
@@ -1134,13 +1147,38 @@ const bashTool: Tool = {
     if (args.timeout_ms && args.timeout_ms > 0) {
       timeout = Math.min(args.timeout_ms, 600000);
     }
+    const environment = (shell: ReturnType<typeof commandShell>) => ({ ...process.env, ...shell.env, ...gitSafetyEnv(), VIPCODE: "1", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat" });
+
+    if (background) {
+      const shell = commandShell();
+      const job = startJob({
+        command,
+        workdir,
+        cwd,
+        file: shell.file,
+        args: shell.args(command),
+        env: environment(shell),
+        timeoutMs: args.timeout_ms > 0 ? timeout : undefined,
+      });
+      await waitForJob(job, BACKGROUND_START_MS, ctx.signal, false);
+      // Esc mientras arranca: lo has cancelado. Después ya no le afecta: para eso está en segundo plano
+      if (ctx.signal?.aborted && job.finished === null) {
+        await stopJob(job);
+        return "Cancelado por el usuario";
+      }
+      const body = truncate(readJob(job).trim()) || "(sin salida)";
+      if (job.finished !== null) {
+        return `Código de salida: ${job.code} (ha terminado enseguida: ya no está en marcha)\n${body}`;
+      }
+      return `En marcha en segundo plano con el id ${job.id}; se para al cerrar vipcode. Con la herramienta background ves lo que escribe (action: "output") y lo paras (action: "stop").\nSalida hasta ahora:\n${body}`;
+    }
 
     return await new Promise<string>((resolve) => {
       const shell = commandShell();
       // En su propio grupo de procesos, para poder parar también a los hijos (npm test, servidores…)
       const child = spawnGroup(shell.file, shell.args(command), {
         cwd,
-        env: { ...process.env, ...shell.env, ...gitSafetyEnv(), VIPCODE: "1", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat" },
+        env: environment(shell),
         windowsHide: true,
       });
       let output = "";
@@ -1176,7 +1214,7 @@ const bashTool: Tool = {
         ctx.signal?.removeEventListener("abort", kill);
         let header = `Código de salida: ${code}`;
         if (timedOut) {
-          header = `Cancelado por tiempo (${timeout} ms)`;
+          header = `Cancelado por tiempo (${timeout} ms). Si es un servidor o algo que se queda en marcha, lánzalo con background: true`;
         } else if (ctx.signal?.aborted) {
           header = "Cancelado por el usuario";
         }
@@ -1188,6 +1226,58 @@ const bashTool: Tool = {
         resolve(`${header}\n${truncate(body)}`);
       });
     });
+  },
+};
+
+// Una línea por cada comando en segundo plano
+function describeJob(job: BackgroundJob): string {
+  return `${job.id}: ${jobState(job)} · ${job.workdir ? `(en ${job.workdir}) ` : ""}${job.command.replace(/\s+/g, " ").slice(0, 120)}`;
+}
+
+const backgroundTool: Tool = {
+  name: "background",
+  description:
+    'Mira o para lo que lanzaste con bash y background: true. action: "list" (qué hay), "output" (lo que ha escrito desde la última vez; con wait_ms espera a que escriba algo, por ejemplo a que arranque un servidor) o "stop" (lo para con todo lo que haya lanzado).',
+  parameters: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["list", "output", "stop"] },
+      id: { type: "string", description: "El id que te dio bash, por ejemplo bg1 (no hace falta si solo hay uno)" },
+      wait_ms: { type: "number", description: "Con output: lo que se espera a que escriba algo, en milisegundos (máximo 30000)" },
+    },
+    required: ["action"],
+  },
+  permission: "none",
+  readOnly: false,
+  async run(args, ctx) {
+    const action = String(args.action);
+    const list = allJobs();
+    if (action === "list") {
+      return list.length > 0 ? list.map(describeJob).join("\n") : "No hay nada en segundo plano.";
+    }
+    if (action !== "output" && action !== "stop") {
+      return `Error: action tiene que ser list, output o stop, no «${action}».`;
+    }
+    let job: BackgroundJob | undefined;
+    if (args.id) {
+      // Solo los que ha lanzado vipcode: esto nunca para un proceso cualquiera del ordenador
+      job = findJob(String(args.id));
+    } else {
+      const running = runningJobs();
+      job = running.length === 1 ? running[0] : undefined;
+    }
+    if (!job) {
+      return `Error: no encuentro ese comando. ${list.length > 0 ? `Hay estos:\n${list.map(describeJob).join("\n")}` : "No hay nada en segundo plano."}`;
+    }
+    if (action === "stop") {
+      await stopJob(job);
+      return describeJob(job);
+    }
+    if (args.wait_ms > 0) {
+      await waitForJob(job, Math.min(Number(args.wait_ms), BACKGROUND_WAIT_MS), ctx.signal, true);
+    }
+    const text = readJob(job).trim();
+    return `${describeJob(job)}\n${text ? truncate(text) : "(no ha escrito nada nuevo)"}`;
   },
 };
 
@@ -1592,6 +1682,7 @@ export const CORE_TOOLS: Tool[] = [
   listDir,
   globTool,
   grepTool,
+  backgroundTool,
   bashTool,
   webFetch,
   webSearch,
@@ -1659,11 +1750,17 @@ export function describeCall(name: string, rawArgs: string): string {
       return `${args.name || ""}${args.file ? ` · ${args.file}` : ""}`;
     }
     // Un comando se resume por su primera línea con algo (un «python - <<EOF» de varias líneas, por esa)
+    if (name === "background") {
+      return `${args.action === "stop" ? "para" : args.action === "output" ? "mira" : "lista"}${args.id ? ` ${args.id}` : ""}`;
+    }
     if (name === "bash" && args.command) {
       const lines = String(args.command).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
       let text = lines[0] || "";
       if (lines.length > 1) {
         text += " …";
+      }
+      if (args.background === true || args.background === "true") {
+        text = `(en segundo plano) ${text}`;
       }
       if (args.workdir && String(args.workdir).trim() !== "" && String(args.workdir).trim() !== ".") {
         text = `(${args.workdir}) ${text}`;

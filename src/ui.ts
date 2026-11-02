@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import type { Interface } from "node:readline/promises";
 import pc from "picocolors";
 import type { AgentEvents } from "./agent.js";

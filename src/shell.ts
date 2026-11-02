@@ -1,4 +1,6 @@
-import { type ChildProcess, type ChildProcessByStdio, type SpawnOptions, spawn } from "node:child_process";
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
+import { type ChildProcess, type ChildProcessByStdio, type SpawnOptions, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { Readable } from "node:stream";
@@ -95,6 +97,22 @@ export function killTree(child: ChildProcess) {
       // ya había terminado
     }
   }, 3000).unref();
+}
+
+// Igual, pero ya, sin esperar a nada: para cuando vipcode se está cerrando y no va a quedar quien lo termine
+export function killTreeNow(child: ChildProcess) {
+  if (!child.pid) {
+    return;
+  }
+  if (process.platform === "win32") {
+    spawnSync(system32("taskkill.exe"), ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    return;
+  }
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    // ya había terminado
+  }
 }
 
 // Comandos que siguen en marcha en su propio grupo de procesos (macOS y Linux)

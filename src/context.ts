@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import crypto from "node:crypto";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { estimateTokens } from "./router.js";

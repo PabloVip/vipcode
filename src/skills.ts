@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -230,16 +232,53 @@ export function readSkillFile(skill: SkillDefinition, file: string): string {
 
 // En la lista que va en cada petición, descripciones cortas: los modelos gratis tienen poco contexto
 const LISTED_DESCRIPTION = 250;
+// Lo que puede ocupar la lista entera (unos 2.000 tokens). Con muchas skills se acortan más las descripciones: 84 skills
+// ocupaban unos 5.600 tokens en cada petición, que en un modelo pequeño es mucho
+const LISTED_TOTAL = 8000;
+// Menos que esto ya no ayuda a elegir: mejor solo los nombres
+const LISTED_MINIMUM = 40;
+
+// Hasta dónde puede llegar cada descripción para que todas quepan en «room»: las cortas se quedan enteras y lo que dejan
+// libre se reparte entre las largas
+function descriptionLimit(lengths: number[], room: number): number {
+  const sorted = [...lengths].sort((a, b) => a - b);
+  let left = room;
+  for (let i = 0; i < sorted.length; i++) {
+    const share = left / (sorted.length - i);
+    if (sorted[i] > share) {
+      return Math.floor(share);
+    }
+    left -= sorted[i];
+  }
+  return LISTED_DESCRIPTION;
+}
+
+// La lista de skills que va en la descripción de la herramienta. Los nombres van siempre (salvo si ni ellos caben)
+export function skillList(skills: SkillDefinition[]): string {
+  const room = LISTED_TOTAL - skills.reduce((sum, skill) => sum + skill.name.length + 5, 0);
+  const limit = Math.min(LISTED_DESCRIPTION, descriptionLimit(skills.map((skill) => skill.description.length), Math.max(0, room)));
+  if (limit >= LISTED_MINIMUM) {
+    const short = (text: string) => (text.length > limit ? `${text.slice(0, limit - 1).replace(/\s+\S*$/, "")}…` : text);
+    return skills.map((skill) => `- ${skill.name}: ${short(skill.description)}`).join("\n");
+  }
+  const names: string[] = [];
+  let used = 0;
+  for (const skill of skills) {
+    used += skill.name.length + 3;
+    if (used > LISTED_TOTAL) {
+      break;
+    }
+    names.push(`- ${skill.name}`);
+  }
+  return names.length < skills.length ? `${names.join("\n")}\n(y ${skills.length - names.length} más: /skills las enseña todas)` : names.join("\n");
+}
 
 // Herramienta para que el agente cargue una skill cuando la tarea encaja con su descripción
 export function skillTool(skills: SkillDefinition[]): Tool {
   const listed = skills.filter((skill) => skill.modelInvocable);
-  const short = (text: string) => (text.length > LISTED_DESCRIPTION ? `${text.slice(0, LISTED_DESCRIPTION - 1)}…` : text);
   return {
     name: "skill",
-    description: `Carga una skill: instrucciones y recursos para un tipo de tarea concreto. Si la tarea encaja con la descripción de alguna, cárgala antes de empezar y sigue sus instrucciones. Con "file" lees uno de sus ficheros (por ejemplo references/guia.md).\nSkills disponibles:\n${listed
-      .map((skill) => `- ${skill.name}: ${short(skill.description)}`)
-      .join("\n")}`,
+    description: `Carga una skill: instrucciones y recursos para un tipo de tarea concreto. Si la tarea encaja con la descripción de alguna, cárgala antes de empezar y sigue sus instrucciones. Con "file" lees uno de sus ficheros (por ejemplo references/guia.md).\nSkills disponibles:\n${skillList(listed)}`,
     parameters: {
       type: "object",
       properties: {
@@ -254,7 +293,7 @@ export function skillTool(skills: SkillDefinition[]): Tool {
       const wanted = normalizeSkillName(String(args.name || ""));
       const skill = skills.find((item) => item.name === wanted);
       if (!skill) {
-        return `Error: no hay ninguna skill llamada «${args.name}». Disponibles: ${listed.map((item) => item.name).join(", ") || "ninguna"}.`;
+        return `Error: no hay ninguna skill llamada «${args.name}». Disponibles: ${truncate(listed.map((item) => item.name).join(", "), LISTED_TOTAL) || "ninguna"}.`;
       }
       if (args.file) {
         return readSkillFile(skill, String(args.file));

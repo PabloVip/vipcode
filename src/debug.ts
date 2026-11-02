@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import fs from "node:fs";
 import { DEBUG_LOG_PATH, ensureHomeDir } from "./paths.js";
 

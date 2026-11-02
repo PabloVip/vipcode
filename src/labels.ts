@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Cómo se cuenta cada herramienta en pantalla y en las conversaciones guardadas
 const TOOL_LABEL: Record<string, string> = {
   read_file: "Lee",
@@ -7,6 +9,7 @@ const TOOL_LABEL: Record<string, string> = {
   glob: "Busca ficheros",
   grep: "Busca",
   bash: "Ejecuta",
+  background: "Segundo plano",
   webfetch: "Abre",
   websearch: "Busca en internet",
   todowrite: "Tareas",

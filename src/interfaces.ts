@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Las interfaces que se pueden elegir con /interfaz (se guarda en "interfaz" en tu configuración). Todas son de pantalla
 // completa: la conversación con su propio scroll y la caja de escribir fija abajo
 

@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Los /comandos integrados de la interfaz. Van aparte para que también los conozca el prompt del modelo (si estuvieran
 // en app.ts, prompt.ts tendría que importarlo y se cerraría un círculo de imports)
 export const BUILTIN_COMMANDS: { name: string; args?: string; description: string }[] = [
@@ -13,6 +15,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "programar", description: "agente que puede modificar ficheros (antes /build)" },
   { name: "profe", description: "agente que te enseña paso a paso; no cambia nada, lo haces tú" },
   { name: "limites", description: "cuánto te queda hoy de cada plan gratis" },
+  { name: "procesos", args: "[parar [id]]", description: "lo que el agente ha dejado en segundo plano (servidores…): verlo y pararlo" },
   { name: "copiar", args: "[código]", description: "copia la última respuesta (o su último bloque de código) al portapapeles" },
   { name: "doctor", description: "comprueba que todo funciona (programas, claves, proveedores) y dice cómo arreglar lo que falte" },
   { name: "bug", args: "[qué ha pasado]", description: "avisa de un fallo: abre un issue en GitHub con el informe de /doctor ya puesto (sin tus claves)" },
@@ -30,7 +33,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "delete", args: "<n>", description: "borrar una sesión de la lista" },
   { name: "export", description: "guardar la conversación en Markdown" },
   { name: "usage", description: "tokens gastados en esta sesión" },
-  { name: "mcp", description: "estado de los servidores MCP" },
+  { name: "mcp", args: "[login|logout <servidor>]", description: "estado de los servidores MCP; iniciar o cerrar sesión en los que lo piden" },
   { name: "lsp", description: "servidores de lenguaje (diagnósticos)" },
   { name: "yolo", args: "[on|off]", description: "aprobar todo sin preguntar en esta sesión" },
   { name: "reset-limits", description: "olvidar las pausas guardadas de los proveedores" },

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Vigila los proveedores del catálogo: pide a cada uno su lista de modelos y, si se puede usar (con clave o sin ella),
 // le hace a cada modelo una pregunta mínima con una herramienta, como las hace vipcode. Dice qué modelos del catálogo ya
 // no existen o no contestan, para quitarlos o cambiarlos en src/catalog.ts antes de que les pase a los usuarios.

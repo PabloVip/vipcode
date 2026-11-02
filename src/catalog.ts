@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import type { ModelConfig, ProviderConfig } from "./config.js";
 import { REPO_URL } from "./meta.js";
 

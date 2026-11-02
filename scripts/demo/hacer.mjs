@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Vuelve a hacer la animación del README (docs/demo.svg) con una sesión real de vipcode y los modelos gratis sin clave:
 //   npm run demo
 // Necesita python3 (macOS o Linux). Todo pasa en una carpeta temporal: no toca ~/.vipcode ni el proyecto.

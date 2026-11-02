@@ -30,5 +30,14 @@ jobs:
       - name: Instalar expect
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y expect
+      # Sin ripgrep, grep usa su búsqueda alternativa: con él se prueban los dos caminos (también en Windows)
+      - name: Instalar ripgrep
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get install -y ripgrep ;;
+            macOS) brew install ripgrep ;;
+            Windows) choco install ripgrep -y --no-progress ;;
+          esac
       - run: npm ci
       - run: npm test

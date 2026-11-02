@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import fs from "node:fs";
 import path from "node:path";
 import { retiredInterface } from "./interfaces.js";
@@ -116,6 +118,9 @@ export interface McpServerConfig {
   cwd?: string;
   url?: string;
   headers?: Record<string, string>;
+  // Para los servidores remotos que piden iniciar sesión (/mcp login): false para no usarlo nunca, o tu aplicación en ese
+  // servicio si no deja registrarse solo
+  oauth?: false | { clientId?: string; clientSecret?: string; scope?: string; callbackPort?: number };
   enabled?: boolean;
   timeoutMs?: number;
 }
@@ -174,6 +179,8 @@ export interface Config {
   // Si el modelo que llevaba la tarea se queda sin cupo menos de esto, se le espera en vez de pasarle la tarea a otro (0 = no
   // esperar nunca). No tiene que ver con los modelos lentos: lo que se les espera lo dice firstResponseMs
   stickyWaitMs: number;
+  // Si cambia código y termina sin ejecutar nada, se le pide que lo compruebe o que diga que no lo ha hecho
+  verifyCode: boolean;
   permission: PermissionConfig;
   mcp: Record<string, McpServerConfig>;
   lsp: Record<string, LspServerConfig | false> | false;
@@ -232,6 +239,7 @@ export const DEFAULT_CONFIG: Config = {
   maxWaitMs: 90000,
   firstResponseMs: 40000,
   stickyWaitMs: 30000,
+  verifyCode: true,
   permission: DEFAULT_PERMISSION,
   mcp: {},
   lsp: {},

@@ -1,4 +1,7 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import fs from "node:fs";
+import path from "node:path";
 import pc from "picocolors";
 import { Agent, type UserInput } from "./agent.js";
 import { type AgentDefinition, MAIN_AGENT, agentName, loadAgents, primaryAgents, subagents } from "./agents.js";
@@ -20,14 +23,15 @@ import { type SkillDefinition, loadSkills, skillContent } from "./skills.js";
 import { hasSecurity, localChangelog, sectionsBetween } from "./changelog.js";
 import { cleanForClipboard, copyToClipboard, lastCodeBlock } from "./clipboard.js";
 import { bugReportUrl, doctorReport, gitAdvice } from "./doctor.js";
-import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession, sessionMarkdownPath } from "./session.js";
+import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession, sessionMarkdownPath, statsReport } from "./session.js";
 import { Snapshots } from "./snapshot.js";
+import { allJobs, jobState, runningJobs, stopAllJobs, stopJob } from "./background.js";
 import { commandShell, findProgram, killTree, spawnGroup } from "./shell.js";
 import { type UpdateStep, compareVersions, updateVipcode } from "./update.js";
 import { type TutorialCard, type TutorialEvent, isTutorialDir, tutorialCard, tutorialDone } from "./tutorial.js";
 import { INTERFACES, interfaceFor } from "./interfaces.js";
-import { formatTodos, truncate } from "./tools.js";
-import { showLine } from "./sanitize.js";
+import { formatTodos, resolvePath, truncate } from "./tools.js";
+import { showControl, showLine } from "./sanitize.js";
 import { type ProjectTrust, projectTrust } from "./trust.js";
 import { joinList } from "./trustinfo.js";
 
@@ -473,7 +477,8 @@ export class App {
   // /bug: GitHub con el informe de /doctor ya puesto; la persona cuenta qué ha pasado y lo envía ella
   async reportBug(ui: UiAdapter, description: string) {
     ui.info("Preparando el informe…");
-    const url = bugReportUrl(await doctorReport(this), description);
+    // Primero las cuentas de esta conversación (si no cabe todo se recorta por el final): solo números, sin lo que se ha dicho
+    const url = bugReportUrl([...statsReport(this.agent.session.stats), await doctorReport(this)].join("\n"), description);
     // Por SSH, o en Linux sin escritorio, el navegador de esta máquina no es el tuyo: el enlace, al portapapeles (salvo si
     // has dicho con VIPCODE_BROWSER cómo abrirlo)
     const local = Boolean(process.env.VIPCODE_BROWSER) || (!isRemoteSession() && (process.platform !== "linux" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)));
@@ -489,7 +494,17 @@ export class App {
 
   async shutdown() {
     saveSession(this.agent.session);
-    await Promise.allSettled([this.lsp?.shutdown(), this.mcp?.close()]);
+    await Promise.allSettled([this.lsp?.shutdown(), this.mcp?.close(), stopAllJobs()]);
+  }
+
+  // Si es un fichero o una carpeta del proyecto, su ruta desde la raíz (nada de fuera, ni tus datos de vipcode)
+  projectPath(file: string): string | null {
+    try {
+      const abs = resolvePath(this.root, file);
+      return fs.existsSync(abs) && abs !== path.resolve(this.root) ? path.relative(this.root, abs).replace(/\\/g, "/") : null;
+    } catch {
+      return null;
+    }
   }
 
   primaryAgents(): AgentDefinition[] {
@@ -601,6 +616,7 @@ export class App {
         row("Ctrl+F", "busca en la conversación (Enter o ↑ la anterior, ↓ la siguiente, Esc cierra)"),
         row("Copiar", "arrastra con el ratón y se copia al soltar; doble clic, una palabra; triple, la línea · /copiar"),
         row("Clic en una herramienta", "despliega su salida entera (otro clic la pliega)"),
+        row("Clic en una ruta", "añade ese fichero a la caja como @ruta"),
         row("Clic en un enlace", "lo abre en el navegador; en un /comando, lo escribe en la caja"),
         row("Clic en «y más» · «↓ N líneas»", "despliega las novedades enteras · baja al final de la conversación"),
       );
@@ -1163,11 +1179,40 @@ export class App {
       case "/limits":
         ui.block(limitsReport(this.router));
         return {};
+      case "/procesos":
+      case "/ps": {
+        const [action, id] = arg.split(/\s+/);
+        const jobs = allJobs();
+        if (action === "parar" || action === "stop") {
+          const running = runningJobs();
+          const target = id ? running.filter((job) => job.id === id) : running;
+          if (target.length === 0) {
+            ui.info(id ? `No hay ningún comando ${showControl(id)} en marcha. /procesos enseña los que hay.` : "No hay nada en marcha.");
+            return {};
+          }
+          await Promise.all(target.map((job) => stopJob(job)));
+          ui.info(`Parado: ${target.map((job) => job.id).join(", ")}.`);
+          return {};
+        }
+        if (jobs.length === 0) {
+          ui.info("No hay nada en segundo plano. Aquí sale lo que el agente deja en marcha, como un servidor.");
+          return {};
+        }
+        ui.block(jobs.map((job) => `  ${job.id.padEnd(6)} ${jobState(job).padEnd(28)} ${showControl(`${job.workdir ? `(en ${job.workdir}) ` : ""}${job.command}`).slice(0, 100)}`).join("\n"));
+        if (runningJobs().length > 0) {
+          ui.info("/procesos parar los para todos; /procesos parar bg1, solo ese. Al cerrar vipcode se paran solos.");
+        }
+        return {};
+      }
       case "/usage": {
         const usage = this.agent.session.usage;
         ui.info(
           `Tokens en esta sesión: ${usage.prompt} de entrada y ${usage.completion} de salida (todo gratis). Última petición: ~${this.agent.lastTokens} tokens con ${this.agent.lastSlot || "—"}.`,
         );
+        const stats = statsReport(this.agent.session.stats);
+        if (stats.length > 0) {
+          ui.block(stats.join("\n"));
+        }
         return {};
       }
       case "/mcp": {
@@ -1175,10 +1220,24 @@ export class App {
           ui.info('No hay servidores MCP. Añádelos en "mcp" de tu config (mira el README).');
           return {};
         }
+        const [action, target] = rest;
+        if (action === "login" || action === "logout") {
+          if (!target) {
+            ui.info(`Escribe /mcp ${action} <servidor>. /mcp enseña los que hay.`);
+            return {};
+          }
+          try {
+            const row = action === "login" ? await this.mcp.login(target, ui) : await this.mcp.logout(target);
+            ui.info(`${showControl(target)}: ${row.state}${row.state === "conectado" ? ` (${row.tools} herramientas)` : ""}${row.error ? `. ${showControl(row.error)}` : ""}`);
+          } catch (err) {
+            ui.error(showControl((err as Error).message));
+          }
+          return {};
+        }
         ui.block(
           this.mcp
             .status()
-            .map((server) => `  ${server.name.padEnd(20)} ${server.state}${server.state === "conectado" ? ` (${server.tools} herramientas)` : ""}${server.error ? ` ${pc.red(server.error)}` : ""}`)
+            .map((server) => `  ${server.name.padEnd(20)} ${server.state}${server.state === "conectado" ? ` (${server.tools} herramientas)` : ""}${server.error ? ` ${pc.red(showControl(server.error))}` : ""}`)
             .join("\n"),
         );
         return {};

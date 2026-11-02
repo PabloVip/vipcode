@@ -1,9 +1,15 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
+import crypto from "node:crypto";
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServerConfig } from "./config.js";
 import { debugLog } from "./debug.js";
+import { type LoginUi, callbackServer, openBrowser } from "./login.js";
+import { McpOAuthProvider, type McpOAuthOptions, forgetSession, hasSession } from "./mcp-auth.js";
 import { VERSION } from "./meta.js";
 import { findProgram } from "./shell.js";
 import { CORE_TOOLS, type Tool, truncate } from "./tools.js";
@@ -110,6 +116,37 @@ function toText(result: any): { output: string; images: string[] } {
   return { output, images };
 }
 
+function limited<T>(promise: Promise<T>, what: string, timeout: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const limit = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what}: tiempo agotado`)), timeout);
+  });
+  // Sin limpiar el temporizador, el proceso no podría terminar hasta que venciera
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
+}
+
+// El servidor pide iniciar sesión (lo dice el SDK o, sin sesión, el propio transporte con un 401)
+function isUnauthorized(err: unknown): boolean {
+  return err instanceof UnauthorizedError || (err as { code?: unknown } | null)?.code === 401;
+}
+
+const isRemoteConfig = (config: McpServerConfig) => config.type === "remote" || (!config.type && Boolean(config.url));
+
+// Con una cabecera Authorization puesta por ti, o con oauth: false, vipcode no gestiona ninguna sesión
+function usesOAuth(config: McpServerConfig): boolean {
+  return config.oauth !== false && !Object.keys(config.headers || {}).some((name) => name.toLowerCase() === "authorization");
+}
+
+function oauthOptions(config: McpServerConfig): McpOAuthOptions {
+  const oauth = config.oauth || {};
+  return {
+    clientId: oauth.clientId ? expandEnv(String(oauth.clientId)) : undefined,
+    clientSecret: oauth.clientSecret ? expandEnv(String(oauth.clientSecret)) : undefined,
+    scope: oauth.scope,
+    callbackPort: oauth.callbackPort,
+  };
+}
+
 // Conecta con los servidores MCP del config y ofrece sus herramientas al agente
 export class McpManager {
   private servers = new Map<string, ServerState>();
@@ -154,16 +191,8 @@ export class McpManager {
   private async connect(server: ServerState, config: McpServerConfig) {
     const timeout = config.timeoutMs || 30000;
     const client = new Client({ name: "vipcode", version: VERSION });
-    const isRemote = config.type === "remote" || (!config.type && Boolean(config.url));
-
-    const withTimeout = <T>(promise: Promise<T>, what: string): Promise<T> => {
-      let timer: NodeJS.Timeout | undefined;
-      const limit = new Promise<T>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(`${what}: tiempo agotado`)), timeout);
-      });
-      // Sin limpiar el temporizador, el proceso no podría terminar hasta que venciera
-      return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
-    };
+    const isRemote = isRemoteConfig(config);
+    const withTimeout = <T>(promise: Promise<T>, what: string): Promise<T> => limited(promise, what, timeout);
 
     if (isRemote) {
       if (!config.url) {
@@ -172,14 +201,26 @@ export class McpManager {
       const url = new URL(config.url);
       const headers = Object.fromEntries(Object.entries(config.headers || {}).map(([name, value]) => [name, expandEnv(String(value))]));
       const requestInit = { headers };
+      // Solo con una sesión ya iniciada. Sin ella se conecta como siempre, y si el servidor la pide se dice cómo iniciarla: ni
+      // se registra nada en el servidor ni se abre el navegador sin que lo pidas
+      const oauth = usesOAuth(config);
+      const authProvider = oauth && hasSession(config.url) ? new McpOAuthProvider(config.url, oauthOptions(config), null) : undefined;
+      const needsLogin = (err: unknown) => (oauth && isUnauthorized(err) ? new Error(`pide iniciar sesión: escribe /mcp login ${server.name}`) : err);
       try {
-        await withTimeout(client.connect(new StreamableHTTPClientTransport(url, { requestInit })), "conectar");
+        await withTimeout(client.connect(new StreamableHTTPClientTransport(url, { requestInit, authProvider })), "conectar");
       } catch (err) {
+        if (oauth && isUnauthorized(err)) {
+          throw needsLogin(err);
+        }
         // Servidores antiguos que solo hablan SSE
         debugLog("mcp streamable falló, pruebo SSE", server.name, err);
         await client.close().catch(() => {});
         const fallback = new Client({ name: "vipcode", version: VERSION });
-        await withTimeout(fallback.connect(new SSEClientTransport(url, { requestInit })), "conectar (SSE)");
+        try {
+          await withTimeout(fallback.connect(new SSEClientTransport(url, { requestInit, authProvider })), "conectar (SSE)");
+        } catch (sseError) {
+          throw needsLogin(sseError);
+        }
         server.client = fallback;
       }
     } else {
@@ -219,6 +260,106 @@ export class McpManager {
     };
     const listed = await withTimeout(server.client.listTools(), "listar herramientas");
     server.tools = (listed.tools || []).map((tool: any) => this.wrapTool(server, tool));
+  }
+
+  // Vuelve a conectar desde cero (después de iniciar o cerrar sesión)
+  private async reconnect(server: ServerState, config: McpServerConfig) {
+    for (const tool of server.tools) {
+      this.names.delete(tool.name);
+    }
+    server.tools = [];
+    if (server.client) {
+      server.client.onclose = undefined;
+      await server.client.close().catch(() => {});
+      server.client = undefined;
+    }
+    server.state = "conectando";
+    server.error = undefined;
+    try {
+      await this.connect(server, config);
+      server.state = "conectado";
+    } catch (err) {
+      server.state = "error";
+      server.error = (err as Error).message;
+      debugLog("mcp", server.name, err);
+    }
+    this.onChange?.();
+  }
+
+  private remoteServer(name: string): { server: ServerState; config: McpServerConfig & { url: string } } {
+    const server = this.servers.get(name);
+    const config = this.configs[name];
+    if (!server || !config) {
+      throw new Error(`No hay ningún servidor MCP llamado ${name}. /mcp enseña los que hay.`);
+    }
+    if (!isRemoteConfig(config) || !config.url) {
+      throw new Error(`${name} es un servidor local: no hay que iniciar sesión.`);
+    }
+    return { server, config: config as McpServerConfig & { url: string } };
+  }
+
+  // /mcp login: lo pides tú, se abre el navegador, vuelve con un código (y el «state» que se mandó), se cambia por la sesión y
+  // se vuelve a conectar. Devuelve el estado en el que queda
+  async login(name: string, ui: LoginUi): Promise<McpStatus> {
+    const { server, config } = this.remoteServer(name);
+    if (!usesOAuth(config)) {
+      throw new Error(`${name} tiene una cabecera Authorization o "oauth": false en la configuración: vipcode no gestiona su sesión.`);
+    }
+    const options = oauthOptions(config);
+    const state = crypto.randomBytes(16).toString("hex");
+    const callback = await callbackServer(state, 5 * 60 * 1000, { strict: true, port: options.callbackPort });
+    // Si el navegador dice que no antes de que se espere el código, ya saltará al esperarlo: que no tumbe vipcode
+    callback.code.catch(() => {});
+    const provider = new McpOAuthProvider(config.url, options, {
+      redirectUrl: callback.url,
+      state,
+      open: (target) => {
+        ui.info(`Abro el navegador para que inicies sesión en ${name} (espero 5 minutos). Si no se abre, entra en:\n${target.href}`);
+        openBrowser(target.href);
+      },
+    });
+    const url = new URL(config.url);
+    const requestInit = { headers: Object.fromEntries(Object.entries(config.headers || {}).map(([key, value]) => [key, expandEnv(String(value))])) };
+    const timeout = config.timeoutMs || 30000;
+    let lastError: unknown = null;
+    let authorized = false;
+    try {
+      // Como al conectar: primero el transporte de ahora y, en los servidores antiguos, SSE
+      for (const transport of [new StreamableHTTPClientTransport(url, { requestInit, authProvider: provider }), new SSEClientTransport(url, { requestInit, authProvider: provider })]) {
+        const client = new Client({ name: "vipcode", version: VERSION });
+        try {
+          await limited(client.connect(transport), "conectar", timeout);
+          authorized = true;
+          await client.close().catch(() => {});
+          break;
+        } catch (err) {
+          lastError = err;
+          if (err instanceof UnauthorizedError) {
+            const code = await callback.code;
+            await limited(transport.finishAuth(code), "iniciar sesión", timeout);
+            authorized = true;
+            await client.close().catch(() => {});
+            break;
+          }
+          await client.close().catch(() => {});
+        }
+      }
+    } finally {
+      callback.close();
+    }
+    if (!authorized) {
+      throw lastError instanceof Error ? lastError : new Error("no se ha podido iniciar sesión");
+    }
+    await this.reconnect(server, config);
+    return this.status().find((row) => row.name === name)!;
+  }
+
+  // /mcp logout: olvida la sesión guardada y vuelve a conectar (sin ella, si el servidor la pide, lo dice)
+  async logout(name: string): Promise<McpStatus> {
+    const { server, config } = this.remoteServer(name);
+    forgetSession(config.url);
+    await this.reconnect(server, config);
+    return this.status().find((row) => row.name === name)!;
   }
 
   // El nombre que ve el modelo: servidor_herramienta, y si ya existe (o es uno de vipcode), con _2, _3…

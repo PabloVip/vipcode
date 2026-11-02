@@ -1397,6 +1397,14 @@ test("clics: enlaces (también partidos en dos líneas), /comandos y novedades q
   // Solo direcciones web: con un clic nunca se abre otra cosa que haya escrito un modelo
   assert.equal(mouse.urlAt(["javascript:alert(1)"], 0, 3, []), null);
   assert.equal(mouse.urlAt(["file:///etc/passwd"], 0, 3, []), null);
+  // Una ruta del proyecto se deja en la caja, con su línea o su puntuación quitadas, y solo si existe
+  const known = (file) => (["src/app.ts", "README.md", "src"].includes(file) ? file : null);
+  assert.equal(mouse.pathAt("mira src/app.ts para verlo", 7, known), "src/app.ts");
+  assert.equal(mouse.pathAt("en `src/app.ts:12`, ahí", 7, known), "src/app.ts");
+  assert.equal(mouse.pathAt("el fichero README.md.", 13, known), "README.md");
+  assert.equal(mouse.pathAt("mira src/otro.ts", 7, known), null);
+  // Una palabra suelta no: aunque se llame como una carpeta, puede ser cualquier cosa
+  assert.equal(mouse.pathAt("el código de src es", 14, known), null);
   // Solo los /comandos que existen
   assert.equal(mouse.commandAt("escribe /update para instalarla", 10, ["update", "new"]), "/update");
   assert.equal(mouse.commandAt("(/new empieza otra conversación)", 3, ["update", "new"]), "/new");
@@ -1615,3 +1623,57 @@ test("criaturas: monstruitos al azar, repetibles con la misma semilla, y su pane
   }
 });
 
+test("skills: con muchas, la lista que va en cada petición no crece sin límite y conserva los nombres", async () => {
+  const { skillTool, skillList } = await import("../dist/skills.js");
+  const make = (count, length) =>
+    Array.from({ length: count }, (_, i) => ({
+      name: `skill-${i}`,
+      modelInvocable: true,
+      description: `Usa esta skill número ${i} cuando ${"haga falta algo muy concreto ".repeat(40)}`.slice(0, length),
+    }));
+  // Con pocas, como siempre: hasta 250 caracteres por skill
+  const few = skillTool(make(3, 600)).description;
+  assert.ok(few.length > 3 * 240, String(few.length));
+  // Con 84 de descripciones largas (lo que ocupaba 5.600 tokens en una instalación de verdad) cabe en la cuenta
+  const many = skillList(make(84, 600));
+  assert.ok(many.length <= 8000, String(many.length));
+  assert.ok(many.length > 6000, "aprovecha lo que cabe");
+  for (let i = 0; i < 84; i++) {
+    assert.match(many, new RegExp(`^- skill-${i}: Usa esta skill`, "m"));
+  }
+  // Las cortas se quedan enteras: lo que dejan libre es para las largas
+  const mixed = make(60, 600).map((skill, i) => (i % 2 ? { ...skill, description: "Corta." } : skill));
+  const list = skillList(mixed);
+  assert.equal(list.match(/: Corta\.$/gm).length, 30);
+  assert.ok(list.length <= 8000);
+  assert.ok(list.split("\n")[0].length > 200, "las largas aprovechan lo que dejan libre las cortas");
+  // Con muchísimas, solo los nombres, y si ni ellos caben se dice cuántas faltan
+  const names = skillList(make(300, 600));
+  assert.match(names, /^- skill-0$/m);
+  assert.match(names, /^- skill-299$/m);
+  assert.ok(names.length <= 8000);
+  const huge = skillList(make(2000, 600));
+  assert.ok(huge.length <= 8100);
+  assert.match(huge, /\(y \d+ más: \/skills las enseña todas\)$/);
+  // Una skill que no sale en la lista se puede cargar igual si se pide por su nombre, y el error no se dispara
+  const tool = skillTool(make(2000, 50));
+  assert.match(await tool.run({ name: "no-existe" }), /no hay ninguna skill/);
+});
+
+test("licencia: cada fichero de código lleva su aviso (y el de arranque, después de su primera línea)", () => {
+  const ROOT = path.resolve(import.meta.dirname, "..");
+  const missing = [];
+  for (const base of ["src", "scripts"]) {
+    for (const entry of fs.readdirSync(path.join(ROOT, base), { recursive: true })) {
+      if (!/\.(ts|tsx|mjs|js|cjs)$/.test(entry)) {
+        continue;
+      }
+      const lines = fs.readFileSync(path.join(ROOT, base, entry), "utf8").split("\n");
+      const header = lines[0].startsWith("#!") ? lines.slice(1, 3) : lines.slice(0, 2);
+      if (!header[0]?.startsWith("// Copyright (C)") || header[1] !== "// SPDX-License-Identifier: AGPL-3.0-or-later") {
+        missing.push(`${base}/${entry}`);
+      }
+    }
+  }
+  assert.deepEqual(missing, []);
+});

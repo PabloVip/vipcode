@@ -288,3 +288,37 @@ test("interfaz: la de criaturas pone un monstruito a la derecha que cambia con c
     await mock.close();
   }
 });
+
+test("interfaz: un comando en segundo plano se aprueba para su carpeta, se ve en la barra y se para con /procesos", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const mock = await startMock(({ body }) => {
+    const last = lastMessage(body);
+    if (last.role === "tool") {
+      return { text: "SERVIDOR-LANZADO" };
+    }
+    return { tools: [{ name: "bash", args: { command: "node srv.cjs", background: true, workdir: "sub" } }] };
+  });
+  const ws = tempWorkspace({ "sub/srv.cjs": 'require("node:fs").writeFileSync("pid.txt", String(process.pid)); setInterval(() => {}, 1000);' });
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  try {
+    const result = await runExpect("tui-segundo-plano.exp", ws);
+    assert.equal(result.code, 0, result.plain.slice(-3000));
+    assert.match(result.plain, /TUI-SEGUNDO-PLANO-OK/);
+    // Y al salir no queda nada en marcha
+    const pid = Number(ws.read("sub/pid.txt"));
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (let i = 0; i < 100 && alive(); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(!alive());
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
+});

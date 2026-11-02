@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Publica una versión nueva de vipcode: sube el número, pasa las pruebas, crea el commit y la etiqueta,
 // lo sube a GitHub, crea la release con el paquete ya compilado y lo publica en npm.
 //

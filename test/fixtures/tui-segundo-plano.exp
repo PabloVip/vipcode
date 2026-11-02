@@ -1,0 +1,75 @@
+# Comandos en segundo plano en la pantalla completa: el permiso dice dónde y cómo va, «permitir siempre» es para esa carpeta,
+# la barra de abajo lo enseña y /procesos lo para (lo lanza test/tui.test.mjs)
+set timeout 30
+log_user 1
+set cli [lindex $argv 0]
+match_max -d 200000
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+# Espera sin dejar de leer la pantalla
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
+}
+
+proc libre {} {
+  expect {
+    "Escribe tu mensaje" {}
+    timeout { falla "no vuelve a quedar libre" }
+  }
+}
+
+spawn -noecho node $cli
+stty rows 30 columns 110 < $spawn_out(slave,name)
+libre
+
+send "arranca el servidor\r"
+expect {
+  "(en segundo plano) (en sub)" {}
+  timeout { falla "el permiso no dice que va en segundo plano y en qué carpeta" }
+}
+expect {
+  "en sub en esta sesión" {}
+  timeout { falla "«permitir siempre» no dice que es para esa carpeta" }
+}
+# Sí, y permitir siempre: para esa carpeta (el diálogo se ve un instante antes de escuchar el teclado)
+pausa 0.3
+send "p"
+expect {
+  "SERVIDOR-LANZADO" {}
+  timeout { falla "no sigue después de aprobarlo" }
+}
+expect {
+  "1 en segundo plano" {}
+  timeout { falla "la barra de abajo no enseña lo que hay en segundo plano" }
+}
+libre
+send "/procesos\r"
+expect {
+  "en marcha desde hace" {}
+  timeout { falla "/procesos no enseña lo que hay en marcha" }
+}
+libre
+send "/procesos parar\r"
+expect {
+  "Parado: bg" {}
+  timeout { falla "/procesos parar no lo para" }
+}
+send "/exit\r"
+expect {
+  eof {}
+  timeout { falla "/exit no cierra la interfaz" }
+}
+puts "\nTUI-SEGUNDO-PLANO-OK"
+exit 0

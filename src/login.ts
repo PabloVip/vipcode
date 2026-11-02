@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import http from "node:http";
@@ -57,8 +59,9 @@ function page(text: string): string {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>vipcode</title></head><body style="font-family:system-ui,sans-serif;margin:15vh auto;max-width:32rem;padding:0 1rem;text-align:center"><h1>vipcode</h1><p>${text}</p></body></html>`;
 }
 
-// Espera a que el navegador vuelva a http://localhost:<puerto>/callback con el código
-async function callbackServer(state: string, timeoutMs: number) {
+// Espera a que el navegador vuelva a http://localhost:<puerto>/callback con el código. Con «strict», sin el «state» que se
+// mandó no vale: cualquier página que visites podría llamar a esa dirección
+export async function callbackServer(state: string, timeoutMs: number, options: { strict?: boolean; port?: number } = {}) {
   let resolveCode!: (code: string) => void;
   let rejectCode!: (err: Error) => void;
   const code = new Promise<string>((resolve, reject) => {
@@ -74,7 +77,7 @@ async function callbackServer(state: string, timeoutMs: number) {
     }
     const html = { "content-type": "text/html; charset=utf-8" };
     const returned = url.searchParams.get("state");
-    if (returned && returned !== state) {
+    if ((returned && returned !== state) || (options.strict && returned !== state)) {
       res.writeHead(400, html);
       res.end(page("Esta respuesta no es de este inicio de sesión. Vuelve a intentarlo desde vipcode."));
       return;
@@ -94,7 +97,7 @@ async function callbackServer(state: string, timeoutMs: number) {
   const servers = [http.createServer(handler)];
   await new Promise<void>((resolve, reject) => {
     servers[0].once("error", reject);
-    servers[0].listen(0, "127.0.0.1", () => resolve());
+    servers[0].listen(options.port || 0, "127.0.0.1", () => resolve());
   });
   const port = (servers[0].address() as AddressInfo).port;
   // También en IPv6, porque el navegador puede resolver «localhost» como ::1

@@ -781,3 +781,41 @@ test("si se cierra vipcode (por ejemplo cerrando la ventana de la terminal), se 
   await mock.close();
   ws.cleanup();
 });
+
+test("vipcode run: lo que el agente deja en segundo plano se para al terminar", async () => {
+  let call = 0;
+  const mock = await startMock(async ({ path: url }) => {
+    if (!url.endsWith("/chat/completions")) {
+      return { json: { data: [] } };
+    }
+    call++;
+    if (call === 1) {
+      return { tools: [{ name: "bash", args: { command: "node srv.cjs", background: true } }] };
+    }
+    // Cuando contesta, ya ha arrancado (en un ordenador lento puede tardar)
+    for (let i = 0; i < 200 && !ws.exists("pid.txt"); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return { text: "En marcha." };
+  });
+  const ws = tempWorkspace({ "srv.cjs": 'require("node:fs").writeFileSync("pid.txt", String(process.pid)); setInterval(() => {}, 1000);' });
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false, permission: { bash: "allow", edit: "allow" } });
+  const result = await runVip(["run", "arranca el servidor"], { cwd: ws.proj, home: ws.home });
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /En marcha\./);
+  const pid = Number(ws.read("pid.txt"));
+  const alive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (let i = 0; i < 160 && alive(); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(!alive(), "sigue en marcha después de terminar vipcode");
+  await mock.close();
+  ws.cleanup();
+});

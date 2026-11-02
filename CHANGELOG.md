@@ -4,6 +4,19 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- **Comandos en segundo plano.** El agente puede dejar en marcha un servidor o un «watch» y seguir trabajando, mirar lo que escribe y pararlo, en vez de quedarse bloqueado hasta que se acababa el tiempo. Se aprueban como cualquier otro comando, se ven en la barra de abajo y con el nuevo `/procesos` (que también los para), y se paran solos al cerrar vipcode.
+- **Comprueba el código antes de darlo por hecho.** Si el modelo cambia código y termina sin haber ejecutado nada, o con la comprobación fallando, se le pide una vez que lo compruebe o lo arregle, o que diga claramente cómo ha quedado. Si le dices que no a un comando, no insiste. Se puede quitar con `verifyCode: false`.
+- **Los modelos que se atascan dejan paso a otro.** Si un modelo falla una y otra vez en lo mismo, repite la misma llamada, da vueltas buscando sin avanzar o solo anuncia lo que va a hacer, pasa detrás de los demás unas horas y coge la tarea otro. `/models` lo enseña y `/reset-limits` le da otra oportunidad. Si lo has fijado con `/model`, se respeta.
+- **MCP con inicio de sesión.** Los servidores remotos que piden OAuth ya funcionan: `/mcp login <servidor>` abre el navegador, la sesión se recuerda y se renueva sola, y `/mcp logout <servidor>` la olvida.
+- **`/usage` y `/bug` cuentan lo que ha pasado en la conversación:** modelos, cambios de modelo, atascos y errores por herramienta. Solo números, sin lo que se ha dicho ni qué ficheros: ayuda a entender un fallo sin enseñar nada tuyo.
+- **Un clic en una ruta** de un fichero del proyecto la deja en la caja como `@ruta`.
+
+### Cambiado
+
+- **Menos contexto gastado con muchas skills.** La lista de skills que va en cada petición ya no crece sin límite: con muchas se acortan las descripciones y los nombres siguen todos. Con 84 skills, de unos 5.600 tokens a menos de 2.000 por petición.
+
 ## [0.3.6] - 2026-11-02
 
 ### Corregido

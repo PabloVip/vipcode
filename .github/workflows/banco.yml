@@ -1,0 +1,41 @@
+name: Banco de tareas
+
+# Una vez a la semana mide cómo terminan el trabajo los modelos gratis (scripts/banco-tareas.mjs): cuántas tareas resuelven,
+# con pruebas que decide el script y no el modelo, y cuántas veces dicen que está hecho sin estarlo. El informe sale en el
+# resumen de la tarea y el resultado se guarda para compararlo con --comparar. No abre avisos: es una medida, no una alarma.
+# También se puede lanzar a mano desde la pestaña Actions.
+on:
+  schedule:
+    - cron: "41 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  banco:
+    name: Tareas con los modelos gratis
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Aquí se ejecuta código escrito por modelos de fuera: que el token de GitHub no se quede guardado en la carpeta
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          # Desde Node 25 el modelo de permisos también corta la salida a internet del código de los modelos
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # Sin claves ni secretos, y el script deja el entorno sin nada que no haga falta
+      - name: Pasar las tareas
+        run: node scripts/banco-tareas.mjs --out banco.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Guardar el resultado
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: banco-de-tareas
+          path: banco.json
+          if-no-files-found: ignore

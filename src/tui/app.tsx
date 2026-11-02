@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import fs from "node:fs";
 import path from "node:path";
 import { Box, Text, render, useAnimation, useApp, useInput, usePaste, useWindowSize } from "ink";
@@ -5,6 +7,7 @@ import pc from "picocolors";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ToolEvent, UserInput } from "../agent.js";
 import type { App, Progress, RunOptions, SelectItem, UiAdapter } from "../app.js";
+import { runningJobs } from "../background.js";
 import { configNotices } from "../config.js";
 import { discoveryIsStale } from "../discovery.js";
 import { isImagePath, readClipboardImage, toDataUrl } from "../images.js";
@@ -249,6 +252,8 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
   const usage = app.agent.session.usage;
   const spent = usage.prompt + usage.completion;
   const queued = app.agent.queue.length;
+  // Lo que el agente ha dejado en marcha se ve siempre: no puede quedarse nada corriendo sin que lo sepas
+  const jobs = runningJobs().length;
   // Cuánto queda del plan gratis del modelo en uso (/limites lo enseña todo)
   const quota = slot ? quotaFor(app.router, slot) : null;
   let quotaColor: string | undefined;
@@ -294,6 +299,7 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
     (fit.models ? ` · ${available}/${app.router.slots.length} modelos`.length : 0) +
     (fit.tokens ? ` · ${shortTokens(spent)} tokens`.length : 0) +
     (queued > 0 ? ` · ${queued} en cola`.length : 0) +
+    (jobs > 0 ? ` · ${jobs} en segundo plano`.length : 0) +
     (app.yolo ? 7 : 0) +
     (hintText() ? 2 + hintText().length : 0);
   const warning = context > 0 && app.agent.lastTokens / context >= 0.6;
@@ -337,6 +343,7 @@ function StatusBar(props: { app: App; agentName: string; busy: boolean; model: s
           {fit.tokens ? ` · ${shortTokens(spent)} tokens` : ""}
           {queued > 0 ? ` · ${queued} en cola` : ""}
         </Text>
+        {jobs > 0 ? <Text color="yellow"> · {jobs} en segundo plano</Text> : null}
         {app.yolo ? <Text color="red"> · yolo</Text> : null}
       </Text>
       {hintText() ? (
@@ -384,6 +391,11 @@ function Main(props: { app: App; initial: string }) {
     interfaceId,
     side,
     onCommand: (command) => setEditor({ value: `${command} `, cursor: command.length + 1 }),
+    onMention: (file) =>
+      setEditor((current) => {
+        const value = `${current.value}${current.value && !/\s$/.test(current.value) ? " " : ""}@${file} `;
+        return { value, cursor: value.length };
+      }),
   });
   const [attachments, setAttachments] = useState<string[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);

@@ -105,19 +105,27 @@ expect {
 }
 
 # 5. Arriba, la última línea de la conversación dice cuánto queda por debajo («↓ N líneas más»): un clic en ella baja al
-# final (la fila se va probando)
+# final (la fila se va probando). Por el camino se pincha en las rutas de los ficheros, que se añaden a la caja como @ruta
 set abajo 0
+set ruta 0
 for {set fila 21} {$fila <= 27 && !$abajo} {incr fila} {
   send "\033\[<0;5;${fila}M\033\[<0;5;${fila}m"
   expect {
     -timeout 1
     "LINEA-80" { set abajo 1 }
+    "en la caja" { set ruta 1; exp_continue }
     timeout {}
   }
 }
 if {!$abajo} {
   falla "un clic en «↓ N líneas más» no baja al final"
 }
+if {!$ruta} {
+  falla "un clic en una ruta no la deja en la caja"
+}
+# Lo que se ha quedado en la caja se borra
+send "\003"
+pausa 0.3
 
 # 6. Ctrl+Inicio lleva al principio y Ctrl+Fin vuelve al final
 send "\033\[1;5H"

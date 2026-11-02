@@ -51,6 +51,7 @@
     "release": "node scripts/release.mjs",
     "vigilar": "npm run build && node scripts/vigilar.mjs",
     "prueba-real": "npm run build && node scripts/prueba-real.mjs",
+    "banco": "npm run build && node scripts/banco-tareas.mjs",
     "demo": "npm run build && node scripts/demo/hacer.mjs"
   },
   "engines": {

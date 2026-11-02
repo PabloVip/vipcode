@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import type {
   ChatCompletionMessageFunctionToolCall,
   ChatCompletionMessageParam,
@@ -23,10 +25,10 @@ import {
 } from "./context.js";
 import type { LspManager } from "./lsp.js";
 import type { McpManager } from "./mcp.js";
-import type { PermissionReply, PermissionRequest } from "./permissions.js";
+import { type PermissionReply, type PermissionRequest, permissionsFor, splitCommand } from "./permissions.js";
 import { systemPrompt } from "./prompt.js";
 import { type ChatResult, NoSlotError, type Router, type Usage, estimateTokens } from "./router.js";
-import { type LogEntry, type Session, type Turn, saveSession } from "./session.js";
+import { type LogEntry, type Session, type SessionStats, type Turn, newStats, saveSession } from "./session.js";
 import { type SkillDefinition, skillTool } from "./skills.js";
 import type { Snapshots } from "./snapshot.js";
 import {
@@ -133,6 +135,29 @@ const FAILURE_LIMIT = 3;
 const STUCK_NOTES_LIMIT = 3;
 // Veces que se le pide que haga lo que ha anunciado sin hacerlo (en un mismo mensaje tuyo)
 const ANNOUNCE_NUDGES = 2;
+// Veces que le puede llegar lo mismo al buscar antes de decirle que está dando vueltas: los modelos flojos siguen buscando
+// con llamadas un poco distintas (list_dir, glob, grep…) y no terminan nunca. «Sin coincidencias» es normal unas cuantas
+// veces, y volver a leer un fichero también: en una conversación resumida el modelo puede haberlo perdido de vista
+const LOOK_TOOLS = new Set(["read_file", "list_dir", "glob", "grep"]);
+const SAME_RESULT_LIMIT = 3;
+const SAME_READ_LIMIT = 6;
+
+// Lo que dice la herramienta si le has dicho que no (o la configuración lo prohíbe)
+const REJECTED = "El usuario ha rechazado";
+// Ficheros que se pueden compilar o ejecutar. En los demás (un README, un .txt, la configuración) no hay nada que comprobar
+const CODE_FILE = /\.(astro|bash|c|cc|cjs|clj|cpp|cs|cts|cxx|dart|erl|ex|exs|fs|go|h|hpp|hs|java|jl|js|jsx|kt|kts|lua|m|mjs|ml|mts|php|pl|ps1|py|r|rb|rs|scala|sh|svelte|swift|ts|tsx|vue|zig)$/i;
+// Comandos que no comprueban nada: solo miran, mueven ficheros, instalan o guardan en git
+const NOT_A_CHECK =
+  /^(ls|dir|pwd|cd|cat|type|head|tail|less|more|echo|printf|sleep|grep|rg|find|tree|wc|which|where|stat|file|diff|sed|awk|sort|uniq|mkdir|rmdir|rm|del|mv|move|cp|copy|touch|chmod|chown|ln|tar|unzip|curl -o|wget|Get-Content|Get-ChildItem|Select-String|Test-Path|New-Item|Remove-Item|Copy-Item|Move-Item|Write-Output|Write-Host|git|npm (i|install|ci|add|uninstall|ls|list)|yarn (add|install|remove)|pnpm (add|install|i|remove)|bun (add|install|i|remove)|pip3? (install|uninstall|list|show|freeze)|go (get|mod)|cargo (add|update|fetch)|brew|apt|apt-get|dnf|yum|winget|choco)\b/i;
+// Lo que dice bash cuando el comando ha fallado o se ha quedado sin tiempo
+const FAILED_RUN = /^(Código de salida: (?!0\b)|Cancelado por tiempo)/;
+// La respuesta ya dice que está sin comprobar o que sigue fallando
+const ADMITS_UNCHECKED =
+  /\bsigue(n)? (fallando|sin funcionar)|\b(todav[ií]a|a[uú]n) (no )?(falla|funciona)|\bstill (fail|not)|\bsin (probar|comprobar|ejecutar|compilar|verificar)|\bno (lo |la |los |las |se )*(he|ha|hemos|han|pude|puedo|podido|tengo)( podido| forma de| manera de| cómo)? (probad|ejecutad|compilad|comprobad|verificad|probar|ejecutar|compilar|comprobar|verificar)|\b(not|never) (been )?(tested|run|executed|verified|compiled)|\buntested\b|\bunverified\b|\b(haven't|have not|hasn't|has not|couldn't|could not|cannot|can't|didn't|did not) (been able to )?(test|run|execute|verify|compile|check)/i;
+const CHECK_NUDGE =
+  "[Aviso de vipcode] Has cambiado código y no has ejecutado nada después. Si se puede, compruébalo ahora con bash (las pruebas, la compilación o ejecutándolo) y arregla lo que falle. Si no se puede o no procede, no insistas: termina diciendo claramente que está sin comprobar.";
+const FAILED_NUDGE =
+  "[Aviso de vipcode] Has cambiado código y lo último que has ejecutado para comprobarlo ha fallado (mira su resultado). Arréglalo y vuelve a comprobarlo; si no puedes, termina diciendo claramente qué sigue fallando.";
 
 // A qué se aplica una llamada, para saber si falla una y otra vez con lo mismo
 function callTarget(name: string, rawArgs: string): string {
@@ -160,18 +185,31 @@ export function announcesAction(text: string | null | undefined): boolean {
   if (/[?¿]/.test(last) || /\b(si quieres|si prefieres|quieres que|te parece|av[ií]same|dime si|if you want|let me know|would you like)\b/i.test(last)) {
     return false;
   }
-  return /^(voy a|ahora ((lo|la|los|las) )?(voy|vamos|creo|hago|ejecuto|arreglo|reviso|compruebo|actualizo|añado|corrijo|paso|edito|escribo|instalo|lanzo|construyo)|a continuaci[oó]n|procedo a|vamos a|empiezo (por|con)|primero (voy|creo|reviso|compruebo)|i will|i'll|let me|now i('ll| will)|next,? i)\b/i.test(last);
+  return /^(voy a|ahora ((lo|la|los|las) )?(voy|vamos|creo|hago|ejecuto|arreglo|reviso|compruebo|actualizo|añado|corrijo|paso|edito|escribo|instalo|lanzo|construyo)|a continuaci[oó]n|procedo a|vamos a|empiezo (por|con)|primero (voy|creo|reviso|compruebo)|i will|i'll|let me|let's|let us|we (can|will|need to|should)|we'll|now i('ll| will)|next,? i)\b/i.test(last);
 }
 
 // Cuenta los fallos de cada herramienta sobre lo mismo (un edit_file al mismo fichero, una búsqueda en la misma carpeta…).
 // Un acierto sobre eso mismo pone la cuenta a cero
 class FailureTracker {
   private counts = new Map<string, number>();
+  private results = new Map<string, number>();
 
   // Devuelve el aviso para el modelo si algo ha llegado al límite de fallos
   add(outcomes: CallOutcome[]): string | null {
     const notes: string[] = [];
     for (const outcome of outcomes) {
+      if (!LOOK_TOOLS.has(outcome.name) && !outcome.isError && !outcome.output.startsWith(REJECTED)) {
+        // Está haciendo algo más que mirar: no está dando vueltas
+        this.results.clear();
+      } else if (LOOK_TOOLS.has(outcome.name) && !outcome.isError) {
+        const seen = (this.results.get(outcome.output) || 0) + 1;
+        if (seen >= (outcome.name === "read_file" || /^Sin (coincidencias|resultados)/.test(outcome.output) ? SAME_READ_LIMIT : SAME_RESULT_LIMIT)) {
+          this.results.delete(outcome.output);
+          notes.push(`Te ha llegado ${seen} veces el mismo resultado al buscar o leer: repetirlo no te va a dar nada nuevo. Sigue con lo que ya sabes; si lo que te piden no existe o no lo encuentras, dilo y termina.`);
+        } else {
+          this.results.set(outcome.output, seen);
+        }
+      }
       const key = `${outcome.name}\u0000${outcome.target}`;
       if (!outcome.isError) {
         this.counts.delete(key);
@@ -198,6 +236,58 @@ class FailureTracker {
   }
 }
 
+// Si en esta tarea hay código cambiado que nadie ha ejecutado después
+class CheckTracker {
+  pending = false;
+  // Ha cambiado código en esta tarea, y si lo último que ha ejecutado para comprobarlo ha fallado
+  edited = false;
+  failed = false;
+  // Ha llegado a ejecutar algo que comprueba
+  ran = false;
+  // Le has dicho que no a un comando (o la configuración lo prohíbe): no se le vuelve a pedir
+  refused = false;
+
+  note(outcomes: CallOutcome[]) {
+    for (const { name, target, isError, output } of outcomes) {
+      const rejected = output.startsWith(REJECTED);
+      if (name === "write_file" || name === "edit_file") {
+        if (!isError && !rejected && !output.startsWith("Nada que cambiar") && CODE_FILE.test(target)) {
+          this.pending = true;
+          this.edited = true;
+          this.failed = false;
+        }
+      } else if (name === "bash" && rejected) {
+        this.refused = true;
+      } else if (name === "bash" && !isError && splitCommand(target).some((part) => !NOT_A_CHECK.test(part))) {
+        this.pending = false;
+        this.ran = true;
+        this.failed = this.edited && FAILED_RUN.test(output);
+      }
+    }
+  }
+
+  // Lo que ha hecho un subagente también cuenta para quien lo lanzó
+  absorb(sub: CheckTracker) {
+    if (sub.pending) {
+      this.pending = true;
+    } else if (sub.ran) {
+      this.pending = false;
+      this.ran = true;
+      this.failed = sub.failed;
+    }
+    this.edited ||= sub.edited;
+    this.refused ||= sub.refused;
+  }
+
+  reset() {
+    this.pending = false;
+    this.edited = false;
+    this.failed = false;
+    this.ran = false;
+    this.refused = false;
+  }
+}
+
 export class Agent {
   agent: AgentDefinition;
   events: AgentEvents = {};
@@ -218,6 +308,7 @@ export class Agent {
   private touched = new Set<string>();
   private lastError = "";
   private taskSlot = "";
+  private checks = new CheckTracker();
 
   constructor(
     private deps: AgentDeps,
@@ -260,6 +351,12 @@ export class Agent {
     this.touched.clear();
     this.lastError = "";
     this.taskSlot = "";
+    this.checks.reset();
+  }
+
+  // Lo que va pasando en la conversación (las de antes no tenían esto), para /usage y /bug
+  private get stats(): SessionStats {
+    return (this.session.stats ??= newStats());
   }
 
   // Herramientas de un agente: las propias, task (si hay subagentes) y las de MCP, con sus filtros
@@ -700,6 +797,13 @@ export class Agent {
       this.lastSlot = result.slot.key;
       this.lastTokens = tokens;
     }
+    // Un proveedor tuyo puede decir algo de ti (el nombre de tu empresa): en las cuentas va sin nombre
+    const model = result.slot.provider.custom ? "modelo propio" : result.slot.key;
+    this.stats.steps++;
+    this.stats.models[model] = (this.stats.models[model] || 0) + 1;
+    if (relay.previousSlot && relay.previousSlot !== result.slot.key) {
+      this.stats.switches++;
+    }
     this.events.onStep?.({ slot: result.slot.key, usage: result.usage, tokens });
     return result;
   }
@@ -724,6 +828,12 @@ export class Agent {
       const result = await runTool(tools, name, args, { ...ctx, onProgress: (text) => this.events.onToolProgress?.(event, text) }, agent.readOnly);
       this.events.onToolEnd?.({ ...event, output: result.output, display: result.display, stats: result.stats, isError: Boolean(result.isError) });
       outcomes.push({ name, target: callTarget(name, args), isError: Boolean(result.isError), output: result.output });
+      // Las herramientas de MCP, sin su nombre: dicen qué servicios usas. Lo que se invente el modelo tampoco se apunta
+      const counted = name === "task" || name === "skill" || CORE_TOOLS.some((tool) => tool.name === name) ? name : tools.some((tool) => tool.name === name) ? "mcp" : "inexistente";
+      this.stats.tools[counted] = (this.stats.tools[counted] || 0) + 1;
+      if (result.isError) {
+        this.stats.toolErrors[counted] = (this.stats.toolErrors[counted] || 0) + 1;
+      }
       if (depth === 0) {
         this.logEntry({
           role: "tool",
@@ -777,11 +887,44 @@ export class Agent {
     for (const outcome of outcomes) {
       if (outcome.isError) {
         lastError = `${outcome.name} (${outcome.target}): ${outcome.output.split("\n").slice(0, 3).join(" ")}`;
-      } else if ((outcome.name === "write_file" || outcome.name === "edit_file") && outcome.target) {
+      } else if ((outcome.name === "write_file" || outcome.name === "edit_file") && outcome.target && !outcome.output.startsWith(REJECTED)) {
         touched.add(outcome.target);
       }
     }
     return lastError;
+  }
+
+  // Un modelo que se ha atascado pasa detrás de los demás: el siguiente paso lo coge otro, con la nota de relevo
+  private modelStuck(key: string) {
+    this.stats.stuck++;
+    if (this.deps.router.noteStuck(key)) {
+      this.events.onInfo?.(`(${key} se ha atascado: lo intenta otro modelo)`);
+    }
+  }
+
+  // Lo que hay que pedirle antes de dar por terminado lo que ha cambiado («asked»: lo que ya se le ha pedido en este mensaje
+  // tuyo, una vez cada cosa), o null: si hay código sin ejecutar o la comprobación ha fallado, no lo ha dicho él, no le has
+  // dicho que no a un comando y se le deja ejecutar algo
+  private checkNudge(agent: AgentDefinition, tools: Tool[], answer: unknown, asked: Set<string>): { text: string; info: string } | null {
+    const wanted = this.checks.pending
+      ? { text: CHECK_NUDGE, info: "(ha cambiado código sin comprobarlo: le pido que lo compruebe)" }
+      : this.checks.failed
+        ? { text: FAILED_NUDGE, info: "(la comprobación ha fallado: le pido que lo arregle)" }
+        : null;
+    if (!wanted || asked.has(wanted.text) || this.deps.config.verifyCode === false || this.checks.refused || !tools.some((tool) => tool.name === "bash")) {
+      return null;
+    }
+    if (typeof answer === "string" && ADMITS_UNCHECKED.test(answer)) {
+      return null;
+    }
+    // Que se le deje ejecutar algo que compruebe: un «git status» o un «ls» permitidos (los hay por defecto) no valen
+    const rules = permissionsFor(this.deps.config.permission, agent.permission).bash;
+    const allowed = !rules || typeof rules === "string" ? rules !== "deny" : Object.entries(rules).some(([pattern, action]) => action !== "deny" && !NOT_A_CHECK.test(pattern));
+    if (!allowed) {
+      return null;
+    }
+    asked.add(wanted.text);
+    return wanted;
   }
 
   // Detecta cuando el modelo repite la misma llamada una y otra vez
@@ -824,6 +967,7 @@ export class Agent {
         this.touched.clear();
         this.lastError = "";
         this.taskSlot = "";
+        this.checks.reset();
       }
       await this.loop(tools, signal);
     } finally {
@@ -843,6 +987,7 @@ export class Agent {
     const failures = new FailureTracker();
     let stuckNotes = 0;
     let nudges = 0;
+    const checksAsked = new Set<string>();
 
     for (let step = 0; step < maxSteps; step++) {
       // Entera si cabe; si no, un resumen de lo anterior y los últimos mensajes (el historial no se toca). Si contesta otro
@@ -861,12 +1006,26 @@ export class Agent {
         // Ha terminado anunciando algo («Voy a crear…») sin hacerlo: se le pide que lo haga (unas pocas veces)
         if (announcesAction(message.content) && nudges < ANNOUNCE_NUDGES && step + 1 < maxSteps && this.queue.length === 0) {
           nudges++;
+          this.stats.announced++;
+          if (nudges === ANNOUNCE_NUDGES) {
+            this.modelStuck(result.slot.key);
+          }
           this.events.onInfo?.("(el modelo ha anunciado algo sin hacerlo: le pido que siga)");
           this.session.messages.push({
             role: "user",
             content:
               "[Aviso de vipcode] Has terminado anunciando lo que vas a hacer, pero sin llamar a ninguna herramienta, así que no se ha hecho nada. Hazlo ya con las herramientas; o, si no puedes o no debes seguir, dilo claramente y termina.",
           });
+          saveSession(this.session);
+          continue;
+        }
+        // Ha cambiado código y da por terminado sin haberlo ejecutado, o con la comprobación fallando: se le pide (una vez cada
+        // cosa por mensaje tuyo) que lo haga o que diga claramente que no. La regla del prompt de sistema sola no basta
+        const nudge = step + 1 < maxSteps && this.queue.length === 0 ? this.checkNudge(agent, tools, message.content, checksAsked) : null;
+        if (nudge) {
+          this.stats.unchecked++;
+          this.events.onInfo?.(nudge.info);
+          this.session.messages.push({ role: "user", content: nudge.text });
           saveSession(this.session);
           continue;
         }
@@ -884,6 +1043,7 @@ export class Agent {
       if (lastError) {
         this.lastError = lastError;
       }
+      this.checks.note(outcomes);
       saveSession(this.session);
 
       if (signal?.aborted) {
@@ -897,17 +1057,21 @@ export class Agent {
           role: "user",
           content: `Has hecho la misma llamada a ${looping} tres veces seguidas con los mismos argumentos. No la repitas: cambia de enfoque o explica qué te bloquea.`,
         });
+        this.modelStuck(result.slot.key);
       }
 
       // La misma herramienta falla una y otra vez sobre lo mismo (aunque los argumentos cambien un poco): se le avisa; y
       // si sigue atascado después de varios avisos, se para para no gastar los pasos (y tu cupo) en nada
       const stuck = failures.add(outcomes);
-      if (stuck) {
+      // (si es la misma llamada repetida ya se le acaba de decir: un solo aviso)
+      if (stuck && !looping) {
         stuckNotes++;
+        this.modelStuck(result.slot.key);
         if (stuckNotes > STUCK_NOTES_LIMIT) {
           this.taskSlot = "";
+          this.stats.stopped++;
           this.events.onNotice?.(
-            `He parado: el modelo sigue fallando una y otra vez (${truncate(this.lastError, 200)}). Revisa el último error, cambia de modelo con /model o escribe "continúa" para que lo intente de nuevo.`,
+            `He parado: el modelo sigue atascado${this.lastError ? ` (${truncate(this.lastError, 200)})` : ""}. Cambia de modelo con /model, o escribe "continúa" para que lo intente de nuevo.`,
           );
           return;
         }
@@ -954,6 +1118,18 @@ export class Agent {
     }
     // Un agente de solo lectura no puede saltarse la norma lanzando un subagente que edite
     const agent: AgentDefinition = parent.readOnly ? { ...sub, readOnly: true } : sub;
+    const checks = new CheckTracker();
+    const report = await this.subagentLoop(agent, prompt, description, checks, signal);
+    this.checks.absorb(checks);
+    // Sin gastar otra petición: quien lo lanzó lo sabe y lo puede comprobar (y si no, se le pedirá a él)
+    if ((checks.pending || checks.failed) && this.deps.config.verifyCode !== false && !ADMITS_UNCHECKED.test(report)) {
+      const state = checks.pending ? "no ha ejecutado nada después: está sin comprobar" : "lo último que ha ejecutado para comprobarlo ha fallado";
+      return `${report}\n\n[vipcode: este subagente ha cambiado código y ${state}]`;
+    }
+    return report;
+  }
+
+  private async subagentLoop(agent: AgentDefinition, prompt: string, description: string, checks: CheckTracker, signal?: AbortSignal): Promise<string> {
     const tools = this.toolsFor(agent, 1);
     const ctx = this.toolContext(agent, signal, 1);
     const messages: Message[] = [{ role: "user", content: prompt }];
@@ -992,16 +1168,19 @@ export class Agent {
       }
       const outcomes = await this.runCalls(result.message.tool_calls, tools, ctx, agent, 1, messages, signal);
       this.noteOutcomes(outcomes, touched);
+      checks.note(outcomes);
       if (signal?.aborted) {
         return "Cancelado por el usuario.";
       }
       const looping = this.repeated(history, result.message.tool_calls);
       if (looping) {
         messages.push({ role: "user", content: `Has repetido la misma llamada a ${looping} tres veces. Cambia de enfoque o termina con lo que tengas.` });
+        this.modelStuck(result.slot.key);
       }
       const stuck = failures.add(outcomes);
-      if (stuck) {
+      if (stuck && !looping) {
         messages.push({ role: "user", content: stuck });
+        this.modelStuck(result.slot.key);
       }
     }
     this.repairHistory(messages);

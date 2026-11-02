@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Convierte una grabación asciicast v2 de vipcode en un SVG animado para el README: reproduce la grabación en un
 // emulador de terminal, toma los fotogramas y los apila; una animación CSS los va enseñando uno a uno
 import fs from "node:fs";

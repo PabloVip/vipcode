@@ -229,6 +229,14 @@ test("contexto: las lecturas viejas de un fichero que se volvió a leer no se ma
   assert.equal(supersededReads(once), once);
 });
 
+test("bash: si se acaba el tiempo, sugiere lanzarlo en segundo plano", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-bash-tiempo-"));
+  fs.writeFileSync(path.join(root, "espera.cjs"), "setInterval(() => {}, 1000);");
+  const result = await run(newCtx(root), "bash", { command: "node espera.cjs", timeout_ms: 500 });
+  assert.match(result.output, /Cancelado por tiempo.*background: true/);
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+});
+
 test("relevo y prompt: nota para el modelo que coge la tarea, comandos de vipcode, honestidad y la shell de Windows", async () => {
   const handed = withHandoff([{ role: "system", content: "base" }, { role: "user", content: "hola" }], "Ficheros: a.go");
   assert.match(handed[0].content, /^base\n\n# Relevo\n/);
@@ -350,7 +358,182 @@ test("anuncios: una frase final normal que empieza por «Ahora» no es un anunci
   for (const text of ["Ahora los tests pasan.", "Ahora las pruebas pasan correctamente.", "Ahora lo tienes listo.", "Now I have finished the task."]) {
     assert.equal(announcesAction(text), false, text);
   }
-  for (const text of ["Ahora lo arreglo.", "Ahora los reviso.", "Ahora reviso los tests.", "Voy a crear el fichero.", "Now I'll run it.", "Now I will run it."]) {
+  for (const text of ["Ahora lo arreglo.", "Ahora los reviso.", "Ahora reviso los tests.", "Voy a crear el fichero.", "Now I'll run it.", "Now I will run it.", "Let's start by reading the code.", "We can use read_file to see the bug."]) {
     assert.equal(announcesAction(text), true, text);
+  }
+});
+
+// Un programa que se queda en marcha, apunta su número de proceso y va escribiendo
+const SERVER = `
+const fs = require("node:fs");
+fs.writeFileSync("pid-" + process.argv[2] + ".txt", String(process.pid));
+console.log("listo ñ");
+let n = 0;
+setInterval(() => console.log("tick " + ++n), 100);
+`;
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function until(check, ms = 8000) {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > ms) {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return true;
+}
+
+test("segundo plano: arranca, se mira lo nuevo, se para con todo lo que lanzó y no le afecta Esc después", async () => {
+  const background = await import("../dist/background.js");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-bg-"));
+  fs.writeFileSync(path.join(root, "srv.cjs"), SERVER);
+  fs.writeFileSync(path.join(root, "falla.cjs"), 'console.log("me voy"); process.exit(3);');
+  fs.mkdirSync(path.join(root, "sub"));
+  fs.writeFileSync(path.join(root, "sub", "srv.cjs"), SERVER);
+  const requests = [];
+  const controller = new AbortController();
+  const ctx = { ...newCtx(root), signal: controller.signal, ask: async (request) => (requests.push(request), { allow: true }) };
+  const pidOf = (name) => Number(fs.readFileSync(path.join(root, name), "utf8"));
+  try {
+    // Pide permiso como cualquier otro comando, y se ve que va en segundo plano
+    let result = await run(ctx, "bash", { command: "node srv.cjs uno", background: true });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].kind, "bash");
+    assert.equal(requests[0].subject, "node srv.cjs uno");
+    assert.match(requests[0].preview, /en segundo plano/);
+    const id = /id (bg\d+)/.exec(result.output)[1];
+    // En un ordenador lento puede no haber escrito nada todavía
+    assert.ok(await until(() => fs.existsSync(path.join(root, "pid-uno.txt"))));
+    const pid = pidOf("pid-uno.txt");
+    assert.ok(alive(pid));
+    let written = result.output;
+    assert.ok(await until(() => background.findJob(id).buffer.includes("listo ñ")));
+    assert.equal(tools.describeCall("bash", JSON.stringify({ command: "node srv.cjs", background: true })), "(en segundo plano) node srv.cjs");
+
+    // output: solo lo nuevo, y con wait_ms espera a que escriba algo
+    result = await run(ctx, "background", { action: "output", id, wait_ms: 3000 });
+    written += result.output;
+    assert.match(written, /listo ñ/);
+    assert.match(result.output, /en marcha desde hace/);
+    assert.ok(await until(() => background.findJob(id).buffer.includes("tick")));
+    result = await run(ctx, "background", { action: "output", id, wait_ms: 3000 });
+    const first = Number(/tick (\d+)\s*$/.exec(result.output)[1]);
+    result = await run(ctx, "background", { action: "output", id, wait_ms: 3000 });
+    const ticks = [...result.output.matchAll(/tick (\d+)/g)].map((match) => Number(match[1]));
+    assert.ok(ticks.length > 0 && ticks[0] === first + 1, result.output);
+
+    // Sin id vale si solo hay uno; y un id que no es de vipcode no para nada
+    result = await run(ctx, "background", { action: "output" });
+    assert.match(result.output, new RegExp(id));
+    result = await run(ctx, "background", { action: "stop", id: String(process.pid) });
+    assert.ok(result.isError);
+    assert.match(result.output, /no encuentro/);
+    assert.ok(alive(process.pid));
+    result = await run(ctx, "background", { action: "sopla" });
+    assert.ok(result.isError);
+
+    // Esc una vez en marcha no lo para: para eso está en segundo plano
+    controller.abort();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.ok(alive(pid));
+    const quiet = { ...ctx, signal: undefined };
+
+    // Se para con lo que haya lanzado (aquí el proceso de node está por debajo de la shell)
+    result = await run(quiet, "background", { action: "stop", id });
+    assert.match(result.output, /parado/);
+    assert.ok(await until(() => !alive(pid)), "sigue en marcha después de pararlo");
+    result = await run(quiet, "background", { action: "list" });
+    assert.match(result.output, new RegExp(`${id}: parado`));
+
+    // Si termina enseguida se sabe ya, con su código y sin esperar más de la cuenta
+    result = await run(quiet, "bash", { command: "node falla.cjs", background: true });
+    // (en un ordenador muy lento puede no haberle dado tiempo: entonces se ve con «output»)
+    if (!/^En marcha/.test(result.output)) {
+      assert.match(result.output, /Código de salida: 3/);
+      assert.match(result.output, /me voy/);
+    }
+
+    // En otra carpeta: lo aprobado para una carpeta no vale en otra, igual que sin segundo plano
+    requests.length = 0;
+    result = await run(quiet, "bash", { command: "node srv.cjs dos", background: true, workdir: "sub" });
+    assert.equal(requests[0].workdir, "sub");
+    assert.match(requests[0].preview, /en sub/);
+    assert.ok(await until(() => fs.existsSync(path.join(root, "sub", "pid-dos.txt"))));
+    await background.stopAllJobs();
+    assert.ok(await until(() => !alive(Number(fs.readFileSync(path.join(root, "sub", "pid-dos.txt"), "utf8")))));
+
+    // Si le dices que no, no arranca
+    requests.length = 0;
+    result = await run({ ...quiet, ask: async () => ({ allow: false }) }, "bash", { command: "node srv.cjs tres", background: true });
+    assert.match(result.output, /ha rechazado/);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.ok(!fs.existsSync(path.join(root, "pid-tres.txt")));
+
+    // Esc mientras arranca sí lo cancela
+    const cancel = new AbortController();
+    const pending = run({ ...quiet, signal: cancel.signal }, "bash", { command: "node srv.cjs cuatro", background: true });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    cancel.abort();
+    result = await pending;
+    assert.match(result.output, /Cancelado/);
+    assert.equal(background.runningJobs().length, 0);
+    if (fs.existsSync(path.join(root, "pid-cuatro.txt"))) {
+      assert.ok(await until(() => !alive(pidOf("pid-cuatro.txt"))));
+    }
+
+    // Un modo de solo lectura no puede usarlo
+    result = await tools.runTool(tools.CORE_TOOLS, "background", JSON.stringify({ action: "stop", id }), quiet, true);
+    assert.match(result.output, /solo lectura/);
+  } finally {
+    await background.stopAllJobs();
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("segundo plano: hay un límite, no se queda sin memoria y dice lo que se ha perdido", async () => {
+  const background = await import("../dist/background.js");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-bg2-"));
+  fs.writeFileSync(path.join(root, "srv.cjs"), SERVER);
+  fs.writeFileSync(path.join(root, "mucho.cjs"), 'process.stdout.write("x".repeat(500000) + "\\nfinal\\n"); setInterval(() => {}, 1000);');
+  const ctx = newCtx(root);
+  try {
+    for (let i = 0; i < background.MAX_RUNNING; i++) {
+      await run(ctx, "bash", { command: `node srv.cjs n${i}`, background: true });
+    }
+    assert.equal(background.runningJobs().length, background.MAX_RUNNING);
+    const asked = [];
+    const result = await run({ ...ctx, ask: async (request) => (asked.push(request), { allow: true }) }, "bash", { command: "node srv.cjs otro", background: true });
+    assert.ok(result.isError);
+    assert.match(result.output, /ya hay 5 comandos/);
+    // Ni siquiera se pregunta: no se podría hacer
+    assert.equal(asked.length, 0);
+    await background.stopAllJobs();
+    assert.equal(background.runningJobs().length, 0);
+
+    // Escribe más de lo que se guarda: lo último se conserva, se dice cuánto se ha perdido y lo que le llega al modelo es corto
+    const start = await run(ctx, "bash", { command: "node mucho.cjs", background: true });
+    const id = /id (bg\d+)/.exec(start.output)[1];
+    assert.ok(start.output.length < 25000, String(start.output.length));
+    const job = background.findJob(id);
+    assert.ok(await until(() => job.buffer.includes("final"), 15000));
+    assert.ok(job.buffer.length <= 200000);
+    assert.equal(job.buffer.length + job.dropped, 500000 + "\nfinal\n".length);
+    const rest = await run(ctx, "background", { action: "output", id });
+    assert.ok(rest.output.length < 25000, String(rest.output.length));
+    const seen = `${start.output}${rest.output}`;
+    assert.match(seen, /caracteres perdidos/);
+    assert.match(seen, /final/);
+  } finally {
+    await background.stopAllJobs();
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

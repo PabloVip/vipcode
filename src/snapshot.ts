@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";

@@ -115,10 +115,11 @@ vipcode empieza por los mejores modelos gratis que tienes disponibles y va cambi
 - **Saturados.** Si un proveedor dice que el modelo está saturado (el famoso error 503), lo deja descansar un par de minutos y usa otro mientras tanto.
 - **Lentos.** Si un modelo no empieza a contestar en unos 40 segundos (60 en Gemini, que suele tardar más; algo más con conversaciones largas), prueba otro y se acuerda de que es lento para ponerlo detrás. Si ya ha empezado a contestar, se le espera.
 - **Proveedores caídos.** Si dos modelos distintos del mismo proveedor no responden en pocos minutos, lo que falla es el proveedor: lo pausa entero 5 minutos y sigue enseguida con otros, en vez de esperar a cada uno de sus modelos.
+- **Modelos que se atascan.** Si un modelo falla una y otra vez en lo mismo, repite la misma llamada, da vueltas buscando sin avanzar o solo anuncia lo que va a hacer, pasa detrás de los demás unas horas y otro coge la tarea, con una nota de lo que ya está hecho. Si lo has fijado con `/model`, se respeta lo que has elegido.
 - **Modelos que desaparecen.** Si un modelo ya no existe o no admite herramientas, lo descarta. Cada día añade solos los modelos gratis nuevos que publican los proveedores.
 - **Calidad.** Con una clave gratuita de [LLM Stats](https://llm-stats.com/developer) (`vipcode auth login llm-stats`) los ordena por su ranking, dando más peso a programar y a usar herramientas.
 
-`/models` enseña cada modelo con su estado (disponible, en pausa hasta…, lento), `/model <proveedor/modelo>` fija uno y `/model auto` vuelve a la rotación. En la [configuración](#configuración), `order` pone primero los que prefieras.
+`/models` enseña cada modelo con su estado (disponible, en pausa hasta…, lento, atascado), `/model <proveedor/modelo>` fija uno y `/model auto` vuelve a la rotación. En la [configuración](#configuración), `order` pone primero los que prefieras.
 
 ## Conversaciones largas
 
@@ -162,6 +163,7 @@ Otras opciones: `-s <id>` abre una conversación concreta, `-m <proveedor/modelo
 - **La rueda del ratón**, **AvPág** y **RePág** suben y bajan por la conversación; la caja de escribir se queda abajo. Al escribir vuelves al final. La barra de la derecha dice por dónde vas (también se puede pinchar y arrastrar), y **Ctrl+Inicio** y **Ctrl+Fin** llevan al principio y al final.
 - **Ctrl+F** busca en la conversación, sin distinguir mayúsculas ni tildes: Enter o ↑ va a la coincidencia anterior, ↓ a la siguiente y Esc cierra.
 - **Un clic en una herramienta** (la línea que dice qué ha hecho) despliega su salida entera, y otro clic la pliega. **Un clic en un enlace** lo abre en el navegador, y en un comando que sale en el texto (por ejemplo `/update`) lo deja escrito en la caja, listo para pulsar Enter. Un clic en «y más en CHANGELOG.md» enseña las novedades enteras, y en «↓ N líneas más» baja al final.
+- **Rutas**: un clic en la ruta de un fichero del proyecto la deja en la caja como `@ruta`, para preguntar por él. No abre nada: con un clic nunca se ejecuta lo que haya escrito un modelo.
 - **Copiar**: arrastra con el ratón sobre la conversación y, al soltar, lo seleccionado se copia solo al portapapeles. Doble clic copia una palabra (también una ruta o una dirección entera) y triple clic, la línea. `/copiar` copia la última respuesta y `/copiar código`, su último bloque de código. Para seleccionar como siempre lo hace la terminal (por ejemplo en la caja de escribir), mantén **Fn** (Terminal de macOS), **⌥** (iTerm2) o **Mayúsculas** (Windows y Linux) mientras arrastras.
 
 **Permisos.** Antes de editar un fichero, ejecutar un comando o salir a internet, vipcode te enseña el cambio o el comando y pregunta. Puedes contestar que sí una vez, que sí a todo lo de ese tipo durante la sesión, que sí siempre a ese comando (por ejemplo `npm test*`), que no, o que no y decirle qué hacer.
@@ -191,11 +193,12 @@ La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan grat
 | `/limites` | Cuánto te queda hoy de cada plan gratis |
 | `/copiar [código]` | Copia la última respuesta (o su último bloque de código) al portapapeles |
 | `/doctor` | Comprueba que todo funciona y dice cómo arreglar lo que falte |
-| `/bug [qué ha pasado]` | Avisa de un fallo: abre un issue en GitHub con el informe de `/doctor` ya puesto (sin tus claves) |
+| `/bug [qué ha pasado]` | Avisa de un fallo: abre un issue en GitHub con el informe de `/doctor` y las cuentas de `/usage` ya puestos (sin tus claves ni lo que hayas escrito) |
 | `/tutorial` | Aprende lo básico en 5 pasos, en una carpeta de prácticas |
 | `/interfaz` | Elige cómo se ve vipcode: pantalla completa, compacta, zen o criaturas |
-| `/usage` | Tokens usados |
-| `/mcp`, `/lsp` | Estado de los servidores MCP y de lenguaje |
+| `/usage` | Tokens usados y lo que ha pasado en la conversación: modelos, cambios de modelo, atascos y errores (solo cuentas) |
+| `/procesos [parar [id]]` | Lo que el agente ha dejado en segundo plano, como un servidor: verlo y pararlo |
+| `/mcp [login\|logout <servidor>]`, `/lsp` | Estado de los servidores MCP y de lenguaje; iniciar o cerrar sesión en los MCP que lo piden |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión |
 | `/reset-limits` | Olvidar las pausas guardadas de los proveedores |
 | `/update` | Actualizar vipcode |
@@ -250,11 +253,12 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 - **order**: modelos que van primero. **disabledProviders**: proveedores que no quieres usar.
 - **providers**: un servidor tuyo compatible con la API de OpenAI (o cambios en los modelos de uno del catálogo).
 - **permission**: `allow`, `ask` o `deny` para `edit`, `bash`, `webfetch` y `mcp`; en `bash` y `mcp` gana el patrón más concreto. Las reglas `deny` se respetan incluso con `--yolo`. Piénsatelo antes de poner `webfetch` en `allow`: un texto malicioso podría hacer que el modelo mande tus datos a una web sin preguntarte.
-- **mcp**: servidores MCP locales (`command`) o remotos (`url`); los que piden iniciar sesión con OAuth todavía no funcionan. Un servidor local no recibe tus variables de entorno (ni tus claves), solo lo imprescindible para arrancar: lo que necesite, ponlo en `environment`. Ahí y en `headers`, `{env:NOMBRE}` se cambia por esa variable tuya. Sus herramientas se llaman `servidor_herramienta`; si dos acaban con el mismo nombre, la segunda lleva `_2` detrás.
+- **mcp**: servidores MCP locales (`command`) o remotos (`url`); si uno remoto pide iniciar sesión, `/mcp` lo dice y `/mcp login <servidor>` la inicia en el navegador. La sesión se recuerda y se renueva sola, y vipcode nunca abre el navegador ni se registra en un servidor sin que lo pidas. Si un servidor no deja registrarse solo, crea tu aplicación en ese servicio y ponla en `"oauth": { "clientId": "…", "clientSecret": "{env:NOMBRE}", "scope": "…", "callbackPort": 3334 }`; con tu propia cabecera `Authorization` o con `"oauth": false`, vipcode no se mete. Un servidor local no recibe tus variables de entorno (ni tus claves), solo lo imprescindible para arrancar: lo que necesite, ponlo en `environment`. Ahí, en `headers` y en `oauth`, `{env:NOMBRE}` se cambia por esa variable tuya. Sus herramientas se llaman `servidor_herramienta`; si dos acaban con el mismo nombre, la segunda lleva `_2` detrás.
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
 - **interfaz**: la que eliges con `/interfaz` (`completa`, `compacta`, `zen` o `criaturas`). La clásica y la de alto contraste (y el `"fullscreen": false` de antes) ya no existen: si las tenías, vipcode te avisa una vez y usa la pantalla completa.
 - **firstResponseMs**: cuánto se espera a que una IA empiece a contestar antes de probar otra (40000, unos 40 s; algo más con conversaciones largas). A Gemini se le espera al menos 60 s, porque suele tardar más. No cuenta para los modelos de tu ordenador.
 - **stickyWaitMs**: si el modelo que lleva una tarea se queda sin cupo un rato corto (como mucho esto), vipcode le espera en vez de pasarle la tarea a medias a otro modelo (30000, 30 s; 0 para no esperar nunca). No cambia lo que se espera a un modelo lento en contestar: eso es **firstResponseMs**. Si al final cambia de modelo, el nuevo recibe una nota de relevo con los ficheros ya cambiados y las tareas pendientes.
+- **verifyCode**: si el modelo cambia código y termina sin haber ejecutado nada, o con la comprobación fallando, se le pide una vez que lo compruebe o lo arregle, o que diga claramente cómo ha quedado. `false` para no pedírselo.
 - **autoCompactTokens**: el máximo de tokens que se le manda a un modelo aunque admita más (90000). Por encima, le llega la [versión resumida](#conversaciones-largas).
 
 Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash), `VIPCODE_BROWSER` (otro navegador) y `VIPCODE_CLIPBOARD` (otro programa para copiar, que reciba el texto por su entrada).
@@ -334,7 +338,8 @@ Después de cada edición, le pasa al modelo los errores que encuentre el servid
 - **Ficheros e internet.** Solo lee, busca y escribe dentro de la carpeta del proyecto, y no puede leer ni cambiar tus claves ni su configuración. Antes de entrar en una dirección de tu ordenador o de tu red (tu router, `localhost`…) pregunta siempre, aunque tengas `webfetch` en `allow`.
 - **Tus claves.** Los servidores MCP y de lenguaje que arranca vipcode no reciben tus claves: si el paquete de uno estuviera comprometido, no podría llevárselas. «Sí siempre a este comando» tampoco vale si el comando escribe en un fichero (`>`) o lleva `$(…)`: eso se pregunta siempre.
 - **Resúmenes.** Los resúmenes de las conversaciones largas los escribe un modelo a partir de todo lo anterior (también de webs o de salidas de comandos), así que van marcados como contexto y no como instrucciones tuyas.
-- **Tus datos.** vipcode no envía datos de uso a nadie: solo habla con los proveedores de IA que uses, con las webs que consulte el agente, con tus servidores MCP, con LLM Stats si le das tu clave y, como mucho una vez por hora, con npm y GitHub para ver si hay versión nueva.
+- **Comandos en segundo plano.** Lo que el agente deja en marcha (un servidor, un «watch») se aprueba como cualquier otro comando, se ve en la barra de abajo y en `/procesos`, y se para al cerrar vipcode. Lo que hayas aprobado para una carpeta no vale en otra.
+- **Tus datos.** vipcode no envía datos de uso a nadie: las cuentas de `/usage` se quedan en tu ordenador y `/bug` solo las pone en el formulario que revisas y envías tú. Solo habla con los proveedores de IA que uses, con las webs que consulte el agente, con tus servidores MCP, con LLM Stats si le das tu clave y, como mucho una vez por hora, con npm y GitHub para ver si hay versión nueva.
 - **Planes gratuitos.** Los proveedores sin clave y varios planes gratis pueden guardar lo que les envías o usarlo para entrenar sus modelos. No mandes contraseñas ni código confidencial; para eso usa un modelo local (Ollama, LM Studio) y pon `"keyless": false` en la configuración.
 
 Si encuentras un fallo de seguridad, avísalo en privado como explica [SECURITY.md](SECURITY.md).

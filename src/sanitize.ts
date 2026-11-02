@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Lo que llega del modelo, de las herramientas o de los proveedores no puede mover el cursor, borrar la pantalla,
 // cambiar el portapapeles (OSC 52) ni disfrazar un comando en el diálogo de permiso
 

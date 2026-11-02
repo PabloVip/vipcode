@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import fs from "node:fs";
 import OpenAI from "openai";
 import type {
@@ -112,6 +114,8 @@ const PROVIDER_PAUSE_MS = 5 * 60 * 1000;
 const IDLE_MS = 120000;
 // Lo que tarda cada modelo en empezar a contestar se recuerda unas horas (luego se le da otra oportunidad)
 const SPEED_TTL_MS = 6 * 60 * 60 * 1000;
+// Un modelo que se ha atascado va detrás de los demás unas horas (luego se le da otra oportunidad)
+const STUCK_TTL_MS = 3 * 60 * 60 * 1000;
 
 // Lo que se espera a que empiece a contestar: lo del config y 1 s más por cada 2.000 tokens que tiene que leer más allá
 // de los primeros 2.000 (el prompt de sistema, que va siempre), sin pasar del máximo de siempre
@@ -389,6 +393,8 @@ interface RouterState {
   recent?: Record<string, number[]>;
   // Lo que suele tardar cada modelo en empezar a contestar
   speed?: Record<string, { ms: number; at: number }>;
+  // Modelos que se han atascado hace poco: cuántas veces y cuándo fue la última
+  stuck?: Record<string, { count: number; at: number }>;
   // Tokens que cuentan los proveedores por cada uno de los que calcula estimateTokens
   tokenFactor?: number;
 }
@@ -484,6 +490,8 @@ export class Router {
   recent: Record<string, number[]> = {};
   // Lo que suele tardar cada modelo en empezar a contestar (media en la que pesa más lo último)
   speed: Record<string, { ms: number; at: number }> = {};
+  // Los que se han atascado hace poco: el router aprende quién tarda, y con esto también quién trabaja mal
+  stuck: Record<string, { count: number; at: number }> = {};
   // Modelos de cada proveedor que no han respondido hace poco (cuándo y cuál), para ver si lo que falla es el proveedor
   private stalls: Record<string, { key: string; at: number }[]> = {};
   // Cuántos tokens cuentan de verdad los proveedores por cada uno de los que calculamos: estimateTokens va por caracteres
@@ -605,6 +613,7 @@ export class Router {
       this.limits = data.limits || {};
       this.recent = data.recent || {};
       this.speed = data.speed || {};
+      this.stuck = data.stuck || {};
       this.tokenFactor = typeof data.tokenFactor === "number" && Number.isFinite(data.tokenFactor) ? clampFactor(data.tokenFactor) : null;
     } catch {
       this.cooldowns = {};
@@ -640,6 +649,11 @@ export class Router {
         delete this.speed[key];
       }
     }
+    for (const [key, entry] of Object.entries(this.stuck)) {
+      if (now - entry.at > STUCK_TTL_MS) {
+        delete this.stuck[key];
+      }
+    }
     try {
       const state: RouterState = {
         cooldowns: this.cooldowns,
@@ -649,6 +663,7 @@ export class Router {
         limits: this.limits,
         recent: this.recent,
         speed: this.speed,
+        stuck: this.stuck,
         tokenFactor: this.tokenFactor ?? undefined,
       };
       writeFileAtomic(STATE_PATH, JSON.stringify(state, null, 2));
@@ -746,6 +761,22 @@ export class Router {
     return entry.ms;
   }
 
+  private isStuck(slot: Slot, now: number): boolean {
+    const entry = this.stuck[slot.key];
+    return Boolean(entry) && now - entry.at <= STUCK_TTL_MS;
+  }
+
+  // Este modelo se ha atascado (falla una y otra vez en lo mismo, repite la misma llamada o solo anuncia lo que va a hacer):
+  // pasa detrás de los demás unas horas, y el siguiente paso lo coge otro con la nota de relevo. Devuelve si cambia algo:
+  // con un solo modelo, o si lo has fijado con /model, sigue siendo el primero
+  noteStuck(key: string): boolean {
+    const old = this.stuck[key];
+    const fresh = old && Date.now() - old.at <= STUCK_TTL_MS;
+    this.stuck[key] = { count: (fresh ? old.count : 0) + 1, at: Date.now() };
+    this.saveState();
+    return this.slots.length > 1 && this.pinned !== key;
+  }
+
   private noteLimits(slot: Slot, headers: unknown) {
     const snapshot = readLimitHeaders(headers, slot.provider);
     if (snapshot) {
@@ -779,6 +810,9 @@ export class Router {
       if (slow) {
         status += ` (lento: ~${duration(slow)} en empezar a contestar)`;
       }
+      if (this.isStuck(slot, now)) {
+        status += " (se atascó hace poco: va detrás de los demás)";
+      }
       if (this.pinned === slot.key) {
         status += " (fijado)";
       }
@@ -801,6 +835,7 @@ export class Router {
   resetCooldowns() {
     this.cooldowns = {};
     this.unsupported = {};
+    this.stuck = {};
     this.skipped.clear();
     this.saveState();
   }
@@ -826,6 +861,9 @@ export class Router {
     // Los que suelen tardar mucho en empezar a contestar, detrás (sin cambiar el orden de los demás)
     const slow = list.filter((slot) => this.slowStart(slot, now) !== null);
     list = [...list.filter((slot) => !slow.includes(slot)), ...slow];
+    // Los que se han atascado hace poco, los últimos: uno lento acaba contestando; uno atascado, no
+    const stuck = list.filter((slot) => this.isStuck(slot, now));
+    list = [...list.filter((slot) => !stuck.includes(slot)), ...stuck];
     // El fijado con /model va el primero; detrás, el preferido del agente
     for (const pattern of [prefer, this.pinned]) {
       if (!pattern) {

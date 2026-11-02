@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";

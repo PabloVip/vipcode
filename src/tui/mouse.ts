@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Pablo Vicente Juan
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import sliceAnsi from "slice-ansi";
 import stringWidth from "string-width";
 import { stripControl } from "../sanitize.js";
@@ -150,6 +152,21 @@ export function urlAt(lines: string[], line: number, col: number, sources: strin
   const exact = sources.find((url) => url === prefix);
   const longer = sources.filter((url) => url.startsWith(prefix));
   return webUrl(exact || (longer.length === 1 ? longer[0] : prefix));
+}
+
+// La ruta que hay en esa columna («src/app.ts», «`src/app.ts:12`,»), si es de un fichero o una carpeta del proyecto («find» lo
+// dice y la devuelve desde la raíz). Un clic nunca abre un fichero que haya nombrado un modelo (abrirlo con el programa de tu
+// sistema podría ejecutarlo): se deja como @ruta en la caja, y lo envías tú si quieres
+export function pathAt(line: string, col: number, find: (file: string) => string | null): string | null {
+  const token = tokenAt(line, col)
+    .replace(/^[`'"(«\[<]+/, "")
+    .replace(/[`'"),.;:»\]>]+$/, "")
+    .replace(/:\d+(:\d+)?$/, "");
+  // Una palabra suelta puede ser cualquier cosa: tiene que tener pinta de ruta
+  if (!/[\\/]/.test(token) && !/\.\w+$/.test(token)) {
+    return null;
+  }
+  return find(token);
 }
 
 // El /comando que hay en esa columna, si es uno de los que existen («/update», «/connect»…)
