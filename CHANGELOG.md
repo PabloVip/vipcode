@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.3.6] - 2026-11-02
+
 ### Corregido
 
 - **Buscar ya funciona aunque haya carpetas sin permiso.** `grep` y `glob` fallaban enteros con `EPERM: operation not permitted, scandir …` en cuanto se topaban con una carpeta que no se podía leer (en Windows pasa en `AppData\Local\Temp` si abres vipcode en tu carpeta personal). Ahora esas carpetas se saltan, y `AppData`, `.venv` y `__pycache__` ya no se recorren.
@@ -325,7 +327,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.3.5...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/PabloVip/vipcode/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/PabloVip/vipcode/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/PabloVip/vipcode/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/PabloVip/vipcode/compare/v0.3.2...v0.3.3
