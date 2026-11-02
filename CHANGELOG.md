@@ -4,6 +4,38 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Corregido
+
+- **Buscar ya funciona aunque haya carpetas sin permiso.** `grep` y `glob` fallaban enteros con `EPERM: operation not permitted, scandir …` en cuanto se topaban con una carpeta que no se podía leer (en Windows pasa en `AppData\Local\Temp` si abres vipcode en tu carpeta personal). Ahora esas carpetas se saltan, y `AppData`, `.venv` y `__pycache__` ya no se recorren.
+- **`grep` busca donde se le dice.** No tenía `path`: si el modelo pedía buscar en una carpeta, se ignoraba y se buscaba en todo el proyecto. Ahora `path` vale para una carpeta o un fichero, y los resultados salen siempre con la ruta desde la raíz.
+- **PowerShell: sin CLIXML y sin tildes rotas.** Los errores llegaban como `#< CLIXML <Objs…_x000D__x000A_`, ilegibles para el modelo y para ti, y los errores de sintaxis salían con la página de códigos de la consola (`En l�nea`). Ahora los errores llegan en texto normal y en UTF-8, la sintaxis se comprueba antes de ejecutar y, si en Windows PowerShell 5.1 el comando lleva `&&` o `||`, se le dice al modelo cómo escribirlo.
+- **Los modelos escriben comandos de Windows PowerShell 5.1 de verdad.** El prompt dice ahora si es Windows PowerShell 5.1 o PowerShell 7 y qué no existe en la 5.1 (`&&`, `grep`, `tail`, `mkdir -p a/{b,c}`, `-MaxDepth`…).
+- **`edit_file` se atasca mucho menos.**
+  - Si el modelo copia el texto de `read_file` con los números de línea delante, se quitan.
+  - Si lo nuevo ya está justo donde iría el cambio, se le dice que no lo repita, en vez de darle un error.
+  - Si el texto no aparece, se le enseña el trozo del fichero que más se parece, con sus números de línea, para que lo copie bien sin otra llamada.
+  - Si no había leído el fichero (por ejemplo lo vio con `cat`) y es pequeño, el aviso trae el contenido y ya cuenta como leído.
+- **La cuenta `+N −M` de cada cambio es la de verdad.** Al crear un fichero salía siempre como mucho `+40`, porque se contaban las líneas de la vista previa.
+- **Los `.ps1` que escribe vipcode en Windows llevan BOM** si tienen tildes: Windows PowerShell 5.1 los leía como ANSI y salía `estÃ¡`.
+- **Un comando de varias líneas se ve por su primera línea**, no por otro argumento (salía `Ejecuta RutaVital-Pro` para un `python - <<EOF`).
+
+### Añadido
+
+- **`workdir` en `bash`:** para ejecutar un comando en una subcarpeta. Cada llamada empieza de nuevo en la raíz del proyecto (un `cd` no se conserva), y ahora el modelo lo sabe. Lo que hayas aprobado para la raíz no vale en otra carpeta: se pregunta aparte, y no se puede usar dentro de `.git`.
+- **Atascos:** si la misma herramienta falla tres veces sobre lo mismo (por ejemplo, editar el mismo fichero), se le pide al modelo que cambie de estrategia; si sigue atascado después de varios avisos, vipcode para y te dice el último error en vez de gastar los pasos (y tu cupo) en nada.
+- **Respuestas que se quedan en «Voy a…»:** si el modelo termina anunciando lo que va a hacer sin llamar a ninguna herramienta, se le pide que lo haga (como mucho dos veces por mensaje).
+- **Subagentes incompletos:** si un subagente acaba anunciando lo que iba a hacer o se queda sin pasos, su informe empieza por `[Subagente INCOMPLETO …]`, para que el agente principal no dé por hecha esa parte.
+- **Relevo entre modelos:** si a mitad de una tarea contesta otro modelo, recibe una nota con las tareas pendientes y los ficheros ya cambiados. Y si el modelo de la tarea solo se queda sin cupo un rato corto, se le espera (`stickyWaitMs`, 90 s por defecto) en vez de pasarle la tarea a medias a otro.
+- **Al llegar al máximo de pasos** se dice qué tareas quedan y cuál fue el último error.
+- **El modelo sabe qué es vipcode:** sus /comandos y sus agentes van en el prompt, así que ya no busca por el disco para averiguarlo. Si vipcode se abre en tu carpeta personal, se le avisa de que no es un proyecto.
+
+### Cambiado
+
+- **Menos contexto gastado:** las lecturas enteras de un fichero que se volvió a leer después ya no se mandan otra vez en cada paso (en una sesión, un mismo fichero se leyó 12 veces y todas viajaban en cada petición).
+- **Reglas de honestidad en el prompt:** no decir que algo compila o funciona sin haberlo ejecutado; no inventar checksums, `go.sum`, `package-lock.json` ni salidas de comandos; no clonar, descargar ni instalar nada sin pedirlo; marcar una tarea como completada solo después de comprobarla.
+- **Mensajes que escribes mientras trabaja:** se le pide que te conteste antes de seguir con la tarea.
+- Lo que se espera a que una IA empiece a contestar ya no crece por el prompt de sistema: solo cuentan los tokens que pasan de los primeros 2.000.
+
 ## [0.3.5] - 2026-10-31
 
 ### Corregido

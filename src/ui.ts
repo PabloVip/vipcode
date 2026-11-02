@@ -149,7 +149,8 @@ export function plainPermissionPrompt(getReadline: () => Interface | null, grant
     let pattern = "";
     if (request.kind === "bash") {
       pattern = suggestPattern(request.subject);
-      options = `[s]í / [n]o / [t]odo / [p] siempre «${pattern}» / [e] no y explicar`;
+      const where = request.workdir ? ` en ${showControl(request.workdir)}` : "";
+      options = `[s]í / [n]o / [t]odo / [p] siempre «${pattern}»${where} / [e] no y explicar`;
     }
     while (true) {
       let answer = "";
@@ -169,7 +170,7 @@ export function plainPermissionPrompt(getReadline: () => Interface | null, grant
         return { allow: true };
       }
       if (answer === "p" && pattern) {
-        grants().allowPattern("bash", pattern);
+        grants().allowPattern("bash", pattern, request.workdir);
         return { allow: true };
       }
       if (answer === "e") {

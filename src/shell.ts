@@ -160,6 +160,8 @@ export interface Shell {
   file: string;
   args(command: string): string[];
   env: Record<string, string>;
+  // Solo PowerShell: «windows» es Windows PowerShell 5.1 (powershell.exe), sin && ni ||; «core», PowerShell 7 (pwsh)
+  flavor?: "windows" | "core";
 }
 
 // El bash de Git para Windows. No vale el de C:\Windows\System32, que es el de WSL y trabaja en otro sistema de ficheros
@@ -184,25 +186,79 @@ function bash(file: string, name: string, login: boolean): Shell {
   return { name, file, args: (command) => [login ? "-lc" : "-c", command], env: { CHERE_INVOKING: "1" } };
 }
 
+// El script que se manda a PowerShell con el comando dentro. El comando va en una cadena y se comprueba su sintaxis antes
+// de ejecutarlo: así un error de sintaxis (por ejemplo un «&&» en Windows PowerShell 5.1) sale en UTF-8 y en claro, con una
+// pista, en vez de en la página de códigos de la consola («En l�nea»). Después se ejecuta en el mismo ámbito y con el
+// código de salida del último programa (o 1 si falló el último comando de PowerShell)
+export function powershellScript(command: string): string {
+  // En una cadena de comillas simples solo hay que doblarlas, incluidas las tipográficas, que para PowerShell son lo mismo.
+  // No va en base64 porque se codifica otra vez al mandarlo, y Windows no admite más de 32.767 caracteres
+  const source = command.replace(/['\u2018\u2019\u201a\u201b]/g, (quote) => quote + quote);
+  return [
+    "$ProgressPreference = 'SilentlyContinue'",
+    "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false",
+    "$OutputEncoding = [Console]::OutputEncoding",
+    // PowerShell 7 pinta los errores con colores de la terminal: aquí no los queremos
+    "if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }",
+    `$vipcodeSource = '${source}'`,
+    "$vipcodeTokens = $null",
+    "$vipcodeErrors = $null",
+    "[void][System.Management.Automation.Language.Parser]::ParseInput($vipcodeSource, [ref]$vipcodeTokens, [ref]$vipcodeErrors)",
+    "if ($vipcodeErrors) {",
+    "  foreach ($vipcodeError in $vipcodeErrors) { [Console]::Out.WriteLine(\"Error de sintaxis de PowerShell (línea $($vipcodeError.Extent.StartLineNumber)): $($vipcodeError.Message)\") }",
+    "  if ($PSVersionTable.PSVersion.Major -lt 7 -and $vipcodeSource -match '&&|\\|\\|') { [Console]::Out.WriteLine('Pista: esto es Windows PowerShell 5.1, que no tiene && ni ||. Separa los comandos con ; o usa: comando1; if ($?) { comando2 }') }",
+    "  exit 1",
+    "}",
+    "$global:vipcodeOk = $true",
+    ". ([ScriptBlock]::Create($vipcodeSource + \"`n`$global:vipcodeOk = `$?\"))",
+    "if ($LASTEXITCODE) { exit $LASTEXITCODE }",
+    "if (-not $global:vipcodeOk) { exit 1 }",
+  ].join("\n");
+}
+
 function powershell(file: string): Shell {
+  const flavor = path.basename(file).toLowerCase().startsWith("pwsh") ? "core" : "windows";
   return {
     name: "PowerShell",
     file,
-    // En UTF-8 (si no, las tildes salen rotas), sin barras de progreso y con el código de salida del último programa.
-    // Va codificado para que las comillas del comando lleguen tal cual
-    args: (command) => {
-      const script = [
-        "$ProgressPreference = 'SilentlyContinue'",
-        "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false",
-        command,
-        "$vipcodeOk = $?",
-        "if ($LASTEXITCODE) { exit $LASTEXITCODE }",
-        "if (-not $vipcodeOk) { exit 1 }",
-      ].join("\n");
-      return ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
-    },
+    flavor,
+    // -OutputFormat Text: sin él, con -EncodedCommand los errores salen en CLIXML («#< CLIXML <Objs…»), ilegibles para
+    // el modelo. Va codificado para que las comillas del comando lleguen tal cual
+    args: (command) => [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "RemoteSigned",
+      "-OutputFormat",
+      "Text",
+      "-EncodedCommand",
+      Buffer.from(powershellScript(command), "utf16le").toString("base64"),
+    ],
     env: {},
   };
+}
+
+// Por si algún PowerShell manda los errores en CLIXML de todos modos: el texto de los errores, decodificado
+export function decodeClixml(text: string): string {
+  if (!text.includes("#< CLIXML")) {
+    return text;
+  }
+  return text.replace(/#< CLIXML\s*(<Objs[\s\S]*?<\/Objs>)/g, (_, xml: string) => {
+    const parts: string[] = [];
+    for (const match of xml.matchAll(/<S S="(?:Error|Warning)">([\s\S]*?)<\/S>/g)) {
+      parts.push(
+        match[1]
+          .replace(/_x([0-9A-Fa-f]{4})_/g, (__, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"')
+          .replace(/&apos;/g, "'")
+          .replace(/&amp;/g, "&"),
+      );
+    }
+    // Sin códigos de color de la terminal
+    return parts.join("").replace(/\u001b\[[0-9;]*m/g, "").replace(/\r\n/g, "\n");
+  });
 }
 
 function cmd(file: string): Shell {

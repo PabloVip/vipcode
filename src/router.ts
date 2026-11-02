@@ -31,6 +31,13 @@ export interface ChatRequest {
   temperature?: number;
   // Modelo o patrón preferido para esta petición (por ejemplo el del agente)
   prefer?: string;
+  // El modelo que contestó el paso anterior de esta misma tarea y una nota de relevo: si contesta otro, la nota se añade
+  // al prompt de sistema para que siga lo que ya estaba decidido (nombres, enfoque, ficheros tocados)
+  previousSlot?: string;
+  handoff?: string;
+  // Si el modelo del paso anterior se queda sin cupo un rato corto (como mucho esto), se le espera en vez de cambiar de
+  // modelo a mitad de tarea (una vez por petición)
+  stickyWaitMs?: number;
 }
 
 export interface ChatHandlers {
@@ -106,10 +113,10 @@ const IDLE_MS = 120000;
 // Lo que tarda cada modelo en empezar a contestar se recuerda unas horas (luego se le da otra oportunidad)
 const SPEED_TTL_MS = 6 * 60 * 60 * 1000;
 
-// Lo que se espera a que empiece a contestar: lo del config y 1 s más por cada 2.000 tokens que tiene que leer, sin pasar
-// del máximo de siempre
+// Lo que se espera a que empiece a contestar: lo del config y 1 s más por cada 2.000 tokens que tiene que leer más allá
+// de los primeros 2.000 (el prompt de sistema, que va siempre), sin pasar del máximo de siempre
 export function firstResponseMs(base: number, tokens: number): number {
-  return Math.min(IDLE_MS, base + Math.round(tokens / 2000) * 1000);
+  return Math.min(IDLE_MS, base + Math.round(Math.max(0, tokens - 2000) / 2000) * 1000);
 }
 
 function duration(ms: number): string {
@@ -342,6 +349,15 @@ function classify(err: unknown): Classified {
 }
 
 // Cada proveedor quiere el historial un poco distinto
+// Los mensajes con la nota de relevo añadida al prompt de sistema (o como primer mensaje de sistema si no hay)
+export function withHandoff(messages: ChatCompletionMessageParam[], handoff: string): ChatCompletionMessageParam[] {
+  const note = `\n\n# Relevo\nOtro modelo llevaba esta tarea hasta ahora y tú la continúas desde aquí. Respeta lo que ya está decidido (nombres de paquetes, rutas, enfoque) salvo que veas un error claro, y no rehagas lo que ya está hecho.\n${handoff}`;
+  if (messages.length > 0 && messages[0].role === "system" && typeof messages[0].content === "string") {
+    return [{ ...messages[0], content: messages[0].content + note }, ...messages.slice(1)];
+  }
+  return [{ role: "system", content: note.trim() }, ...messages];
+}
+
 function prepareMessages(slot: Slot, messages: ChatCompletionMessageParam[]): ChatCompletionMessageParam[] {
   const gemini = slot.provider.baseURL.includes("generativelanguage.googleapis.com");
   return messages.map((message: any) => {
@@ -884,9 +900,12 @@ export class Router {
     let estTokens = estimateTokens(messages) + estimateTokens(request.tools || []);
     // Slots que han fallado en esta petición por motivos no permanentes (contexto, error raro)
     const excluded = new Set<string>();
+    // Si se espera al modelo del paso anterior, se le vuelve a preguntar a él primero
+    let stickTo: string | undefined;
+    let stickyUsed = false;
 
     while (true) {
-      const list = this.candidates(estTokens, excluded, needsVision, needsTools, request.prefer);
+      const list = this.candidates(estTokens, excluded, needsVision, needsTools, stickTo ?? request.prefer);
 
       if (list.length === 0) {
         const wait = this.soonestReturn(estTokens, excluded, needsVision, needsTools);
@@ -922,8 +941,14 @@ export class Router {
       handlers.onAttempt?.(slot.key);
       this.countRequest(slot);
 
+      // Cambio de modelo a mitad de tarea: el nuevo recibe la nota de relevo al final del prompt de sistema
+      let sent = messages;
+      if (request.handoff && request.previousSlot && request.previousSlot !== slot.key) {
+        sent = withHandoff(messages, request.handoff);
+      }
+
       try {
-        const result = await this.streamOnce(slot, { ...request, messages }, signal, {
+        const result = await this.streamOnce(slot, { ...request, messages: sent }, signal, {
           onText: (text) => {
             streamedText = true;
             handlers.onText?.(text);
@@ -965,6 +990,15 @@ export class Router {
             ms = 60000;
           }
           this.setCooldown(scope, now + ms);
+          // Es el modelo con el que iba la tarea y vuelve pronto: mejor esperarle que pasarle la tarea a medias a otro
+          if (request.stickyWaitMs && !stickyUsed && request.previousSlot === slot.key && ms <= request.stickyWaitMs) {
+            stickyUsed = true;
+            stickTo = slot.key;
+            this.saveState();
+            handlers.onNotice?.(`${slot.key}: ${info.detail} → espero ${Math.ceil(ms / 1000)} s para no cambiar de modelo a mitad de la tarea`);
+            await sleep(ms + 500, signal);
+            continue;
+          }
           action = `pausa ${Math.ceil(ms / 1000)} s`;
         } else if (info.kind === "daily") {
           let until = nextUtcMidnight();

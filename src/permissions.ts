@@ -17,6 +17,9 @@ export interface PermissionRequest {
   preview: string;
   // Lo que se compara con las reglas: el comando, la URL, la ruta o el nombre de la herramienta MCP
   subject: string;
+  // Solo bash: la carpeta donde se ejecuta, si no es la raíz. Lo aprobado para la raíz no vale aquí: «npm test» en otra
+  // carpeta ejecuta otro programa
+  workdir?: string;
 }
 
 export interface PermissionReply {
@@ -173,21 +176,21 @@ export function suggestPattern(command: string): string {
 // Permisos concedidos durante la sesión ("sí a todo", "siempre este comando")
 export class SessionGrants {
   private kinds = new Set<Permission>();
-  private patterns: { kind: Permission; pattern: string }[] = [];
+  private patterns: { kind: Permission; pattern: string; workdir?: string }[] = [];
 
   allowKind(kind: Permission) {
     this.kinds.add(kind);
   }
 
-  allowPattern(kind: Permission, pattern: string) {
-    this.patterns.push({ kind, pattern });
+  allowPattern(kind: Permission, pattern: string, workdir?: string) {
+    this.patterns.push({ kind, pattern, workdir });
   }
 
-  allows(kind: Permission, subject: string): boolean {
+  allows(kind: Permission, subject: string, workdir?: string): boolean {
     if (this.kinds.has(kind)) {
       return true;
     }
-    const patterns = this.patterns.filter((entry) => entry.kind === kind).map((entry) => entry.pattern);
+    const patterns = this.patterns.filter((entry) => entry.kind === kind && entry.workdir === workdir).map((entry) => entry.pattern);
     if (patterns.length === 0) {
       return false;
     }
@@ -245,7 +248,8 @@ export function createAsker(
     if (request.force) {
       return prompt(request);
     }
-    if (action === "allow" || grants.allows(request.kind, request.subject)) {
+    // Las reglas allow se piensan para la raíz del proyecto; en otra carpeta solo vale lo aprobado para esa carpeta
+    if ((action === "allow" && !request.workdir) || grants.allows(request.kind, request.subject, request.workdir)) {
       return { allow: true };
     }
     return prompt(request);

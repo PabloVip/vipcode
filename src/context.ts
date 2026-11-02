@@ -57,6 +57,54 @@ export function prunedCopy(messages: Message[]): Message[] {
   });
 }
 
+// Lecturas enteras de un fichero que se volvió a leer entero más adelante: el modelo ya tiene la versión nueva, así que la
+// vieja se deja en una línea. Los modelos releen mucho el mismo fichero (en una sesión, uno de 258 líneas 12 veces) y
+// cada copia se mandaba en todos los pasos siguientes. Las lecturas parciales (offset/limit) no se tocan. Mismos mensajes
+// en el mismo orden; el original no se toca
+export const SUPERSEDED_MARK = "[lectura antigua: más abajo hay una lectura más reciente de este fichero]";
+
+export function supersededReads(messages: Message[]): Message[] {
+  const fullReads: { id: string; path: string }[] = [];
+  for (const message of messages as any[]) {
+    if (message.role !== "assistant" || !Array.isArray(message.tool_calls)) {
+      continue;
+    }
+    for (const call of message.tool_calls) {
+      if (call?.function?.name !== "read_file") {
+        continue;
+      }
+      try {
+        const args = JSON.parse(call.function.arguments || "{}");
+        if (args && typeof args.path === "string" && !args.offset && !args.limit) {
+          fullReads.push({ id: call.id, path: args.path.replace(/\\/g, "/").replace(/^\.\//, "") });
+        }
+      } catch {
+        // argumentos rotos: esa llamada no cuenta
+      }
+    }
+  }
+  const latest = new Map<string, string>();
+  for (const read of fullReads) {
+    latest.set(read.path, read.id);
+  }
+  const old = new Map<string, string>();
+  for (const read of fullReads) {
+    if (latest.get(read.path) !== read.id) {
+      old.set(read.id, read.path);
+    }
+  }
+  if (old.size === 0) {
+    return messages;
+  }
+  return messages.map((message: any) => {
+    const file = message.role === "tool" ? old.get(message.tool_call_id) : undefined;
+    if (file === undefined || typeof message.content !== "string" || message.content.length <= 300) {
+      return message;
+    }
+    return { ...message, content: `${SUPERSEDED_MARK} (${file})` } as Message;
+  });
+}
+
 // El texto de un mensaje (las imágenes, como un aviso)
 export function plainText(content: unknown): string {
   if (typeof content === "string") {

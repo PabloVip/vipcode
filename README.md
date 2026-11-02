@@ -254,6 +254,7 @@ La tuya está en `~/.vipcode/config.json`, y un proyecto puede traer la suya en 
 - **keyless**: `false` para no usar nunca los proveedores sin clave. **checkUpdates**: `false` para no buscar versiones nuevas.
 - **interfaz**: la que eliges con `/interfaz` (`completa`, `compacta`, `zen` o `criaturas`). La clásica y la de alto contraste (y el `"fullscreen": false` de antes) ya no existen: si las tenías, vipcode te avisa una vez y usa la pantalla completa.
 - **firstResponseMs**: cuánto se espera a que una IA empiece a contestar antes de probar otra (40000, unos 40 s; algo más con conversaciones largas). A Gemini se le espera al menos 60 s, porque suele tardar más. No cuenta para los modelos de tu ordenador.
+- **stickyWaitMs**: si el modelo que lleva una tarea se queda sin cupo un rato corto (como mucho esto), vipcode le espera en vez de pasarle la tarea a medias a otro modelo (90000, 90 s; 0 para no esperar nunca). Si al final cambia de modelo, el nuevo recibe una nota de relevo con los ficheros ya cambiados y las tareas pendientes.
 - **autoCompactTokens**: el máximo de tokens que se le manda a un modelo aunque admita más (90000). Por encima, le llega la [versión resumida](#conversaciones-largas).
 
 Variables de entorno: `VIPCODE_HOME` (otra carpeta en lugar de `~/.vipcode`), `VIPCODE_SHELL` (otra shell para los comandos: `pwsh`, `powershell`, `cmd` o un bash), `VIPCODE_BROWSER` (otro navegador) y `VIPCODE_CLIPBOARD` (otro programa para copiar, que reciba el texto por su entrada).

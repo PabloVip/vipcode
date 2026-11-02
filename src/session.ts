@@ -27,7 +27,7 @@ export interface LogEntry {
   // assistant: modelo que contestó
   model?: string;
   // tool: herramienta, resumen de la llamada, si falló y el diff que enseñó
-  tool?: { name: string; summary: string; isError: boolean; display?: string };
+  tool?: { name: string; summary: string; isError: boolean; display?: string; stats?: { added: number; removed: number } };
   // user: imágenes que adjuntaste
   images?: number;
 }

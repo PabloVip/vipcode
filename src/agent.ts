@@ -16,6 +16,7 @@ import {
   planView,
   prunedCopy,
   summaryMessage,
+  supersededReads,
   todoText,
   transcript,
   validSummary,
@@ -57,6 +58,8 @@ export interface ToolEvent {
 export interface ToolEndEvent extends ToolEvent {
   output: string;
   display?: string;
+  // Líneas añadidas y quitadas de verdad (el diff de «display» puede ir recortado)
+  stats?: { added: number; removed: number };
   isError: boolean;
 }
 
@@ -115,6 +118,86 @@ const COMPACT_SUMMARY_TOKENS = 1200;
 
 type Message = ChatCompletionMessageParam;
 
+// Lo que pasó con cada herramienta de un paso (para detectar atascos y para la nota de relevo)
+interface CallOutcome {
+  name: string;
+  // A qué se aplicaba: el fichero, el patrón o el comando
+  target: string;
+  isError: boolean;
+  output: string;
+}
+
+// Veces que puede fallar la misma herramienta sobre lo mismo antes de pedirle al modelo que cambie de estrategia, y
+// avisos de esos que se le dan en un mismo mensaje tuyo antes de parar
+const FAILURE_LIMIT = 3;
+const STUCK_NOTES_LIMIT = 3;
+// Veces que se le pide que haga lo que ha anunciado sin hacerlo (en un mismo mensaje tuyo)
+const ANNOUNCE_NUDGES = 2;
+
+// A qué se aplica una llamada, para saber si falla una y otra vez con lo mismo
+function callTarget(name: string, rawArgs: string): string {
+  try {
+    const args = JSON.parse(rawArgs);
+    const value = args?.path ?? args?.pattern ?? args?.command ?? args?.url ?? args?.query ?? "";
+    return String(value).replace(/\s+/g, " ").trim().slice(0, 100);
+  } catch {
+    return "";
+  }
+}
+
+// Una respuesta final que termina anunciando lo que va a hacer («Voy a crear…», «Ahora reviso…») sin llamar a ninguna
+// herramienta: el modelo cree que sigue trabajando pero el turno se acabaría ahí. No cuenta si pregunta u ofrece algo
+export function announcesAction(text: string | null | undefined): boolean {
+  const clean = (text || "").trim();
+  if (clean === "") {
+    return false;
+  }
+  const sentences = clean
+    .split(/(?<=[.!?…:])\s+|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  const last = (sentences[sentences.length - 1] || "").replace(/^[-*•>#\s]+/, "").replace(/^\*\*/, "");
+  if (/[?¿]/.test(last) || /\b(si quieres|si prefieres|quieres que|te parece|av[ií]same|dime si|if you want|let me know|would you like)\b/i.test(last)) {
+    return false;
+  }
+  return /^(voy a|ahora ((lo|la|los|las) )?(voy|vamos|creo|hago|ejecuto|arreglo|reviso|compruebo|actualizo|añado|corrijo|paso|edito|escribo|instalo|lanzo|construyo)|a continuaci[oó]n|procedo a|vamos a|empiezo (por|con)|primero (voy|creo|reviso|compruebo)|i will|i'll|let me|now i('ll| will)|next,? i)\b/i.test(last);
+}
+
+// Cuenta los fallos de cada herramienta sobre lo mismo (un edit_file al mismo fichero, una búsqueda en la misma carpeta…).
+// Un acierto sobre eso mismo pone la cuenta a cero
+class FailureTracker {
+  private counts = new Map<string, number>();
+
+  // Devuelve el aviso para el modelo si algo ha llegado al límite de fallos
+  add(outcomes: CallOutcome[]): string | null {
+    const notes: string[] = [];
+    for (const outcome of outcomes) {
+      const key = `${outcome.name}\u0000${outcome.target}`;
+      if (!outcome.isError) {
+        this.counts.delete(key);
+        continue;
+      }
+      const count = (this.counts.get(key) || 0) + 1;
+      if (count < FAILURE_LIMIT) {
+        this.counts.set(key, count);
+        continue;
+      }
+      this.counts.delete(key);
+      let advice = "Cambia de estrategia o explica qué te bloquea.";
+      if (outcome.name === "edit_file") {
+        advice = `Deja de intentar editarlo a trozos: léelo entero con read_file y reescríbelo con write_file, o explica qué te bloquea.`;
+      } else if (outcome.name === "bash") {
+        advice = "No lo repitas igual: revisa la sintaxis de la shell (está en el prompt de sistema), prueba otro comando o explica qué te bloquea.";
+      }
+      notes.push(`${outcome.name} sobre «${outcome.target || "lo mismo"}» ha fallado ${FAILURE_LIMIT} veces (el error está en su último resultado). ${advice}`);
+    }
+    if (notes.length === 0) {
+      return null;
+    }
+    return `[Aviso de vipcode] Estás atascado:\n${notes.map((note) => `- ${note}`).join("\n")}`;
+  }
+}
+
 export class Agent {
   agent: AgentDefinition;
   events: AgentEvents = {};
@@ -130,6 +213,11 @@ export class Agent {
   private pendingNote = "";
   // La última vista resumida de la que se avisó (modelo y desde dónde va la cola), para no repetir el aviso en cada paso
   private viewNotice = "";
+  // De la tarea en marcha (un mensaje tuyo): ficheros cambiados y el último error, para la nota de relevo si cambia el
+  // modelo, y el modelo que contestó el último paso
+  private touched = new Set<string>();
+  private lastError = "";
+  private taskSlot = "";
 
   constructor(
     private deps: AgentDeps,
@@ -169,6 +257,9 @@ export class Agent {
     this.pendingNote = "";
     this.viewNotice = "";
     this.lastTokens = 0;
+    this.touched.clear();
+    this.lastError = "";
+    this.taskSlot = "";
   }
 
   // Herramientas de un agente: las propias, task (si hay subagentes) y las de MCP, con sus filtros
@@ -205,6 +296,7 @@ export class Agent {
         toolNames: tools.map((tool) => tool.name),
         instructions: this.deps.config.instructions || [],
         subagent: depth > 0,
+        agentNames: this.deps.agents.map((one) => one.name),
       }),
     };
   }
@@ -285,10 +377,12 @@ export class Agent {
       const tokens = fixed + estimateTokens(list);
       return options.some((option) => option.waitMs <= this.deps.config.maxWaitMs && this.usable(option.context) >= tokens);
     };
-    if (fits(messages)) {
-      return [system, ...messages];
+    // Las lecturas de un fichero que se volvió a leer después no se mandan otra vez
+    const current = supersededReads(messages);
+    if (fits(current)) {
+      return [system, ...current];
     }
-    const trimmed = prunedCopy(messages);
+    const trimmed = prunedCopy(current);
     if (fits(trimmed)) {
       return [system, ...trimmed];
     }
@@ -436,16 +530,42 @@ export class Agent {
     return truncate(previous ? `${previous}\n\n${added}` : added, maxChars);
   }
 
+  // Lo que necesita saber un modelo que coge la tarea a medias: tareas pendientes y ficheros ya cambiados. Va en el prompt
+  // de sistema, así que nada de la salida de las herramientas (viene de fuera y podría traer instrucciones): el último
+  // error lo tiene en el historial
+  private handoffNote(depth: number, touched: Set<string>): string {
+    const parts: string[] = [];
+    if (depth === 0) {
+      const todos = todoText(this.session.todos);
+      if (todos) {
+        parts.push(todos);
+      }
+    }
+    if (touched.size > 0) {
+      parts.push(`Ficheros que ya se han creado o cambiado en esta tarea: ${[...touched].slice(-30).join(", ")}.`);
+    }
+    parts.push("Antes de seguir, mira los últimos mensajes de la conversación para ver en qué punto está y si falló algo.");
+    return parts.join("\n");
+  }
+
   // Prepara lo que se manda y pregunta. Si el modelo para el que se preparó una vista falla y solo quedan otros más
-  // pequeños, se vuelve a preparar para ellos (unas pocas veces)
-  private async ask(messages: Message[], tools: Tool[], agent: AgentDefinition, signal: AbortSignal | undefined, depth: number, holder: SummaryHolder): Promise<ChatResult> {
+  // pequeños, se vuelve a preparar para ellos (unas pocas veces). «relay»: el modelo del paso anterior y la nota de relevo
+  private async ask(
+    messages: Message[],
+    tools: Tool[],
+    agent: AgentDefinition,
+    signal: AbortSignal | undefined,
+    depth: number,
+    holder: SummaryHolder,
+    relay: { previousSlot?: string; handoff?: string } = {},
+  ): Promise<ChatResult> {
     const toolDefs = toolDefinitions(tools);
     const todos = depth === 0 ? todoText(this.session.todos) : "";
     for (let attempt = 0; ; attempt++) {
       const before = this.deps.router.maxContext(toolDefs.length > 0);
       const prepared = await this.prepare(this.systemFor(agent, tools, depth), messages, toolDefs, holder, todos, signal);
       try {
-        return await this.step(prepared, tools, agent, signal, depth);
+        return await this.step(prepared, tools, agent, signal, depth, relay);
       } catch (err) {
         const after = this.deps.router.maxContext(toolDefs.length > 0);
         if (err instanceof NoSlotError && attempt < 2 && after > 0 && after < before) {
@@ -531,10 +651,29 @@ export class Agent {
   }
 
   // Una llamada al modelo, con el texto y el razonamiento en directo
-  private async step(messages: Message[], tools: Tool[], agent: AgentDefinition, signal: AbortSignal | undefined, depth: number): Promise<ChatResult> {
+  private async step(
+    messages: Message[],
+    tools: Tool[],
+    agent: AgentDefinition,
+    signal: AbortSignal | undefined,
+    depth: number,
+    relay: { previousSlot?: string; handoff?: string } = {},
+  ): Promise<ChatResult> {
     let printedText = false;
+    let stickyWaitMs = 0;
+    if (relay.previousSlot) {
+      stickyWaitMs = this.deps.config.stickyWaitMs ?? 90000;
+    }
     const result = await this.deps.router.chat(
-      { messages, tools: toolDefinitions(tools), temperature: agent.temperature, prefer: agent.model },
+      {
+        messages,
+        tools: toolDefinitions(tools),
+        temperature: agent.temperature,
+        prefer: agent.model,
+        previousSlot: relay.previousSlot,
+        handoff: relay.handoff,
+        stickyWaitMs,
+      },
       signal,
       {
         onText: (chunk) => {
@@ -574,20 +713,28 @@ export class Agent {
     depth: number,
     messages: Message[],
     signal?: AbortSignal,
-  ) {
+  ): Promise<CallOutcome[]> {
     const images: string[] = [];
+    const outcomes: CallOutcome[] = [];
     const runOne = async (call: ChatCompletionMessageFunctionToolCall) => {
       const name = call.function.name;
       const args = call.function.arguments;
       const event: ToolEvent = { id: call.id, name, summary: describeCall(name, args), depth, agent: agent.name };
       this.events.onToolStart?.(event);
       const result = await runTool(tools, name, args, { ...ctx, onProgress: (text) => this.events.onToolProgress?.(event, text) }, agent.readOnly);
-      this.events.onToolEnd?.({ ...event, output: result.output, display: result.display, isError: Boolean(result.isError) });
+      this.events.onToolEnd?.({ ...event, output: result.output, display: result.display, stats: result.stats, isError: Boolean(result.isError) });
+      outcomes.push({ name, target: callTarget(name, args), isError: Boolean(result.isError), output: result.output });
       if (depth === 0) {
         this.logEntry({
           role: "tool",
           text: truncate(result.output, 4000),
-          tool: { name, summary: event.summary, isError: Boolean(result.isError), display: result.display ? truncate(result.display, 4000) : undefined },
+          tool: {
+            name,
+            summary: event.summary,
+            isError: Boolean(result.isError),
+            display: result.display ? truncate(result.display, 4000) : undefined,
+            stats: result.stats,
+          },
         });
       }
       if (result.images) {
@@ -621,6 +768,20 @@ export class Agent {
         content: [{ type: "text", text: "Imágenes devueltas por las herramientas:" }, ...images.map((url) => ({ type: "image_url" as const, image_url: { url } }))],
       });
     }
+    return outcomes;
+  }
+
+  // Apunta lo que han hecho las herramientas de un paso: ficheros cambiados y el último error
+  private noteOutcomes(outcomes: CallOutcome[], touched: Set<string>): string {
+    let lastError = "";
+    for (const outcome of outcomes) {
+      if (outcome.isError) {
+        lastError = `${outcome.name} (${outcome.target}): ${outcome.output.split("\n").slice(0, 3).join(" ")}`;
+      } else if ((outcome.name === "write_file" || outcome.name === "edit_file") && outcome.target) {
+        touched.add(outcome.target);
+      }
+    }
+    return lastError;
   }
 
   // Detecta cuando el modelo repite la misma llamada una y otra vez
@@ -658,6 +819,12 @@ export class Agent {
       this.logEntry({ role: "user", text: input.display ?? input.text, images: input.images?.length || undefined });
       saveSession(this.session);
 
+      // Un «continúa» sigue la misma tarea: se conserva lo apuntado; un mensaje nuevo empieza de cero
+      if (!/^\s*(contin[uú]a|sigue|continue|go on)\b/i.test(input.text)) {
+        this.touched.clear();
+        this.lastError = "";
+        this.taskSlot = "";
+      }
       await this.loop(tools, signal);
     } finally {
       if (turn && this.deps.snapshots) {
@@ -673,10 +840,16 @@ export class Agent {
     const maxSteps = agent.maxSteps || this.deps.config.maxSteps;
     const ctx = this.toolContext(agent, signal, 0);
     const history: string[] = [];
+    const failures = new FailureTracker();
+    let stuckNotes = 0;
+    let nudges = 0;
 
     for (let step = 0; step < maxSteps; step++) {
-      // Entera si cabe; si no, un resumen de lo anterior y los últimos mensajes (el historial no se toca)
-      const result = await this.ask(this.session.messages, tools, agent, signal, 0, this.session);
+      // Entera si cabe; si no, un resumen de lo anterior y los últimos mensajes (el historial no se toca). Si contesta otro
+      // modelo que el del paso anterior, recibe la nota de relevo
+      const relay = this.taskSlot ? { previousSlot: this.taskSlot, handoff: this.handoffNote(0, this.touched) } : {};
+      const result = await this.ask(this.session.messages, tools, agent, signal, 0, this.session, relay);
+      this.taskSlot = result.slot.key;
       const message = result.message;
       this.session.messages.push(message as Message);
       if (typeof message.content === "string" && message.content.trim() !== "") {
@@ -685,6 +858,19 @@ export class Agent {
       saveSession(this.session);
 
       if (!message.tool_calls || message.tool_calls.length === 0) {
+        // Ha terminado anunciando algo («Voy a crear…») sin hacerlo: se le pide que lo haga (unas pocas veces)
+        if (announcesAction(message.content) && nudges < ANNOUNCE_NUDGES && step + 1 < maxSteps && this.queue.length === 0) {
+          nudges++;
+          this.events.onInfo?.("(el modelo ha anunciado algo sin hacerlo: le pido que siga)");
+          this.session.messages.push({
+            role: "user",
+            content:
+              "[Aviso de vipcode] Has terminado anunciando lo que vas a hacer, pero sin llamar a ninguna herramienta, así que no se ha hecho nada. Hazlo ya con las herramientas; o, si no puedes o no debes seguir, dilo claramente y termina.",
+          });
+          saveSession(this.session);
+          continue;
+        }
+        this.taskSlot = "";
         if (this.events.onAnswer) {
           this.events.onAnswer(result.slot.key);
         } else {
@@ -693,10 +879,15 @@ export class Agent {
         return;
       }
 
-      await this.runCalls(message.tool_calls, tools, ctx, agent, 0, this.session.messages, signal);
+      const outcomes = await this.runCalls(message.tool_calls, tools, ctx, agent, 0, this.session.messages, signal);
+      const lastError = this.noteOutcomes(outcomes, this.touched);
+      if (lastError) {
+        this.lastError = lastError;
+      }
       saveSession(this.session);
 
       if (signal?.aborted) {
+        this.taskSlot = "";
         return;
       }
 
@@ -708,10 +899,30 @@ export class Agent {
         });
       }
 
-      // Lo que hayas escrito mientras trabajaba se le entrega ahora
+      // La misma herramienta falla una y otra vez sobre lo mismo (aunque los argumentos cambien un poco): se le avisa; y
+      // si sigue atascado después de varios avisos, se para para no gastar los pasos (y tu cupo) en nada
+      const stuck = failures.add(outcomes);
+      if (stuck) {
+        stuckNotes++;
+        if (stuckNotes > STUCK_NOTES_LIMIT) {
+          this.taskSlot = "";
+          this.events.onNotice?.(
+            `He parado: el modelo sigue fallando una y otra vez (${truncate(this.lastError, 200)}). Revisa el último error, cambia de modelo con /model o escribe "continúa" para que lo intente de nuevo.`,
+          );
+          return;
+        }
+        this.session.messages.push({ role: "user", content: stuck });
+      }
+
+      // Lo que hayas escrito mientras trabajaba se le entrega ahora, y tiene que contestarlo antes de seguir
       if (this.queue.length > 0) {
         for (const queued of this.queue.splice(0)) {
-          this.session.messages.push(this.buildUserMessage({ text: `[Mensaje nuevo del usuario mientras trabajabas] ${queued.text}`, images: queued.images }));
+          this.session.messages.push(
+            this.buildUserMessage({
+              text: `[Mensaje nuevo del usuario mientras trabajabas: contéstale en tu próxima respuesta antes de seguir con la tarea] ${queued.text}`,
+              images: queued.images,
+            }),
+          );
           this.logEntry({ role: "user", text: queued.text, images: queued.images?.length || undefined });
         }
         this.events.onInfo?.("(mensaje entregado al agente)");
@@ -719,7 +930,17 @@ export class Agent {
       }
     }
 
-    this.events.onNotice?.(`Se alcanzó el máximo de ${maxSteps} pasos. Escribe "continúa" para seguir.`);
+    // Se acabaron los pasos: lo que queda pendiente, para que «continúa» sepa por dónde seguir y tú también
+    const pending = this.session.todos.filter((todo) => todo.status === "pending" || todo.status === "in_progress");
+    const parts = [`Se alcanzó el máximo de ${maxSteps} pasos.`];
+    if (pending.length > 0) {
+      parts.push(`Quedan ${pending.length} tareas: ${pending.map((todo) => todo.content).slice(0, 5).join("; ")}${pending.length > 5 ? "…" : ""}.`);
+    }
+    if (this.lastError) {
+      parts.push(`Último error: ${truncate(this.lastError, 200)}`);
+    }
+    parts.push('Escribe "continúa" para seguir.');
+    this.events.onNotice?.(parts.join(" "));
   }
 
   // Un subagente trabaja con su propio historial y devuelve solo su informe final
@@ -742,13 +963,35 @@ export class Agent {
     const holder: SummaryHolder = {};
     this.events.onInfo?.(`  ↳ ${agent.name}: ${description}`);
 
+    const failures = new FailureTracker();
+    const touched = new Set<string>();
+    let previousSlot = "";
+    let nudged = false;
+
     for (let step = 0; step < maxSteps; step++) {
-      const result = await this.ask(messages, tools, agent, signal, 1, holder);
+      const relay = previousSlot ? { previousSlot, handoff: this.handoffNote(1, touched) } : {};
+      const result = await this.ask(messages, tools, agent, signal, 1, holder, relay);
+      previousSlot = result.slot.key;
       messages.push(result.message as Message);
       if (!result.message.tool_calls || result.message.tool_calls.length === 0) {
-        return result.message.content || "(el subagente no devolvió ningún texto)";
+        // Un subagente que acaba anunciando lo que va a hacer no ha terminado: se le pide una vez que lo haga
+        if (announcesAction(result.message.content) && !nudged && step + 1 < maxSteps) {
+          nudged = true;
+          messages.push({
+            role: "user",
+            content: "[Aviso de vipcode] Has terminado anunciando lo que vas a hacer sin hacerlo. Hazlo ya con las herramientas y después escribe tu informe final.",
+          });
+          continue;
+        }
+        const report = result.message.content || "(el subagente no devolvió ningún texto)";
+        // Si aun así solo anuncia, quien lo lanzó tiene que saber que no está hecho
+        if (announcesAction(result.message.content)) {
+          return `[Subagente INCOMPLETO: terminó anunciando lo que iba a hacer, sin hacerlo]\n${report}`;
+        }
+        return report;
       }
-      await this.runCalls(result.message.tool_calls, tools, ctx, agent, 1, messages, signal);
+      const outcomes = await this.runCalls(result.message.tool_calls, tools, ctx, agent, 1, messages, signal);
+      this.noteOutcomes(outcomes, touched);
       if (signal?.aborted) {
         return "Cancelado por el usuario.";
       }
@@ -756,15 +999,19 @@ export class Agent {
       if (looping) {
         messages.push({ role: "user", content: `Has repetido la misma llamada a ${looping} tres veces. Cambia de enfoque o termina con lo que tengas.` });
       }
+      const stuck = failures.add(outcomes);
+      if (stuck) {
+        messages.push({ role: "user", content: stuck });
+      }
     }
     this.repairHistory(messages);
-    const last: Message[] = [...messages, { role: "user", content: "Se acabaron los pasos. Escribe ya tu informe final con lo que hayas averiguado o hecho." }];
+    const last: Message[] = [...messages, { role: "user", content: "Se acabaron los pasos. Escribe ya tu informe final con lo que hayas averiguado o hecho, y di claramente qué ha quedado sin hacer." }];
     const final = await this.deps.router.chat(
       { messages: await this.prepare(this.systemFor(agent, tools, 1), last, [], holder, "", signal) },
       signal,
       { onNotice: (notice) => this.events.onNotice?.(notice) },
     );
-    return final.message.content || "(el subagente no devolvió ningún informe)";
+    return `[Subagente INCOMPLETO: se le acabaron los ${maxSteps} pasos]\n${final.message.content || "(el subagente no devolvió ningún informe)"}`;
   }
 
   // Deshace el último mensaje: ficheros (con instantáneas, incluido lo que hizo bash) y conversación

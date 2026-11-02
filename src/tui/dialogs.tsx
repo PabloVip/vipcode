@@ -28,7 +28,8 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
   const options: Option[] = [{ key: "s", label: "Sí" }];
   options.push({ key: "t", label: `Sí, y no preguntar más por ${KIND_LABEL[request.kind] || "esto"} en esta sesión` });
   if (pattern) {
-    options.push({ key: "p", label: `Sí, y permitir siempre «${pattern}» en esta sesión` });
+    const where = request.workdir ? ` en ${stripControl(request.workdir)}` : "";
+    options.push({ key: "p", label: `Sí, y permitir siempre «${pattern}»${where} en esta sesión` });
   }
   options.push({ key: "n", label: "No" });
   options.push({ key: "e", label: "No, y decirle qué hacer en su lugar" });

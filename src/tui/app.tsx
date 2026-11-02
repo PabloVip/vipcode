@@ -728,7 +728,7 @@ function Main(props: { app: App; initial: string }) {
         push({ kind: "assistant", text: entry.text, color: agentColor() });
       } else if (entry.role === "tool" && entry.tool) {
         const event = { id: `historial-${index}`, name: entry.tool.name, summary: entry.tool.summary, depth: 0, agent: "" };
-        push({ kind: "tool", event: { ...event, output: entry.text, display: entry.tool.display, isError: entry.tool.isError }, ms: 0 });
+        push({ kind: "tool", event: { ...event, output: entry.text, display: entry.tool.display, stats: entry.tool.stats, isError: entry.tool.isError }, ms: 0 });
       } else {
         push({ kind: "info", text: entry.text });
       }
@@ -840,7 +840,7 @@ function Main(props: { app: App; initial: string }) {
             if (choice.grant === "kind") {
               app.grants.allowKind(request.kind);
             } else if (choice.grant === "pattern" && choice.pattern) {
-              app.grants.allowPattern("bash", choice.pattern);
+              app.grants.allowPattern("bash", choice.pattern, request.workdir);
             }
             setDialog(null);
             resolve(choice.reply);

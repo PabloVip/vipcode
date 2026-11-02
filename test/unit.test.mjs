@@ -1077,8 +1077,10 @@ test("Windows: la shell de los comandos, rutas con / y ficheros con CRLF", async
   assert.equal(ps.name, "PowerShell");
   const args = ps.args('Write-Output "hola ñ"');
   const script = Buffer.from(args[args.indexOf("-EncodedCommand") + 1], "base64").toString("utf16le");
-  assert.match(script, /Write-Output "hola ñ"/);
+  // El comando va dentro en una cadena (para comprobar su sintaxis antes de ejecutarlo)
+  assert.ok(script.includes(`$vipcodeSource = 'Write-Output "hola ñ"'`), script);
   assert.match(script, /exit \$LASTEXITCODE/);
+  assert.ok(args.includes("-OutputFormat"));
   assert.deepEqual(shell.detectShell({ VIPCODE_SHELL: "cmd.exe" }, "win32").args("dir"), ["/d", "/s", "/c", "dir"]);
   assert.deepEqual(shell.splitArgs('"C:\\Program Files\\Firefox\\firefox.exe" --new-tab'), ["C:\\Program Files\\Firefox\\firefox.exe", "--new-tab"]);
   if (process.platform === "win32") {

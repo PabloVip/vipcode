@@ -9,7 +9,7 @@ import { isImagePath, toDataUrl } from "./images.js";
 import type { Permission, PermissionReply, PermissionRequest } from "./permissions.js";
 import { stripControl } from "./sanitize.js";
 import { isInside, protectedDirs } from "./paths.js";
-import { commandShell, findProgram, killTree, spawnGroup } from "./shell.js";
+import { commandShell, decodeClixml, findProgram, killTree, spawnGroup } from "./shell.js";
 
 export type { Permission } from "./permissions.js";
 
@@ -43,6 +43,8 @@ export interface ToolOutput {
   // Imágenes para que el modelo las vea (data URLs)
   images?: string[];
   isError?: boolean;
+  // Líneas añadidas y quitadas de verdad (el diff de «display» puede ir recortado)
+  stats?: { added: number; removed: number };
 }
 
 export interface Tool {
@@ -55,7 +57,19 @@ export interface Tool {
   run: (args: any, ctx: ToolContext) => Promise<string | ToolOutput>;
 }
 
-const IGNORE = ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**", "**/.next/**", "**/vendor/**"];
+const IGNORE = [
+  "**/node_modules/**",
+  "**/.git/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/.next/**",
+  "**/vendor/**",
+  "**/.venv/**",
+  "**/__pycache__/**",
+  // Si alguien abre vipcode en su carpeta personal de Windows: AppData es enorme y está llena de carpetas sin permiso
+  "**/AppData/**",
+  "**/$RECYCLE.BIN/**",
+];
 const MAX_OUTPUT = 20000;
 
 export function truncate(text: string, max = MAX_OUTPUT): string {
@@ -223,8 +237,8 @@ interface DiffLine {
   line: number;
 }
 
-// Diff por líneas al estilo de git: solo los trozos que cambian, con unas líneas de contexto (lo colorea la UI)
-export function unifiedDiff(oldText: string, newText: string, context = 3, maxLines = 120): string {
+// Las operaciones del diff por líneas (iguales, quitadas y añadidas), en orden
+function diffOps(oldText: string, newText: string): DiffLine[] {
   const a = oldText.split("\n");
   const b = newText.split("\n");
 
@@ -305,6 +319,26 @@ export function unifiedDiff(oldText: string, newText: string, context = 3, maxLi
   for (let i = endA; i < a.length; i++) {
     keep(a[i]);
   }
+  return ops;
+}
+
+// Cuántas líneas se añaden y se quitan de verdad (el diff que se enseña puede ir recortado)
+export function diffCounts(oldText: string, newText: string): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const op of diffOps(oldText, newText)) {
+    if (op.type === "+") {
+      added++;
+    } else if (op.type === "-") {
+      removed++;
+    }
+  }
+  return { added, removed };
+}
+
+// Diff por líneas al estilo de git: solo los trozos que cambian, con unas líneas de contexto (lo colorea la UI)
+export function unifiedDiff(oldText: string, newText: string, context = 3, maxLines = 120): string {
+  const ops = diffOps(oldText, newText);
 
   // Marcamos qué líneas se muestran: los cambios y su contexto
   const visible = new Array<boolean>(ops.length).fill(false);
@@ -385,10 +419,25 @@ function markRead(ctx: ToolContext, file: string) {
 }
 
 // Antes de modificar un fichero que ya existe hay que haberlo leído, y no debe haber cambiado desde entonces
+// Si no lo había leído (por ejemplo lo vio con cat en bash) y es pequeño, se le enseña en el propio error y cuenta como
+// leído: así no gasta otro paso en read_file
+const SHOW_UNREAD_LINES = 400;
+
 function checkFresh(ctx: ToolContext, file: string): string | null {
   const readAt = ctx.readTimes.get(file);
   const name = rel(ctx.root, file);
   if (readAt === undefined) {
+    try {
+      const text = fs.readFileSync(file, "utf8");
+      const lines = text.split(/\r?\n/).length;
+      if (lines <= SHOW_UNREAD_LINES && !text.includes("\u0000")) {
+        const numbered = readNumbered(file, name, 1, SHOW_UNREAD_LINES);
+        markRead(ctx, file);
+        return `Error: lee ${name} con read_file antes de modificarlo. Este es su contenido actual (ya cuenta como leído): vuelve a hacer el cambio a partir de él.\n${numbered}`;
+      }
+    } catch {
+      // si no se puede leer, el aviso de siempre
+    }
     return `Error: lee ${name} con read_file antes de modificarlo.`;
   }
   if (fs.statSync(file).mtimeMs > readAt + 1) {
@@ -455,11 +504,23 @@ const writeFile: Tool = {
   readOnly: false,
   async run(args, ctx) {
     const file = resolvePath(ctx.root, args.path, { write: true });
-    const content = String(args.content ?? "");
+    let content = String(args.content ?? "");
+    // Windows PowerShell 5.1 lee los .ps1 sin BOM como ANSI: «está» saldría «estÃ¡». Con BOM los lee en UTF-8
+    if (process.platform === "win32" && /\.(ps1|psm1|psd1)$/i.test(file) && !content.startsWith("\uFEFF") && /[^\x00-\x7f]/.test(content)) {
+      content = `\uFEFF${content}`;
+    }
     const exists = fs.existsSync(file);
     let previous: string | null = null;
     let title = `Crear ${rel(ctx.root, file)}`;
-    let preview = content.split("\n").slice(0, 40).map((l) => `+ ${l}`).join("\n");
+    const newLines = content.split("\n");
+    // El salto de línea del final no es otra línea
+    const lineCount = newLines.length - (newLines.length > 1 && newLines[newLines.length - 1] === "" ? 1 : 0);
+    // Un fichero nuevo se enseña recortado, pero la cuenta de líneas es la de verdad
+    let preview = newLines.slice(0, Math.min(40, lineCount)).map((l) => `+ ${l}`).join("\n");
+    if (lineCount > 40) {
+      preview += `\n[… ${lineCount - 40} líneas más]`;
+    }
+    let stats = { added: lineCount, removed: 0 };
     if (exists) {
       const stale = checkFresh(ctx, file);
       if (stale) {
@@ -468,6 +529,7 @@ const writeFile: Tool = {
       previous = fs.readFileSync(file, "utf8");
       title = `Sobrescribir ${rel(ctx.root, file)}`;
       preview = unifiedDiff(previous, content);
+      stats = diffCounts(previous, content);
     }
     const reply = await ctx.ask({ kind: "write", title, preview, subject: rel(ctx.root, file) });
     if (!reply.allow) {
@@ -478,9 +540,135 @@ const writeFile: Tool = {
     fs.writeFileSync(file, content);
     markRead(ctx, file);
     const output = await withDiagnostics(ctx, file, `Escrito ${rel(ctx.root, file)} (${content.split("\n").length} líneas).`);
-    return { output, display: preview };
+    return { output, display: preview, stats };
   },
 };
+
+// Los modelos a veces copian old_string de la salida de read_file con el número de línea delante («12\tcódigo»): si todas
+// las líneas lo llevan, se quita
+export function stripLineNumbers(text: string): string {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const withText = lines.filter((line) => line.trim() !== "");
+  if (withText.length === 0 || !withText.every((line) => /^\s*\d+\t/.test(line))) {
+    return text;
+  }
+  return lines.map((line) => line.replace(/^\s*\d+\t/, "")).join("\n");
+}
+
+// Parecido entre dos líneas (de 0 a 1), por pares de letras (coeficiente de Dice), sin espacios de los bordes
+function similarity(a: string, b: string): number {
+  const x = a.trim();
+  const y = b.trim();
+  if (x === y) {
+    return 1;
+  }
+  if (x.length < 2 || y.length < 2) {
+    return 0;
+  }
+  const pairs = new Map<string, number>();
+  for (let i = 0; i < x.length - 1; i++) {
+    const pair = x.slice(i, i + 2);
+    pairs.set(pair, (pairs.get(pair) || 0) + 1);
+  }
+  let shared = 0;
+  for (let i = 0; i < y.length - 1; i++) {
+    const pair = y.slice(i, i + 2);
+    const count = pairs.get(pair) || 0;
+    if (count > 0) {
+      shared++;
+      pairs.set(pair, count - 1);
+    }
+  }
+  return (2 * shared) / (x.length - 1 + (y.length - 1));
+}
+
+// Dónde empieza en el fichero el trozo que más se parece a «wanted» (las líneas tal cual, sin espacios de los bordes
+// comparados), o -1 si nada se parece de verdad
+function closestBlock(fileLines: string[], wanted: string[]): { at: number; score: number } {
+  let best = { at: -1, score: 0 };
+  if (wanted.length === 0) {
+    return best;
+  }
+  for (let i = 0; i < fileLines.length; i++) {
+    let total = 0;
+    for (let j = 0; j < wanted.length && i + j < fileLines.length; j++) {
+      total += similarity(fileLines[i + j], wanted[j]);
+    }
+    const score = total / wanted.length;
+    if (score > best.score) {
+      best = { at: i, score };
+    }
+  }
+  return best.score >= 0.6 ? best : { at: -1, score: best.score };
+}
+
+// Líneas (desde 1) donde aparece «text» sin contar los espacios de los bordes. Un texto de una línea puede ser un trozo
+// de una línea; en uno de varias, la primera puede ser el final de una línea y la última, el principio de otra
+function findTrimmed(fileLines: string[], text: string): number[] {
+  const wanted = text.replace(/\r\n/g, "\n").split("\n").map((line) => line.trim());
+  while (wanted.length > 1 && wanted[wanted.length - 1] === "") {
+    wanted.pop();
+  }
+  while (wanted.length > 1 && wanted[0] === "") {
+    wanted.shift();
+  }
+  if (wanted.every((line) => line === "")) {
+    return [];
+  }
+  const found: number[] = [];
+  const last = wanted.length - 1;
+  for (let i = 0; i + wanted.length <= fileLines.length; i++) {
+    const ok = wanted.every((line, j) => {
+      const real = fileLines[i + j].trim();
+      if (wanted.length === 1) {
+        // Un trozo muy corto («x», «)») aparece en cualquier parte: tiene que ser la línea entera
+        return real === line || (line.length >= 8 && real.includes(line));
+      }
+      if (j === 0) {
+        return real.endsWith(line);
+      }
+      if (j === last) {
+        return real.startsWith(line);
+      }
+      return real === line;
+    });
+    if (ok) {
+      found.push(i + 1);
+    }
+  }
+  return found;
+}
+
+// Qué decirle al modelo cuando old_string no aparece: si lo nuevo está justo donde iría el cambio, que no repita la
+// edición; si no, el trozo del fichero que más se parece, con sus números de línea, para que copie el texto exacto sin
+// otra llamada. Que lo nuevo aparezca en otra parte no dice nada: «return result;» puede estar en cualquier función
+function notFoundMessage(original: string, oldString: string, newString: string): { message: string; applied: boolean } {
+  const fileLines = original.replace(/\r\n/g, "\n").split("\n");
+  const wanted = oldString.replace(/\r\n/g, "\n").split("\n").filter((line) => line.trim() !== "").slice(0, 30);
+  const near = closestBlock(fileLines, wanted);
+  const appearsAt = newString.trim() !== "" ? findTrimmed(fileLines, newString) : [];
+  const newCount = newString.trim().split("\n").length;
+  const inPlace = appearsAt.find((line) => near.at >= 0 && line - 1 < near.at + wanted.length && near.at < line - 1 + newCount);
+  if (inPlace !== undefined) {
+    return {
+      message: `Nada que cambiar: old_string no está en el fichero y new_string ya aparece en la línea ${inPlace}, justo donde iría este cambio. Parece ya hecho: no repitas esta edición y sigue con el siguiente paso.`,
+      applied: true,
+    };
+  }
+  let message = "Error: old_string no aparece en el fichero (ni ignorando la sangría y los espacios de los bordes).";
+  if (near.at >= 0) {
+    const from = Math.max(0, near.at - 2);
+    const to = Math.min(fileLines.length, near.at + wanted.length + 2);
+    const block = fileLines.slice(from, to).map((line, i) => `${from + i + 1}\t${line}`).join("\n");
+    message += ` Lo más parecido está en la línea ${near.at + 1}; cópialo tal cual de aquí (sin el número ni el tabulador del principio):\n${block}`;
+  } else {
+    message += " Ningún trozo del fichero se le parece: vuelve a leerlo con read_file (puede que ya lo hayas cambiado) antes de editar.";
+  }
+  if (appearsAt.length > 0) {
+    message += `\nnew_string aparece en la línea ${appearsAt[0]}, pero no donde iría este cambio, y no se ha cambiado nada: comprueba si esa línea es lo que querías.`;
+  }
+  return { message, applied: false };
+}
 
 // Busca old_string en el fichero; si no aparece exacto, prueba ignorando saltos de línea de Windows y los espacios de los bordes
 function replaceInText(
@@ -507,6 +695,14 @@ function replaceInText(
   const direct = exact(original, oldString, newString);
   if (direct) {
     return direct;
+  }
+  // Copiado de read_file con los números de línea delante
+  const unnumbered = stripLineNumbers(oldString);
+  if (unnumbered !== oldString) {
+    const result = replaceInText(original, unnumbered, stripLineNumbers(newString), replaceAll);
+    if (!("error" in result)) {
+      return { ...result, note: `${result.note} (se quitaron los números de línea copiados de read_file)` };
+    }
   }
 
   const crlf = original.includes("\r\n");
@@ -540,10 +736,7 @@ function replaceInText(
     }
   }
   if (matches.length === 0 || oldLines.every((line) => line.trim() === "")) {
-    return {
-      error:
-        "Error: old_string no aparece en el fichero. Vuelve a leerlo con read_file y copia el texto exacto (espacios incluidos, sin el número de línea).",
-    };
+    return { error: "Error: old_string no aparece en el fichero." };
   }
   if (matches.length > 1 && !replaceAll) {
     return { error: `Error: old_string aparece ${matches.length} veces. Añade más contexto para que sea único o usa replace_all.` };
@@ -613,10 +806,18 @@ const editFile: Tool = {
       return { output: "Error: old_string está vacío. Para crear un fichero usa write_file.", isError: true };
     }
     if (oldString === newString) {
+      // Suele pasar cuando el modelo cree que aún tiene que aplicar un cambio que ya hizo: que no lo repita
+      if (findTrimmed(original.replace(/\r\n/g, "\n").split("\n"), oldString).length > 0) {
+        return { output: "Nada que cambiar: old_string y new_string son iguales y ese texto ya está en el fichero. El cambio ya está hecho: sigue con el siguiente paso." };
+      }
       return { output: "Error: old_string y new_string son iguales; no hay nada que cambiar.", isError: true };
     }
     const result = replaceInText(original, oldString, newString, Boolean(args.replace_all));
     if ("error" in result) {
+      if (result.error.startsWith("Error: old_string no aparece")) {
+        const { message, applied } = notFoundMessage(original, stripLineNumbers(oldString), stripLineNumbers(newString));
+        return { output: message, isError: !applied };
+      }
       return { output: result.error, isError: true };
     }
     const diff = unifiedDiff(original, result.updated);
@@ -628,7 +829,7 @@ const editFile: Tool = {
     fs.writeFileSync(file, result.updated);
     markRead(ctx, file);
     const output = await withDiagnostics(ctx, file, `Editado ${rel(ctx.root, file)} (${result.count} sustitución/es)${result.note}.`);
-    return { output, display: diff };
+    return { output, display: diff, stats: diffCounts(original, result.updated) };
   },
 };
 
@@ -679,7 +880,15 @@ const globTool: Tool = {
     if (outsidePattern(String(args.pattern))) {
       return OUTSIDE_PATTERN;
     }
-    const found = await fg(globPattern(String(args.pattern)), { cwd, ignore: [...IGNORE, ...protectedIgnore(cwd)], dot: true, onlyFiles: true, followSymbolicLinks: false });
+    // suppressErrors: una carpeta sin permiso (en Windows pasa en AppData\Local\Temp) se salta en vez de tumbar la búsqueda
+    const found = await fg(globPattern(String(args.pattern)), {
+      cwd,
+      ignore: [...IGNORE, ...protectedIgnore(cwd)],
+      dot: true,
+      onlyFiles: true,
+      followSymbolicLinks: false,
+      suppressErrors: true,
+    });
     const files = insideProject(ctx.root, cwd, found);
     if (files.length === 0) {
       return "Sin resultados.";
@@ -697,8 +906,11 @@ let ripgrepPath: string | null | undefined;
 
 // Ruta completa de ripgrep, si está instalado (VIPCODE_RIPGREP=0 hace que no se use)
 function ripgrepProgram(): string | null {
+  if (process.env.VIPCODE_RIPGREP === "0") {
+    return null;
+  }
   if (ripgrepPath === undefined) {
-    const found = process.env.VIPCODE_RIPGREP === "0" ? null : findProgram("rg");
+    const found = findProgram("rg");
     try {
       ripgrepPath = found && spawnSync(found, ["--version"], { stdio: "ignore" }).status === 0 ? found : null;
     } catch {
@@ -727,6 +939,9 @@ function ripgrep(args: string[], cwd: string, signal?: AbortSignal): Promise<{ c
       signal?.removeEventListener("abort", onAbort);
       if (code === 0 || code === 1) {
         resolve({ code: code ?? 1, stdout });
+      } else if (code === 2 && stdout.trim() !== "") {
+        // 2 con resultados: ha encontrado cosas pero alguna carpeta no se podía leer (sin permiso): valen igual
+        resolve({ code: 0, stdout });
       } else {
         resolve(null);
       }
@@ -736,11 +951,13 @@ function ripgrep(args: string[], cwd: string, signal?: AbortSignal): Promise<{ c
 
 const grepTool: Tool = {
   name: "grep",
-  description: "Busca una expresión regular dentro de los ficheros del proyecto. Devuelve fichero:línea: texto.",
+  description:
+    "Busca una expresión regular dentro de los ficheros del proyecto, o solo en una carpeta o fichero con path. Devuelve fichero:línea: texto (rutas relativas a la raíz del proyecto).",
   parameters: {
     type: "object",
     properties: {
       pattern: { type: "string", description: "Expresión regular" },
+      path: { type: "string", description: "Carpeta o fichero donde buscar, relativo a la raíz (por defecto, todo el proyecto)" },
       include: { type: "string", description: "Glob de ficheros donde buscar, por ejemplo **/*.php" },
       ignore_case: { type: "boolean" },
     },
@@ -753,9 +970,25 @@ const grepTool: Tool = {
     if (args.include && outsidePattern(String(args.include))) {
       return OUTSIDE_PATTERN;
     }
+    // Dónde se busca: todo el proyecto o lo que diga path (una carpeta o un fichero)
+    const target = resolvePath(ctx.root, args.path);
+    let dir = target;
+    let single: string | null = null;
+    try {
+      if (fs.statSync(target).isFile()) {
+        dir = path.dirname(target);
+        single = path.basename(target);
+      }
+    } catch {
+      return `Error: ${args.path} no existe.`;
+    }
+    // Lo que devuelve la búsqueda va relativo a «dir»; el modelo lo ve relativo a la raíz
+    const prefix = rel(ctx.root, dir);
+    const fromRoot = (file: string) => (prefix === "." ? file : `${prefix}/${file}`);
+
     if (ripgrepProgram()) {
       // --crlf: en los ficheros con saltos de línea de Windows, $ también encaja antes del \r\n
-      const rgArgs = ["--line-number", "--no-heading", "--color", "never", "--with-filename", "--crlf", "--max-columns", "300", "--max-columns-preview", "-e", pattern];
+      const rgArgs = ["--line-number", "--no-heading", "--color", "never", "--with-filename", "--no-messages", "--crlf", "--max-columns", "300", "--max-columns-preview", "-e", pattern];
       if (process.platform === "win32") {
         rgArgs.push("--path-separator", "/");
       }
@@ -765,11 +998,12 @@ const grepTool: Tool = {
       if (args.include) {
         rgArgs.push("-g", globPattern(String(args.include)));
       }
-      for (const pattern of protectedIgnore(ctx.root)) {
-        rgArgs.push("-g", `!${pattern}`);
+      for (const ignored of protectedIgnore(dir)) {
+        rgArgs.push("-g", `!${ignored}`);
       }
-      rgArgs.push(".");
-      const found = await ripgrep(rgArgs, ctx.root, ctx.signal);
+      // «--»: un fichero del proyecto puede llamarse «--pre=sh», y rg ejecutaría ese programa con lo que busca
+      rgArgs.push("--", single ?? ".");
+      const found = await ripgrep(rgArgs, dir, ctx.signal);
       if (found) {
         if (found.code === 1 || found.stdout.trim() === "") {
           return "Sin coincidencias.";
@@ -777,7 +1011,7 @@ const grepTool: Tool = {
         const lines = found.stdout
           .split("\n")
           .filter((line) => line.length > 0)
-          .map((line) => line.replace(/\r$/, "").replace(/^\.\//, "").replace(/^([^:]+):(\d+):/, "$1:$2: "));
+          .map((line) => line.replace(/\r$/, "").replace(/^\.\//, "").replace(/^([^:]+):(\d+):/, (_, file: string, n: string) => `${fromRoot(file)}:${n}: `));
         if (lines.length > 200) {
           return `${lines.slice(0, 200).join("\n")}\n[… limitado a 200 resultados]`;
         }
@@ -799,10 +1033,20 @@ const grepTool: Tool = {
     if (args.include) {
       include = globPattern(String(args.include));
     }
-    const files = insideProject(ctx.root, ctx.root, await fg(include, { cwd: ctx.root, ignore: [...IGNORE, ...protectedIgnore(ctx.root)], dot: false, onlyFiles: true, followSymbolicLinks: false }));
+    let files: string[];
+    if (single) {
+      files = [single];
+    } else {
+      // suppressErrors: una carpeta sin permiso se salta en vez de tumbar la búsqueda entera
+      files = insideProject(
+        ctx.root,
+        dir,
+        await fg(include, { cwd: dir, ignore: [...IGNORE, ...protectedIgnore(dir)], dot: false, onlyFiles: true, followSymbolicLinks: false, suppressErrors: true }),
+      );
+    }
     const results: string[] = [];
     for (const file of files) {
-      const abs = path.join(ctx.root, file);
+      const abs = path.join(dir, file);
       let stat;
       try {
         stat = fs.statSync(abs);
@@ -812,14 +1056,20 @@ const grepTool: Tool = {
       if (stat.size > 1024 * 1024) {
         continue;
       }
-      const buffer = fs.readFileSync(abs);
+      let buffer: Buffer;
+      try {
+        buffer = fs.readFileSync(abs);
+      } catch {
+        // sin permiso para leerlo: se salta
+        continue;
+      }
       if (buffer.includes(0)) {
         continue;
       }
       const lines = buffer.toString("utf8").split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
         if (regex.test(lines[i])) {
-          results.push(`${file}:${i + 1}: ${lines[i].slice(0, 300)}`);
+          results.push(`${rel(ctx.root, abs)}:${i + 1}: ${lines[i].slice(0, 300)}`);
           if (results.length >= 200) {
             return results.join("\n") + "\n[… limitado a 200 resultados]";
           }
@@ -842,11 +1092,12 @@ function gitSafetyEnv(): Record<string, string> {
 const bashTool: Tool = {
   name: "bash",
   description:
-    "Ejecuta un comando de shell en la raíz del proyecto (tests, git, instalar dependencias…). No lo uses para leer o editar ficheros: para eso están las otras herramientas. No es interactivo: evita comandos que esperen que escribas algo.",
+    "Ejecuta un comando de shell (tests, git, instalar dependencias…). Cada llamada empieza de nuevo en la raíz del proyecto: un cd no se conserva para la siguiente; para trabajar en una subcarpeta usa workdir. No lo uses para leer o editar ficheros: para eso están las otras herramientas. No es interactivo: evita comandos que esperen que escribas algo.",
   parameters: {
     type: "object",
     properties: {
       command: { type: "string" },
+      workdir: { type: "string", description: "Carpeta donde ejecutarlo, relativa a la raíz del proyecto (por defecto, la raíz)" },
       description: { type: "string", description: "Qué hace el comando, en 5-10 palabras" },
       timeout_ms: { type: "number", description: "Tiempo máximo en milisegundos (máximo 600000)" },
     },
@@ -856,11 +1107,26 @@ const bashTool: Tool = {
   readOnly: false,
   async run(args, ctx) {
     const command = String(args.command ?? "");
+    let cwd = ctx.root;
+    if (args.workdir && String(args.workdir).trim() !== "" && String(args.workdir).trim() !== ".") {
+      // Con write: el comando puede escribir, así que tampoco vale la instalación de vipcode
+      cwd = resolvePath(ctx.root, String(args.workdir), { write: true });
+      if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
+        return `Error: la carpeta ${args.workdir} no existe.`;
+      }
+      // Lo que se escribe en .git (hooks, config) lo ejecuta git después; con workdir, el comando ya no nombraría .git
+      const inner = path.relative(realPathOf(ctx.root), realPathOf(cwd));
+      if (inner.split(/[\\/]/).some((part) => part.toLowerCase() === ".git")) {
+        return "Error: workdir no puede estar dentro de .git.";
+      }
+    }
     let title = "Ejecutar comando";
     if (args.description) {
       title = `Ejecutar: ${String(args.description).slice(0, 80)}`;
     }
-    const reply = await ctx.ask({ kind: "bash", title, preview: `$ ${command}`, subject: command });
+    const workdir = cwd === ctx.root ? undefined : rel(ctx.root, cwd);
+    const where = workdir ? `(en ${workdir}) ` : "";
+    const reply = await ctx.ask({ kind: "bash", title, preview: `${where}$ ${command}`, subject: command, workdir });
     if (!reply.allow) {
       return rejected(reply, "ejecutar el comando");
     }
@@ -873,7 +1139,7 @@ const bashTool: Tool = {
       const shell = commandShell();
       // En su propio grupo de procesos, para poder parar también a los hijos (npm test, servidores…)
       const child = spawnGroup(shell.file, shell.args(command), {
-        cwd: ctx.root,
+        cwd,
         env: { ...process.env, ...shell.env, ...gitSafetyEnv(), VIPCODE: "1", GIT_TERMINAL_PROMPT: "0", GIT_PAGER: "cat", PAGER: "cat" },
         windowsHide: true,
       });
@@ -914,7 +1180,8 @@ const bashTool: Tool = {
         } else if (ctx.signal?.aborted) {
           header = "Cancelado por el usuario";
         }
-        let body = output.trim();
+        // Por si PowerShell manda algún error en CLIXML («#< CLIXML <Objs…»): en texto normal
+        let body = decodeClixml(output).trim();
         if (body === "") {
           body = "(sin salida)";
         }
@@ -1294,7 +1561,7 @@ const diagnosticsTool: Tool = {
 export function taskTool(subagents: { name: string; description: string }[]): Tool {
   return {
     name: "task",
-    description: `Lanza un subagente que trabaja por su cuenta, con su propio contexto, y te devuelve un informe. Úsalo para investigaciones amplias o tareas independientes que llenarían tu contexto. Lanza varios a la vez si son independientes. Tipos:\n${subagents
+    description: `Lanza un subagente que trabaja por su cuenta, con su propio contexto, y te devuelve un informe. Úsalo para investigaciones amplias o tareas independientes que llenarían tu contexto. Lanza varios a la vez si son independientes. Revisa cada informe: si empieza por [Subagente INCOMPLETO] o solo anuncia lo que iba a hacer, esa parte no está hecha. Tipos:\n${subagents
       .map((agent) => `- ${agent.name}: ${agent.description}`)
       .join("\n")}`,
     parameters: {
@@ -1390,6 +1657,18 @@ export function describeCall(name: string, rawArgs: string): string {
     }
     if (name === "skill") {
       return `${args.name || ""}${args.file ? ` · ${args.file}` : ""}`;
+    }
+    // Un comando se resume por su primera línea con algo (un «python - <<EOF» de varias líneas, por esa)
+    if (name === "bash" && args.command) {
+      const lines = String(args.command).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      let text = lines[0] || "";
+      if (lines.length > 1) {
+        text += " …";
+      }
+      if (args.workdir && String(args.workdir).trim() !== "" && String(args.workdir).trim() !== ".") {
+        text = `(${args.workdir}) ${text}`;
+      }
+      return text.slice(0, 120);
     }
     if (args.path && args.pattern) {
       return `${args.pattern} en ${args.path}`;

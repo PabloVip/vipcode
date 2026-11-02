@@ -209,7 +209,8 @@ function ToolView(props: { event: ToolEndEvent; ms: number; fold?: "folded" | "o
   const foldable = full.length > 0 && plain(full) !== plain(summary);
   const open = foldable && props.fold === "open";
   const detail = open ? full : summary;
-  const stats = event.isError ? null : diffStats(event.display);
+  // La cuenta de verdad si la herramienta la da (el diff que se enseña puede ir recortado); si no, la del diff
+  const stats = event.isError ? null : event.stats && (event.stats.added > 0 || event.stats.removed > 0) ? event.stats : diffStats(event.display);
   return (
     <Box flexDirection="column" marginLeft={event.depth > 0 ? 4 : 0}>
       <Text wrap="truncate-end">

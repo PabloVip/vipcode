@@ -171,6 +171,9 @@ export interface Config {
   maxWaitMs: number;
   // Lo que se espera a que una IA empiece a contestar antes de probar otra (con conversaciones largas, algo más)
   firstResponseMs: number;
+  // Si el modelo que llevaba la tarea se queda sin cupo menos de esto, se le espera en vez de pasarle la tarea a otro (0 = no
+  // esperar nunca)
+  stickyWaitMs: number;
   permission: PermissionConfig;
   mcp: Record<string, McpServerConfig>;
   lsp: Record<string, LspServerConfig | false> | false;
@@ -228,6 +231,7 @@ export const DEFAULT_CONFIG: Config = {
   bashTimeoutMs: 120000,
   maxWaitMs: 90000,
   firstResponseMs: 40000,
+  stickyWaitMs: 90000,
   permission: DEFAULT_PERMISSION,
   mcp: {},
   lsp: {},
