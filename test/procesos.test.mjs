@@ -162,8 +162,8 @@ test("un comando que termina pero deja algo con su salida abierta contesta a los
     const result = await run(ws.ctx, { command: "node padre.cjs sale" });
     assert.ok(Date.now() - start < 6000, `ha tardado ${Date.now() - start} ms`);
     assert.match(result.output, /en marcha/);
-    // En Windows la shell no le pasa al nieto su salida: «close» llega sin esperar y el nieto queda por su cuenta. Sin una
-    // shell en medio sí la tiene: eso se prueba abajo
+    // En Windows, Node mata a un hijo normal cuando muere su padre (lo mete en un «job object»): el nieto muere, su salida se
+    // cierra y «close» llega sin esperar. El caso de un nieto que sobrevive se prueba abajo
     if (process.platform !== "win32") {
       assert.match(result.output, /^Código de salida: 0 \(había dejado algo en marcha/);
       await noneAlive([ws.pids()[1]]);
@@ -173,13 +173,13 @@ test("un comando que termina pero deja algo con su salida abierta contesta a los
   }
 });
 
-// Lo mismo sin shell en medio: el nieto tiene la salida de verdad en todos los sistemas, y «close» no llega nunca por sí solo
-test("sin shell en medio: un nieto con la salida abierta no impide contestar (ha terminado, Esc y tiempo máximo)", async () => {
+// Un nieto «detached» sobrevive a su padre en todos los sistemas, con la salida abierta: «close» no llega nunca por sí solo
+test("un nieto que sobrevive con la salida abierta no impide contestar (ha terminado, Esc y tiempo máximo)", async () => {
   const launch = (ws, mode) => spawnGroup(process.execPath, ["padre.cjs", mode], { cwd: ws.root, windowsHide: true });
   let ws = workspace();
   try {
     const start = Date.now();
-    const result = await watchChild(launch(ws, "sale"), { timeoutMs: 60000 });
+    const result = await watchChild(launch(ws, "sale-suelto"), { timeoutMs: 60000 });
     assert.ok(Date.now() - start < 6000, `ha tardado ${Date.now() - start} ms`);
     assert.equal(result.lingering, true);
     assert.equal(result.code, 0);
