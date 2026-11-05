@@ -15,7 +15,7 @@ process.env.USERPROFILE = HOME;
 
 const tools = await import("../dist/tools.js");
 const { findLongRunning, looksLikeServer } = await import("../dist/long-running.js");
-const { killTree, spawnGroup, stopAllProcesses } = await import("../dist/process.js");
+const { killTree, spawnGroup, stopAllProcesses, watchChild } = await import("../dist/process.js");
 const { expandCommand } = await import("../dist/commands.js");
 const { App } = await import("../dist/app.js");
 const { systemPrompt } = await import("../dist/prompt.js");
@@ -161,12 +161,54 @@ test("un comando que termina pero deja algo con su salida abierta contesta a los
     const start = Date.now();
     const result = await run(ws.ctx, { command: "node padre.cjs sale" });
     assert.ok(Date.now() - start < 6000, `ha tardado ${Date.now() - start} ms`);
-    assert.match(result.output, /^Código de salida: 0 \(había dejado algo en marcha/);
     assert.match(result.output, /en marcha/);
-    // En Windows, con el padre ya muerto, taskkill no tiene por dónde llegar al nieto
+    // En Windows la shell no le pasa al nieto su salida: «close» llega sin esperar y el nieto queda por su cuenta. Sin una
+    // shell en medio sí la tiene: eso se prueba abajo
     if (process.platform !== "win32") {
+      assert.match(result.output, /^Código de salida: 0 \(había dejado algo en marcha/);
       await noneAlive([ws.pids()[1]]);
     }
+  } finally {
+    ws.cleanup();
+  }
+});
+
+// Lo mismo sin shell en medio: el nieto tiene la salida de verdad en todos los sistemas, y «close» no llega nunca por sí solo
+test("sin shell en medio: un nieto con la salida abierta no impide contestar (ha terminado, Esc y tiempo máximo)", async () => {
+  const launch = (ws, mode) => spawnGroup(process.execPath, ["padre.cjs", mode], { cwd: ws.root, windowsHide: true });
+  let ws = workspace();
+  try {
+    const start = Date.now();
+    const result = await watchChild(launch(ws, "sale"), { timeoutMs: 60000 });
+    assert.ok(Date.now() - start < 6000, `ha tardado ${Date.now() - start} ms`);
+    assert.equal(result.lingering, true);
+    assert.equal(result.code, 0);
+    assert.equal(result.reason, null);
+    assert.match(result.output, /en marcha/);
+  } finally {
+    ws.cleanup();
+  }
+  ws = workspace();
+  try {
+    const cancel = new AbortController();
+    const pending = watchChild(launch(ws, "suelto"), { timeoutMs: 60000, signal: cancel.signal });
+    assert.ok(await ws.started());
+    await sleep(200);
+    const start = Date.now();
+    cancel.abort();
+    const result = await pending;
+    assert.ok(Date.now() - start < 3000, `ha tardado ${Date.now() - start} ms`);
+    assert.equal(result.reason, "abort");
+    assert.match(result.output, /en marcha/);
+  } finally {
+    ws.cleanup();
+  }
+  ws = workspace();
+  try {
+    const start = Date.now();
+    const result = await watchChild(launch(ws, "suelto"), { timeoutMs: 1000 });
+    assert.ok(Date.now() - start < 4000, `ha tardado ${Date.now() - start} ms`);
+    assert.equal(result.reason, "timeout");
   } finally {
     ws.cleanup();
   }
