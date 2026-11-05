@@ -4,6 +4,17 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Corregido
+
+- **Un comando que no termina ya no deja a vipcode colgado.** `npm start` podía dejarlo esperando horas: el tiempo máximo no lo cortaba, Esc no lo interrumpía y `/exit` estaba bloqueado, porque se esperaba a que se cerrara la salida del comando y un proceso nieto la mantenía abierta. Ahora cancelar o pasarse de tiempo contesta en el acto con lo que haya escrito, y si un comando ya ha terminado pero algo sigue con su salida abierta, a los 2 s se para. Vale también para `!comando` y para las plantillas.
+- **`/exit` y Ctrl+C dos veces siempre salen,** aunque haya una herramienta o un subagente en marcha, también en el modo de texto y en `vipcode run`: cancelan lo que esté en curso, paran todos los comandos y guardan la conversación.
+- **No quedan procesos vivos al salir.** En Windows no se llevaba la cuenta de los comandos normales: cerrar vipcode dejaba el servidor de Node en marcha. Ahora hay un registro de todos, en todos los sistemas.
+
+### Cambiado
+
+- **El agente no lanza servidores de desarrollo ni modos «watch».** `npm start`, `ng serve`, `vite`, `docker compose up` sin `-d`, `tail -f` y parecidos se rechazan antes de ejecutarse, también con `background: true`, y el modelo recibe la alternativa (`npm run build`, `ng build`, `mvn package`, `docker compose up -d`…). Los servidores los arrancas tú. Si se escapa uno, se corta cuando lleva 30 s sin escribir y lo último que escribió parece un servidor listo.
+- **Los subagentes tienen su propio tiempo máximo:** 15 minutos, cambiable con `subagentTimeoutMs`.
+
 ## [0.4.2] - 2026-11-02
 
 ### Añadido

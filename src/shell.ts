@@ -1,9 +1,8 @@
 // Copyright (C) 2026 Pablo Vicente Juan
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { type ChildProcess, type ChildProcessByStdio, type SpawnOptions, spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import type { Readable } from "node:stream";
 import crossSpawn from "cross-spawn";
 
 // Lanza un programa. En Windows npm instala los programas como .cmd, que spawn no puede lanzar directamente:
@@ -67,98 +66,8 @@ export function findProgram(name: string, env: NodeJS.ProcessEnv = process.env):
 }
 
 // Programas de Windows que siempre están en System32
-function system32(name: string): string {
+export function system32(name: string): string {
   return findProgram(name) || path.join(process.env.SystemRoot || "C:\\Windows", "System32", name);
-}
-
-// Para un programa y todo lo que haya lanzado. En Windows no hay grupos de procesos: taskkill /T recorre los hijos. En
-// macOS y Linux se para su grupo de procesos (si se lanzó con spawnGroup; si no, solo él), y si en 3 s no ha parado, a
-// la fuerza
-export function killTree(child: ChildProcess) {
-  if (process.platform === "win32" && child.pid) {
-    const taskkill = spawn(system32("taskkill.exe"), ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-    taskkill.on("error", () => child.kill());
-    return;
-  }
-  try {
-    if (!child.pid) {
-      throw new Error("sin pid");
-    }
-    process.kill(-child.pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
-  setTimeout(() => {
-    try {
-      if (child.pid) {
-        process.kill(-child.pid, "SIGKILL");
-      }
-    } catch {
-      // ya había terminado
-    }
-  }, 3000).unref();
-}
-
-// Igual, pero ya, sin esperar a nada: para cuando vipcode se está cerrando y no va a quedar quien lo termine
-export function killTreeNow(child: ChildProcess) {
-  if (!child.pid) {
-    return;
-  }
-  if (process.platform === "win32") {
-    spawnSync(system32("taskkill.exe"), ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-    return;
-  }
-  try {
-    process.kill(-child.pid, "SIGKILL");
-  } catch {
-    // ya había terminado
-  }
-}
-
-// Comandos que siguen en marcha en su propio grupo de procesos (macOS y Linux)
-const groups = new Set<ChildProcess>();
-const EXIT_SIGNALS = ["SIGHUP", "SIGTERM"] as const;
-
-function stopGroups() {
-  for (const child of groups) {
-    try {
-      process.kill(-child.pid!, "SIGTERM");
-    } catch {
-      // ya había terminado
-    }
-  }
-  groups.clear();
-}
-
-// Si cierras la ventana de la terminal (o alguien para vipcode), se paran también los comandos que estén en marcha.
-// Después la señal hace lo de siempre: sin este oyente, cerrar vipcode, o lo que hagan los demás (Ink deja la terminal
-// como estaba)
-function onExitSignal(signal: NodeJS.Signals) {
-  stopGroups();
-  for (const name of EXIT_SIGNALS) {
-    process.removeListener(name, onExitSignal);
-  }
-  process.kill(process.pid, signal);
-}
-
-// Lanza un comando de la shell en su propio grupo de procesos (en macOS y Linux), para poder pararlo con todo lo que
-// lance (npm test, un servidor…) con killTree. Fuera del grupo de vipcode la terminal ya no lo pararía al cerrar la
-// ventana: se para al cerrarse vipcode. Sin entrada, y su salida se lee por stdout y stderr
-export function spawnGroup(file: string, args: string[], options: Omit<SpawnOptions, "stdio" | "detached">): ChildProcessByStdio<null, Readable, Readable> {
-  const child = spawn(file, args, { ...options, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
-  if (process.platform !== "win32" && child.pid) {
-    if (groups.size === 0) {
-      process.removeListener("exit", stopGroups);
-      process.on("exit", stopGroups);
-      for (const name of EXIT_SIGNALS) {
-        process.removeListener(name, onExitSignal);
-        process.on(name, onExitSignal);
-      }
-    }
-    groups.add(child);
-    child.once("exit", () => groups.delete(child));
-  }
-  return child;
 }
 
 // Separa los argumentos respetando las comillas: a "b c" d → [a, b c, d]

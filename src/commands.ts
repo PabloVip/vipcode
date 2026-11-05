@@ -4,7 +4,8 @@ import path from "node:path";
 import type { Config } from "./config.js";
 import { readMarkdownDir } from "./frontmatter.js";
 import { GLOBAL_COMMANDS_DIR } from "./paths.js";
-import { commandShell, killTree, spawnGroup, splitArgs } from "./shell.js";
+import { spawnGroup, watchChild } from "./process.js";
+import { commandShell, splitArgs } from "./shell.js";
 import { truncate } from "./tools.js";
 import { isProjectFile, projectTrust } from "./trust.js";
 
@@ -90,31 +91,16 @@ export function loadCommands(root: string, config: Config, trusted = projectTrus
   return [...commands.values()];
 }
 
-function runShell(command: string, cwd: string): Promise<string> {
-  return new Promise((resolve) => {
-    const shell = commandShell();
-    // En su propio grupo de procesos: si se pasa de tiempo, se para también todo lo que haya lanzado
-    const child = spawnGroup(shell.file, shell.args(command), {
-      cwd,
-      env: { ...process.env, ...shell.env, GIT_PAGER: "cat", PAGER: "cat" },
-      windowsHide: true,
-    });
-    let output = "";
-    const timer = setTimeout(() => killTree(child), 30000);
-    // Como texto: así una letra de varios bytes no se rompe si llega partida entre dos trozos
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (text: string) => (output += text));
-    child.stderr.on("data", (text: string) => (output += text));
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve(`(no se pudo ejecutar: ${err.message})`);
-    });
-    child.on("close", () => {
-      clearTimeout(timer);
-      resolve(truncate(output.trim(), 10000));
-    });
+async function runShell(command: string, cwd: string): Promise<string> {
+  const shell = commandShell();
+  // En su propio grupo de procesos: si se pasa de tiempo, se para también todo lo que haya lanzado
+  const child = spawnGroup(shell.file, shell.args(command), {
+    cwd,
+    env: { ...process.env, ...shell.env, GIT_PAGER: "cat", PAGER: "cat" },
+    windowsHide: true,
   });
+  const result = await watchChild(child, { timeoutMs: 30000 });
+  return result.error ? `(no se pudo ejecutar: ${result.error})` : truncate(result.output.trim(), 10000);
 }
 
 // Rellena la plantilla: $ARGUMENTS, $1…$9 y !`comando` (se sustituye por su salida)

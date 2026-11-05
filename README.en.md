@@ -202,7 +202,7 @@ The bottom bar shows the agent, the model, how much of its free plan is left and
 | `/tutorial` | Learn the basics in 5 steps, in a practice folder |
 | `/interfaz` | Choose how vipcode looks: full screen, compact, zen or creatures |
 | `/usage` | Tokens used and what happened in the conversation: models, model switches, stuck models and errors (just counts) |
-| `/procesos [parar [id]]` | What the agent left running in the background, like a server: see it and stop it |
+| `/procesos [parar [id]]` | What the agent left running in the background, like a long test run: see it and stop it |
 | `/mcp [login\|logout <server>]`, `/lsp` | Status of MCP and language servers; sign in or out of the MCP servers that require it |
 | `/yolo [on\|off]` | Approve everything without asking for the session (except reading files with secrets) |
 | `/reset-limits` | Forget the saved provider pauses |

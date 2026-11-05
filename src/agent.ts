@@ -1119,7 +1119,25 @@ export class Agent {
     // Un agente de solo lectura no puede saltarse la norma lanzando un subagente que edite
     const agent: AgentDefinition = parent.readOnly ? { ...sub, readOnly: true } : sub;
     const checks = new CheckTracker();
-    const report = await this.subagentLoop(agent, prompt, description, checks, signal);
+    // Se para si lo cancelas y, además, tiene su propio tiempo máximo: uno atascado no puede dejar esperando al principal
+    // Sale de la configuración: lo que no sea un tiempo válido no puede romper el subagente, y los temporizadores no pasan de 2^31 ms
+    const configured = Number(this.deps.config.subagentTimeoutMs);
+    const limitMs = Number.isFinite(configured) && configured > 0 ? Math.min(configured, 2147483647) : 900000;
+    const limit = AbortSignal.timeout(limitMs);
+    const timedOut = () => limit.aborted && !signal?.aborted;
+    const outOfTime = `[Subagente INCOMPLETO: se le acabó el tiempo (${Math.round(limitMs / 1000)} s)]`;
+    let report: string;
+    try {
+      report = await this.subagentLoop(agent, prompt, description, checks, signal ? AbortSignal.any([signal, limit]) : limit);
+      if (timedOut()) {
+        report = outOfTime;
+      }
+    } catch (err) {
+      if (!timedOut()) {
+        throw err;
+      }
+      report = outOfTime;
+    }
     this.checks.absorb(checks);
     // Sin gastar otra petición: quien lo lanzó lo sabe y lo puede comprobar (y si no, se le pedirá a él)
     if ((checks.pending || checks.failed) && this.deps.config.verifyCode !== false && !ADMITS_UNCHECKED.test(report)) {

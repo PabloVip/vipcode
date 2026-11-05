@@ -37,6 +37,8 @@ Es TypeScript (Node.js 22 o superior, módulos ES) y la interfaz está hecha con
 | `src/permissions.ts`, `src/trust.ts` | Qué se pregunta antes de hacer, y la confianza en la configuración de cada carpeta |
 | `src/session.ts`, `src/snapshot.ts` | Conversaciones guardadas, y las instantáneas de `/undo` |
 | `src/background.ts` | Los comandos que siguen en marcha en segundo plano |
+| `src/process.ts` | Parar un comando con todo lo que haya lanzado, esperar a uno sin quedarse colgado y el registro de los que siguen vivos |
+| `src/long-running.ts` | Qué comandos no terminan solos (servidores de desarrollo, modos «watch») |
 | `src/mcp.ts`, `src/mcp-auth.ts`, `src/lsp.ts`, `src/skills.ts` | Servidores MCP y sus sesiones, servidores de lenguaje y skills |
 | `src/tui/` | La interfaz de pantalla completa: conversación, ratón, diálogos, estilos y criaturas |
 

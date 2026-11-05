@@ -7,7 +7,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Config, LspServerConfig } from "./config.js";
 import { debugLog } from "./debug.js";
-import { findProgram, killTree, spawnProgram, withoutSecrets } from "./shell.js";
+import { killTree } from "./process.js";
+import { findProgram, spawnProgram, withoutSecrets } from "./shell.js";
 
 export interface Diagnostic {
   line: number;

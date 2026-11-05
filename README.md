@@ -200,7 +200,7 @@ La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan grat
 | `/tutorial` | Aprende lo básico en 5 pasos, en una carpeta de prácticas |
 | `/interfaz` | Elige cómo se ve vipcode: pantalla completa, compacta, zen o criaturas |
 | `/usage` | Tokens usados y lo que ha pasado en la conversación: modelos, cambios de modelo, atascos y errores (solo cuentas) |
-| `/procesos [parar [id]]` | Lo que el agente ha dejado en segundo plano, como un servidor: verlo y pararlo |
+| `/procesos [parar [id]]` | Lo que el agente ha dejado en segundo plano, como unas pruebas largas: verlo y pararlo |
 | `/mcp [login\|logout <servidor>]`, `/lsp` | Estado de los servidores MCP y de lenguaje; iniciar o cerrar sesión en los MCP que lo piden |
 | `/yolo [on\|off]` | Aprobar todo sin preguntar durante la sesión (menos leer ficheros con secretos) |
 | `/reset-limits` | Olvidar las pausas guardadas de los proveedores |
@@ -343,7 +343,8 @@ Después de cada edición, le pasa al modelo los errores que encuentre el servid
 - **Tus claves.** Los servidores MCP y de lenguaje que arranca vipcode no reciben tus claves: si el paquete de uno estuviera comprometido, no podría llevárselas. «Sí siempre a este comando» tampoco vale si el comando escribe en un fichero (`>`) o lleva `$(…)`: eso se pregunta siempre.
 - **Resúmenes.** Los resúmenes de las conversaciones largas los escribe un modelo a partir de todo lo anterior (también de webs o de salidas de comandos), así que van marcados como contexto y no como instrucciones tuyas.
 - **Ficheros con secretos.** Lo que el agente lee se envía al modelo, que puede ser de un proveedor sin cuenta. Por eso `.env`, `.ssh`, `.aws`, `.npmrc`, `*.pem`, `*.key` y otros parecidos no se leen sin preguntar, ni siquiera con `/yolo` (`permission.secrets` lo cambia), y `grep` no enseña lo que contienen. Si los adjuntas tú con `@`, no se pregunta: lo estás pidiendo.
-- **Comandos en segundo plano.** Lo que el agente deja en marcha (un servidor, un «watch») se aprueba como cualquier otro comando, se ve en la barra de abajo y en `/procesos`, y se para al cerrar vipcode. Lo que hayas aprobado para una carpeta no vale en otra.
+- **Comandos que no terminan.** El agente no lanza servidores de desarrollo ni modos «watch» (`npm start`, `ng serve`, `vite`, `docker compose up` sin `-d`, `tail -f`…): se rechazan con la alternativa (`npm run build`, `ng build`…), y esos los arrancas tú. Si uno se escapa, se corta cuando lleva 30 s callado y lo último que escribió parece un servidor listo. Esc, el tiempo máximo, `/exit` y Ctrl+C dos veces nunca esperan al comando, y paran también todo lo que haya lanzado. Cada subagente tiene su propio tiempo máximo (`subagentTimeoutMs`, 15 minutos).
+- **Comandos en segundo plano.** Lo que el agente deja en marcha (unas pruebas largas, un build grande) se aprueba como cualquier otro comando, se ve en la barra de abajo y en `/procesos`, y se para al cerrar vipcode. Lo que hayas aprobado para una carpeta no vale en otra.
 - **Tus datos.** vipcode no envía datos de uso a nadie: las cuentas de `/usage` se quedan en tu ordenador y `/bug` solo las pone en el formulario que revisas y envías tú. Solo habla con los proveedores de IA que uses, con las webs que consulte el agente, con tus servidores MCP, con LLM Stats si le das tu clave y, como mucho una vez por hora, con npm y GitHub para ver si hay versión nueva.
 - **Planes gratuitos.** Los proveedores sin clave y varios planes gratis pueden guardar lo que les envías o usarlo para entrenar sus modelos. No mandes contraseñas ni código confidencial; para eso usa un modelo local (Ollama, LM Studio) y pon `"keyless": false` en la configuración.
 

@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
-import { decodeClixml, killTree, killTreeNow, spawnGroup } from "./shell.js";
+import { killTree, spawnGroup } from "./process.js";
+import { decodeClixml } from "./shell.js";
 
-// Comandos que siguen en marcha mientras el agente hace otras cosas (un servidor, un compilador en modo «watch»). Se
+// Comandos que siguen en marcha mientras el agente hace otras cosas (unas pruebas largas, un build grande). Se
 // aprueban igual que cualquier otro comando, puedes verlos y pararlos con /procesos y se paran todos al cerrar vipcode
 
-// Los que pueden estar en marcha a la vez, y lo último que se guarda de lo que escribe cada uno (un servidor puede escribir
+// Los que pueden estar en marcha a la vez, y lo último que se guarda de lo que escribe cada uno (un comando puede escribir
 // sin parar, y esto se queda en memoria)
 export const MAX_RUNNING = 5;
 const MAX_KEPT = 200000;
@@ -47,29 +48,6 @@ export interface StartOptions {
 
 const jobs = new Map<string, BackgroundJob>();
 let counter = 0;
-let hooked = false;
-
-// Si vipcode se cierra de golpe (un error, Ctrl+C dos veces…) no pasa por shutdown. En macOS y Linux además los para
-// spawnGroup si la señal viene de fuera; en Windows, al cerrar la ventana llega SIGHUP y hay unos segundos para pararlos
-function hookExit() {
-  if (hooked) {
-    return;
-  }
-  hooked = true;
-  const stopNow = () => {
-    for (const job of runningJobs()) {
-      killTreeNow(job.child);
-    }
-  };
-  process.on("exit", stopNow);
-  if (process.platform === "win32") {
-    process.once("SIGHUP", () => {
-      stopNow();
-      process.exit(129);
-    });
-  }
-}
-
 export function runningJobs(): BackgroundJob[] {
   return [...jobs.values()].filter((job) => job.finished === null);
 }
@@ -97,7 +75,6 @@ function forgetOldJobs() {
 
 // Lo lanza en su propio grupo de procesos, para poder pararlo con todo lo que lance. Quien llama ya ha pedido permiso
 export function startJob(options: StartOptions): BackgroundJob {
-  hookExit();
   const child = spawnGroup(options.file, options.args, { cwd: options.cwd, env: options.env, windowsHide: true });
   const job: BackgroundJob = {
     id: `bg${++counter}`,
@@ -208,8 +185,15 @@ export async function stopJob(job: BackgroundJob): Promise<void> {
   if (process.platform === "win32" && young > 0) {
     await new Promise((resolve) => setTimeout(resolve, young));
   }
-  killTree(job.child);
-  await waitForJob(job, 4000, undefined, false);
+  await killTree(job.child);
+  await waitForJob(job, 500, undefined, false);
+  // Algo que no se ha podido parar sigue con su salida abierta: para vipcode, este ya ha terminado
+  if (job.finished === null) {
+    job.finished = Date.now();
+    job.child.stdout.destroy();
+    job.child.stderr.destroy();
+    wake(job);
+  }
 }
 
 export async function stopAllJobs(): Promise<void> {

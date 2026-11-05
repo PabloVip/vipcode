@@ -57,7 +57,7 @@ interface Live {
 const REPLAY_MAX = 300;
 
 // Comandos que se pueden usar mientras el agente trabaja (solo consultan)
-const SAFE_WHILE_BUSY = ["/help", "/usage", "/todos", "/mcp", "/lsp", "/providers", "/skills"];
+const SAFE_WHILE_BUSY = ["/help", "/usage", "/todos", "/mcp", "/lsp", "/providers", "/skills", "/exit", "/quit"];
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -420,6 +420,7 @@ function Main(props: { app: App; initial: string }) {
   const live = useRef<Live>({ text: "", reasoning: "", running: new Map(), model: "", shell: null });
   const dirty = useRef(false);
   const controller = useRef<AbortController | null>(null);
+  const quitting = useRef(false);
   const startedAt = useRef(Date.now());
   // Para el pie de cada respuesta: modelo que contestó y tokens al empezar
   const answered = useRef("");
@@ -527,6 +528,11 @@ function Main(props: { app: App; initial: string }) {
   };
 
   const quit = async () => {
+    // Una vez basta, aunque se pulse o se escriba otra vez mientras se cierra
+    if (quitting.current) {
+      return;
+    }
+    quitting.current = true;
     controller.current?.abort();
     cancelDialog();
     await app.shutdown();
@@ -1069,9 +1075,16 @@ function Main(props: { app: App; initial: string }) {
     }
     // Ctrl+C funciona siempre: interrumpe, cierra el diálogo, borra lo escrito o sale
     if (key.ctrl && input === "c") {
+      // Dos veces seguidas sale, aunque esté esperando a una herramienta
+      if (Date.now() - lastCtrlC.current < 1500) {
+        void quit();
+        return;
+      }
       if (busy && controller.current) {
+        lastCtrlC.current = Date.now();
         controller.current.abort();
         cancelDialog();
+        push({ kind: "info", text: "(pulsa Ctrl+C otra vez para salir)" });
         return;
       }
       if (dialogRef.current) {
@@ -1080,10 +1093,6 @@ function Main(props: { app: App; initial: string }) {
       }
       if (editor.value !== "") {
         update(E.EMPTY);
-        return;
-      }
-      if (Date.now() - lastCtrlC.current < 1500) {
-        void quit();
         return;
       }
       lastCtrlC.current = Date.now();

@@ -183,6 +183,8 @@ export interface Config {
   // Si el modelo que llevaba la tarea se queda sin cupo menos de esto, se le espera en vez de pasarle la tarea a otro (0 = no
   // esperar nunca). No tiene que ver con los modelos lentos: lo que se les espera lo dice firstResponseMs
   stickyWaitMs: number;
+  // Lo que puede durar un subagente antes de pararlo
+  subagentTimeoutMs: number;
   // Si cambia código y termina sin ejecutar nada, se le pide que lo compruebe o que diga que no lo ha hecho
   verifyCode: boolean;
   permission: PermissionConfig;
@@ -244,6 +246,7 @@ export const DEFAULT_CONFIG: Config = {
   maxWaitMs: 90000,
   firstResponseMs: 40000,
   stickyWaitMs: 30000,
+  subagentTimeoutMs: 900000,
   verifyCode: true,
   permission: DEFAULT_PERMISSION,
   mcp: {},

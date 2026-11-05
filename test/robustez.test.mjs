@@ -229,11 +229,11 @@ test("contexto: las lecturas viejas de un fichero que se volvió a leer no se ma
   assert.equal(supersededReads(once), once);
 });
 
-test("bash: si se acaba el tiempo, sugiere lanzarlo en segundo plano", async () => {
+test("bash: si se acaba el tiempo, explica que los servidores los arranca el usuario", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "vipcode-bash-tiempo-"));
   fs.writeFileSync(path.join(root, "espera.cjs"), "setInterval(() => {}, 1000);");
   const result = await run(newCtx(root), "bash", { command: "node espera.cjs", timeout_ms: 500 });
-  assert.match(result.output, /Cancelado por tiempo.*background: true/);
+  assert.match(result.output, /Cortado por tiempo tras 0\.5 s.*lo tiene que arrancar el usuario/);
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
@@ -485,7 +485,7 @@ test("segundo plano: arranca, se mira lo nuevo, se para con todo lo que lanzó y
     cancel.abort();
     result = await pending;
     assert.match(result.output, /Cancelado/);
-    assert.equal(background.runningJobs().length, 0);
+    assert.ok(await until(() => background.runningJobs().length === 0));
     if (fs.existsSync(path.join(root, "pid-cuatro.txt"))) {
       assert.ok(await until(() => !alive(pidOf("pid-cuatro.txt"))));
     }

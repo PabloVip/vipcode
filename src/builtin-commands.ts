@@ -16,7 +16,7 @@ export const BUILTIN_COMMANDS: { name: string; args?: string; description: strin
   { name: "programar", description: "agente que puede modificar ficheros (antes /build)" },
   { name: "profe", description: "agente que te enseña paso a paso; no cambia nada, lo haces tú" },
   { name: "limites", description: "cuánto te queda hoy de cada plan gratis" },
-  { name: "procesos", args: "[parar [id]]", description: "lo que el agente ha dejado en segundo plano (servidores…): verlo y pararlo" },
+  { name: "procesos", args: "[parar [id]]", description: "lo que el agente ha dejado en segundo plano (tareas largas): verlo y pararlo" },
   { name: "copiar", args: "[código]", description: "copia la última respuesta (o su último bloque de código) al portapapeles" },
   { name: "doctor", description: "comprueba que todo funciona (programas, claves, proveedores) y dice cómo arreglar lo que falte" },
   { name: "bug", args: "[qué ha pasado]", description: "avisa de un fallo: abre un issue en GitHub con el informe de /doctor ya puesto (sin tus claves)" },

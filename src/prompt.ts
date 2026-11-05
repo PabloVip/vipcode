@@ -157,10 +157,11 @@ export function systemPrompt(root: string, options: PromptOptions): string {
     rules.push(
       scriptRule(),
       "Every bash call starts again in the working directory: a cd in one call does not carry over to the next. Use the workdir argument (a folder relative to the project) instead of cd.",
+      "Nunca ejecutes servidores de desarrollo ni comandos en modo watch; para comprobar que compila usa el build. No crees carpetas con mkdir: write_file ya crea las carpetas padre. Usa siempre rutas relativas con /.",
     );
   }
   if (has("background")) {
-    rules.push("To start something that keeps running (a dev server, a watcher), use bash with background: true, then check it with the background tool (action \"output\", with wait_ms to give it time to start). Stop it when you no longer need it.");
+    rules.push("For a long task that ends by itself (a big test suite or build), you can use bash with background: true and check it with the background tool (action \"output\", with wait_ms). Stop it when you no longer need it.");
   }
   rules.push(
     "Call several tools in one turn when they are independent.",

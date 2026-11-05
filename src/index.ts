@@ -7,6 +7,7 @@ import readline from "node:readline/promises";
 import pc from "picocolors";
 import { agentName } from "./agents.js";
 import { App, BUILTIN_COMMANDS, type RunOptions, type UiAdapter } from "./app.js";
+import { setInterruptHandler } from "./process.js";
 import { removeAuth } from "./auth.js";
 import { configNotices, loadConfig } from "./config.js";
 import { isImagePath, toDataUrl } from "./images.js";
@@ -375,7 +376,13 @@ async function runOnce(app: App, options: Options, root: string) {
   app.agent.events = plainEvents({ showReasoning: app.config.showReasoning });
   await app.startMcp();
   const controller = new AbortController();
-  process.on("SIGINT", () => controller.abort());
+  // Ctrl+C cancela; dos veces seguidas sale (al salir, process.ts para lo que quede)
+  setInterruptHandler(() => {
+    if (controller.signal.aborted) {
+      process.exit(130);
+    }
+    controller.abort();
+  });
   try {
     // vipcode run "/review" o "/mi-skill tarea": comandos y skills igual que en la interfaz
     let input = { text, images };
@@ -424,17 +431,30 @@ async function plainLoop(app: App, options: Options, root: string) {
 
   let current: AbortController | null = null;
   let lastCtrlC = 0;
+  // Cancela lo que esté en marcha, para todos los comandos, guarda la conversación y sale, sin esperar a ninguna herramienta
+  const leave = () => {
+    current?.abort();
+    rl.close();
+    void app.shutdown().finally(() => process.exit(0));
+  };
+  // /exit también mientras trabaja: se lee aunque nadie esté esperando una línea
+  rl.on("line", (line) => {
+    if (current && /^\/(exit|quit)\s*$/.test(line.trim())) {
+      leave();
+    }
+  });
   rl.on("SIGINT", () => {
-    if (current) {
-      current.abort();
-      console.log(pc.dim("\n(cancelado)"));
+    // Dos veces seguidas sale, aunque esté esperando a una herramienta
+    if (Date.now() - lastCtrlC < 1500) {
+      leave();
       return;
     }
-    if (Date.now() - lastCtrlC < 1500) {
-      rl.close();
-      process.exit(0);
-    }
     lastCtrlC = Date.now();
+    if (current) {
+      current.abort();
+      console.log(pc.dim("\n(cancelado; pulsa Ctrl+C otra vez para salir)"));
+      return;
+    }
     console.log(pc.dim("\n(pulsa Ctrl+C otra vez para salir)"));
     rl.prompt();
   });

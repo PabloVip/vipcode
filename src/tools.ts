@@ -16,7 +16,9 @@ import { MAX_RUNNING, type BackgroundJob, allJobs, findJob, jobState, readJob, r
 import type { Permission, PermissionReply, PermissionRequest } from "./permissions.js";
 import { stripControl } from "./sanitize.js";
 import { isInside, protectedDirs } from "./paths.js";
-import { commandShell, decodeClixml, findProgram, killTree, spawnGroup } from "./shell.js";
+import { findLongRunning, looksLikeServer } from "./long-running.js";
+import { spawnGroup, watchChild } from "./process.js";
+import { commandShell, decodeClixml, findProgram } from "./shell.js";
 
 export type { Permission } from "./permissions.js";
 
@@ -1294,11 +1296,17 @@ function gitSafetyEnv(): Record<string, string> {
 // puerto está ocupado…) el agente lo sabe ya
 const BACKGROUND_START_MS = 2000;
 const BACKGROUND_WAIT_MS = 30000;
+// Un comando que lleva esto sin escribir nada y cuya última salida parece la de un servidor listo se corta
+const SERVER_IDLE_MS = 30000;
+
+function seconds(ms: number): string {
+  return String(Math.round(ms / 100) / 10);
+}
 
 const bashTool: Tool = {
   name: "bash",
   description:
-    "Ejecuta un comando de shell (tests, git, instalar dependencias…). Cada llamada empieza de nuevo en la raíz del proyecto: un cd no se conserva para la siguiente; para trabajar en una subcarpeta usa workdir. No lo uses para leer o editar ficheros: para eso están las otras herramientas. No es interactivo: evita comandos que esperen que escribas algo. Lo que se queda en marcha (un servidor, un «watch») lánzalo con background: true: si no, bloquea hasta que se acabe el tiempo.",
+    "Ejecuta un comando de shell (tests, git, instalar dependencias…). Cada llamada empieza de nuevo en la raíz del proyecto: un cd no se conserva para la siguiente; para trabajar en una subcarpeta usa workdir. No lo uses para leer o editar ficheros: para eso están las otras herramientas. No es interactivo: evita comandos que esperen que escribas algo. No lances servidores de desarrollo ni comandos en modo watch: no terminan y se rechazan. Una tarea larga que termina sola (pruebas, un build grande) puedes lanzarla con background: true.",
   parameters: {
     type: "object",
     properties: {
@@ -1314,6 +1322,11 @@ const bashTool: Tool = {
   readOnly: false,
   async run(args, ctx) {
     const command = String(args.command ?? "");
+    // Lo que no termina solo no se ejecuta, y ni se pregunta: es lo que dejaba a vipcode esperando horas
+    const endless = findLongRunning(command);
+    if (endless) {
+      return `Error: no se ejecuta «${endless.command}» porque no termina solo (es un servidor de desarrollo o un modo watch). Para comprobar que compila usa ${endless.alternative}. Los servidores de desarrollo los arranca el usuario en su propia terminal: si hace falta uno, díselo.`;
+    }
     let cwd = ctx.root;
     if (args.workdir && String(args.workdir).trim() !== "" && String(args.workdir).trim() !== ".") {
       // Con write: el comando puede escribir, así que tampoco vale la instalación de vipcode
@@ -1361,7 +1374,7 @@ const bashTool: Tool = {
       await waitForJob(job, BACKGROUND_START_MS, ctx.signal, false);
       // Esc mientras arranca: lo has cancelado. Después ya no le afecta: para eso está en segundo plano
       if (ctx.signal?.aborted && job.finished === null) {
-        await stopJob(job);
+        void stopJob(job);
         return "Cancelado por el usuario";
       }
       const body = truncate(readJob(job).trim()) || "(sin salida)";
@@ -1371,59 +1384,34 @@ const bashTool: Tool = {
       return `En marcha en segundo plano con el id ${job.id}; se para al cerrar vipcode. Con la herramienta background ves lo que escribe (action: "output") y lo paras (action: "stop").\nSalida hasta ahora:\n${body}`;
     }
 
-    return await new Promise<string>((resolve) => {
-      const shell = commandShell();
-      // En su propio grupo de procesos, para poder parar también a los hijos (npm test, servidores…)
-      const child = spawnGroup(shell.file, shell.args(command), {
-        cwd,
-        env: environment(shell),
-        windowsHide: true,
-      });
-      let output = "";
-      let timedOut = false;
-
-      const kill = () => killTree(child);
-
-      const timer = setTimeout(() => {
-        timedOut = true;
-        kill();
-      }, timeout);
-
-      ctx.signal?.addEventListener("abort", kill);
-
-      // Como texto: así una letra de varios bytes (ñ, á, €) no se rompe si llega partida entre dos trozos
-      const onData = (text: string) => {
-        output += text;
-        if (output.length > 5000000) {
-          output = output.slice(-2000000);
-        }
-        ctx.onProgress?.(text);
-      };
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", onData);
-      child.stderr.on("data", onData);
-      child.on("error", (err) => {
-        clearTimeout(timer);
-        resolve(`No se pudo ejecutar: ${err.message}`);
-      });
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        ctx.signal?.removeEventListener("abort", kill);
-        let header = `Código de salida: ${code}`;
-        if (timedOut) {
-          header = `Cancelado por tiempo (${timeout} ms). Si es un servidor o algo que se queda en marcha, lánzalo con background: true`;
-        } else if (ctx.signal?.aborted) {
-          header = "Cancelado por el usuario";
-        }
-        // Por si PowerShell manda algún error en CLIXML («#< CLIXML <Objs…»): en texto normal
-        let body = decodeClixml(output).trim();
-        if (body === "") {
-          body = "(sin salida)";
-        }
-        resolve(`${header}\n${truncate(body)}`);
-      });
+    const shell = commandShell();
+    // En su propio grupo de procesos, para poder parar también a los hijos (npm test, servidores…)
+    const child = spawnGroup(shell.file, shell.args(command), {
+      cwd,
+      env: environment(shell),
+      windowsHide: true,
     });
+    const idleMs = Number(process.env.VIPCODE_SERVER_IDLE_MS) || SERVER_IDLE_MS;
+    const result = await watchChild(child, { timeoutMs: timeout, signal: ctx.signal, onOutput: ctx.onProgress, idleMs, isIdle: looksLikeServer });
+    if (result.error) {
+      return `No se pudo ejecutar: ${result.error}`;
+    }
+    let header = `Código de salida: ${result.code}`;
+    if (result.reason === "timeout") {
+      header = `Cortado por tiempo tras ${seconds(timeout)} s. Si es un servidor o algo que no termina, lo tiene que arrancar el usuario; para comprobar que compila, usa el build`;
+    } else if (result.reason === "abort") {
+      header = "Cancelado por el usuario";
+    } else if (result.reason === "idle") {
+      header = `Cortado: llevaba ${seconds(idleMs)} s sin escribir nada y lo último parece un servidor ya listo, que no va a terminar. Lo ha dejado parado; para comprobar que compila, usa el build, y los servidores los arranca el usuario`;
+    } else if (result.lingering) {
+      header += " (había dejado algo en marcha con su salida abierta, y se ha parado)";
+    }
+    // Por si PowerShell manda algún error en CLIXML («#< CLIXML <Objs…»): en texto normal
+    let body = decodeClixml(result.output).trim();
+    if (body === "") {
+      body = "(sin salida)";
+    }
+    return `${header}\n${truncate(body)}`;
   },
 };
 

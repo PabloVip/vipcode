@@ -26,7 +26,8 @@ import { bugReportUrl, doctorReport, gitAdvice } from "./doctor.js";
 import { type Session, deleteSession, listSessions, newSession, saveExport, saveSession, sessionMarkdownPath, statsReport } from "./session.js";
 import { Snapshots } from "./snapshot.js";
 import { allJobs, jobState, runningJobs, stopAllJobs, stopJob } from "./background.js";
-import { commandShell, findProgram, killTree, spawnGroup } from "./shell.js";
+import { spawnGroup, stopAllProcesses, watchChild } from "./process.js";
+import { commandShell, findProgram } from "./shell.js";
 import { type UpdateStep, compareVersions, updateVipcode } from "./update.js";
 import { type TutorialCard, type TutorialEvent, isTutorialDir, tutorialCard, tutorialDone } from "./tutorial.js";
 import { INTERFACES, interfaceFor } from "./interfaces.js";
@@ -497,7 +498,10 @@ export class App {
 
   async shutdown() {
     saveSession(this.agent.session);
-    await Promise.allSettled([this.lsp?.shutdown(), this.mcp?.close(), stopAllJobs()]);
+    // Con límite: un servidor MCP o de lenguaje que no contesta no puede impedir que vipcode se cierre. Lo que quede lo para
+    // process.ts al salir
+    const closing = Promise.allSettled([this.lsp?.shutdown(), this.mcp?.close(), stopAllJobs(), stopAllProcesses()]);
+    await Promise.race([closing, new Promise((resolve) => setTimeout(resolve, 3000))]);
   }
 
   // Si es un fichero o una carpeta del proyecto, su ruta desde la raíz (nada de fuera, ni tus datos de vipcode)
@@ -1300,7 +1304,7 @@ export class App {
           return {};
         }
         if (jobs.length === 0) {
-          ui.info("No hay nada en segundo plano. Aquí sale lo que el agente deja en marcha, como un servidor.");
+          ui.info("No hay nada en segundo plano. Aquí sale lo que el agente deja en marcha, como unas pruebas largas.");
           return {};
         }
         ui.block(jobs.map((job) => `  ${job.id.padEnd(6)} ${jobState(job).padEnd(28)} ${showControl(`${job.workdir ? `(en ${job.workdir}) ` : ""}${job.command}`).slice(0, 100)}`).join("\n"));
@@ -1477,63 +1481,31 @@ export class App {
 
   // !comando: lo ejecuta en la carpeta del proyecto (lo escribes tú, así que no pide permiso)
   // y guarda la salida para que el agente la vea con tu siguiente mensaje
-  runShell(command: string, onOutput?: (text: string) => void, signal?: AbortSignal): Promise<{ output: string; code: number | null }> {
-    return new Promise((resolve) => {
-      // Tu shell de siempre; en Windows, la misma que usa el agente (el bash de Git o PowerShell)
-      let shell = { file: process.env.SHELL || findProgram("bash") || "/bin/sh", args: ["-lc", command], env: {} as Record<string, string> };
-      if (process.platform === "win32" || process.env.VIPCODE_SHELL) {
-        const found = commandShell();
-        shell = { file: found.file, args: found.args(command), env: found.env };
-      }
-      // En su propio grupo de procesos: al pararlo (Esc o si se pasa de tiempo) se para también todo lo que haya lanzado,
-      // por ejemplo el servidor de un «!npm run dev»
-      const child = spawnGroup(shell.file, shell.args, {
-        cwd: this.root,
-        env: { ...process.env, ...shell.env, GIT_PAGER: "cat", PAGER: "cat" },
-        windowsHide: true,
-      });
-      let output = "";
-      let stopped = "";
-      const add = (text: string) => {
-        output += text;
-        onOutput?.(text);
-      };
-      // Como texto: así una letra de varios bytes (ñ, á, €) no se rompe si llega partida entre dos trozos
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", add);
-      child.stderr.on("data", add);
-      const stop = (reason: string) => {
-        stopped = reason;
-        killTree(child);
-      };
-      const timer = setTimeout(() => stop(`cancelado por tiempo (${Math.round(this.config.bashTimeoutMs / 1000)} s)`), this.config.bashTimeoutMs);
-      const interrupt = () => stop("interrumpido");
-      signal?.addEventListener("abort", interrupt, { once: true });
-      let done = false;
-      const finish = (code: number | null) => {
-        // "error" y "close" pueden llegar los dos
-        if (done) {
-          return;
-        }
-        done = true;
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", interrupt);
-        let clean = output.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").trimEnd();
-        if (stopped) {
-          clean = `${clean}${clean ? "\n" : ""}(${stopped})`;
-        }
-        this.agent.addNote(`(El usuario ha ejecutado en la terminal \`${command}\`, código de salida ${code ?? "desconocido"}:\n\`\`\`\n${truncate(clean, 8000)}\n\`\`\`)\n\n`);
-        this.agent.logEntry({ role: "tool", text: truncate(clean, 4000), tool: { name: "bash", summary: `(tú) ${command}`, isError: code !== 0 } });
-        saveSession(this.agent.session);
-        resolve({ output: clean, code });
-      };
-      child.on("error", (err) => {
-        output += `No se pudo ejecutar: ${err.message}`;
-        finish(null);
-      });
-      child.on("close", (code) => finish(code));
+  async runShell(command: string, onOutput?: (text: string) => void, signal?: AbortSignal): Promise<{ output: string; code: number | null }> {
+    // Tu shell de siempre; en Windows, la misma que usa el agente (el bash de Git o PowerShell)
+    let shell = { file: process.env.SHELL || findProgram("bash") || "/bin/sh", args: ["-lc", command], env: {} as Record<string, string> };
+    if (process.platform === "win32" || process.env.VIPCODE_SHELL) {
+      const found = commandShell();
+      shell = { file: found.file, args: found.args(command), env: found.env };
+    }
+    // En su propio grupo de procesos: al pararlo (Esc o si se pasa de tiempo) se para también todo lo que haya lanzado,
+    // por ejemplo el servidor de un «!npm run dev»
+    const child = spawnGroup(shell.file, shell.args, {
+      cwd: this.root,
+      env: { ...process.env, ...shell.env, GIT_PAGER: "cat", PAGER: "cat" },
+      windowsHide: true,
     });
+    const result = await watchChild(child, { timeoutMs: this.config.bashTimeoutMs, signal, onOutput });
+    const code = result.code;
+    let clean = `${result.output}${result.error ? `No se pudo ejecutar: ${result.error}` : ""}`.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").trimEnd();
+    const stopped = result.reason === "abort" ? "interrumpido" : result.reason === "timeout" ? `cancelado por tiempo (${Math.round(this.config.bashTimeoutMs / 1000)} s)` : "";
+    if (stopped) {
+      clean = `${clean}${clean ? "\n" : ""}(${stopped})`;
+    }
+    this.agent.addNote(`(El usuario ha ejecutado en la terminal \`${command}\`, código de salida ${code ?? "desconocido"}:\n\`\`\`\n${truncate(clean, 8000)}\n\`\`\`)\n\n`);
+    this.agent.logEntry({ role: "tool", text: truncate(clean, 4000), tool: { name: "bash", summary: `(tú) ${command}`, isError: code !== 0 } });
+    saveSession(this.agent.session);
+    return { output: clean, code };
   }
 
   subagentNames(): string[] {

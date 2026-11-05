@@ -215,7 +215,7 @@ test("bash: salida, código y tiempo límite", async () => {
   let result = await tools.runTool(tools.CORE_TOOLS, "bash", JSON.stringify({ command: "echo hola; exit 3" }), ctx, false);
   assert.equal(result.output, "Código de salida: 3\nhola");
   result = await tools.runTool(tools.CORE_TOOLS, "bash", JSON.stringify({ command: "sleep 5", timeout_ms: 300 }), ctx, false);
-  assert.match(result.output, /Cancelado por tiempo/);
+  assert.match(result.output, /Cortado por tiempo tras 0\.3 s/);
   const denied = { ...ctx, ask: async () => ({ allow: false, feedback: "usa npm" }) };
   result = await tools.runTool(tools.CORE_TOOLS, "bash", JSON.stringify({ command: "yarn" }), denied, false);
   assert.match(result.output, /rechazado.*Motivo: usa npm/);
