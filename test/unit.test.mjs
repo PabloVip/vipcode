@@ -219,8 +219,9 @@ test("bash: salida, código y tiempo límite", async () => {
   const denied = { ...ctx, ask: async () => ({ allow: false, feedback: "usa npm" }) };
   result = await tools.runTool(tools.CORE_TOOLS, "bash", JSON.stringify({ command: "yarn" }), denied, false);
   assert.match(result.output, /rechazado.*Motivo: usa npm/);
-  // Cortar por tiempo ya no espera al proceso: en Windows puede tener la carpeta abierta un momento más
-  fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  // Cortar por tiempo ya no espera al proceso: en Windows puede tener la carpeta abierta un momento más (a uno recién lanzado
+  // se le para pasado 1,5 s). Se borra sin bloquear, para que mientras tanto vipcode pueda pararlo
+  await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
 });
 
 test("HTML a texto y resultados de búsqueda", () => {

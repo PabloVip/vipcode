@@ -234,7 +234,9 @@ test("bash: si se acaba el tiempo, explica que los servidores los arranca el usu
   fs.writeFileSync(path.join(root, "espera.cjs"), "setInterval(() => {}, 1000);");
   const result = await run(newCtx(root), "bash", { command: "node espera.cjs", timeout_ms: 500 });
   assert.match(result.output, /Cortado por tiempo tras 0\.5 s.*lo tiene que arrancar el usuario/);
-  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  // Cortar por tiempo no espera a que el proceso muera (en Windows, a uno recién lanzado se le para pasado 1,5 s): la carpeta
+  // se borra sin bloquear, para que mientras tanto vipcode pueda pararlo
+  await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
 });
 
 test("relevo y prompt: nota para el modelo que coge la tarea, comandos de vipcode, honestidad y la shell de Windows", async () => {
