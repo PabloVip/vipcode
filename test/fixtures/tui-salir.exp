@@ -1,5 +1,5 @@
 # Salir mientras una herramienta está en marcha: /exit o Ctrl+C dos veces, sin esperar a que termine (lo lanza
-# test/procesos.test.mjs). El primer argumento detrás del programa dice cómo salir
+# test/procesos.test.mjs). El primer argumento detrás del programa dice cómo salir: exit, ctrl-c o cola (con un mensaje en cola)
 set timeout 30
 log_user 1
 set cli [lindex $argv 0]
@@ -9,6 +9,20 @@ match_max -d 200000
 proc falla {motivo} {
   puts "\nFALLO: $motivo"
   exit 1
+}
+
+# Espera sin dejar de leer la pantalla: con «after» a secas, la salida de vipcode llena el búfer de la terminal, vipcode se
+# queda bloqueado escribiendo y las teclas siguientes le llegan todas juntas
+proc pausa {segundos} {
+  set fin [expr {[clock milliseconds] + int($segundos * 1000)}]
+  while {[clock milliseconds] < $fin} {
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 20
+  }
 }
 
 spawn -noecho node $cli --yolo
@@ -34,15 +48,29 @@ while {![file exists $fichero] || [file size $fichero] == 0} {
   }
   after 50
 }
-after 500
+pausa 0.5
 
 if {$modo eq "exit"} {
   send "/exit"
-  after 200
+  pausa 0.2
+  send "\r"
+} elseif {$modo eq "cola"} {
+  # Un mensaje que se queda en cola (está trabajando) y luego /exit: al cerrar no se puede mandar a la IA
+  # (Enter aparte, como al teclear: si llega pegado al texto, la caja lo toma como un salto de línea, igual que al pegar)
+  send "SEGUNDO-MENSAJE"
+  pausa 0.3
+  send "\r"
+  expect {
+    "en cola" {}
+    timeout { falla "el mensaje no se queda en cola" }
+  }
+  pausa 0.3
+  send "/exit"
+  pausa 0.3
   send "\r"
 } else {
   send "\x03"
-  after 300
+  pausa 0.3
   send "\x03"
 }
 

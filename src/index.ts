@@ -372,17 +372,22 @@ async function runOnce(app: App, options: Options, root: string) {
   }
   const images = loadImages(options.images, root);
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: Boolean(process.stdin.isTTY) });
-  app.promptPermission = plainPermissionPrompt(() => rl, () => app.grants);
+  const controller = new AbortController();
+  app.promptPermission = plainPermissionPrompt(() => rl, () => app.grants, () => controller.signal);
   app.agent.events = plainEvents({ showReasoning: app.config.showReasoning });
   await app.startMcp();
-  const controller = new AbortController();
   // Ctrl+C cancela; dos veces seguidas sale (al salir, process.ts para lo que quede)
-  setInterruptHandler(() => {
+  const interrupt = () => {
     if (controller.signal.aborted) {
       process.exit(130);
     }
     controller.abort();
-  });
+    console.log(pc.dim("\n(cancelando; pulsa Ctrl+C otra vez para salir ya)"));
+  };
+  setInterruptHandler(interrupt);
+  // En una terminal, Ctrl+C no llega como señal sino como una tecla al readline: sin esto, el primero cerraba la entrada
+  // (y con ella cualquier pregunta de permiso) sin cancelar nada
+  rl.on("SIGINT", interrupt);
   try {
     // vipcode run "/review" o "/mi-skill tarea": comandos y skills igual que en la interfaz
     let input = { text, images };
@@ -396,9 +401,14 @@ async function runOnce(app: App, options: Options, root: string) {
       runOptions = result.run.options;
     }
     await app.runPrompt(input, runOptions, controller.signal);
+    if (controller.signal.aborted) {
+      ui.info("(cancelado)");
+      process.exitCode = 130;
+    }
   } catch (err) {
     if (controller.signal.aborted) {
       ui.info("(cancelado)");
+      process.exitCode = 130;
     } else if (err instanceof NoSlotError) {
       ui.error(err.message);
       process.exitCode = 1;
@@ -425,11 +435,11 @@ async function plainLoop(app: App, options: Options, root: string) {
     return [[], line];
   };
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: Boolean(process.stdin.isTTY), completer });
-  app.promptPermission = plainPermissionPrompt(() => rl, () => app.grants);
+  let current: AbortController | null = null;
+  app.promptPermission = plainPermissionPrompt(() => rl, () => app.grants, () => current?.signal);
   app.agent.events = plainEvents({ showReasoning: app.config.showReasoning });
   void app.startMcp();
 
-  let current: AbortController | null = null;
   let lastCtrlC = 0;
   // Cancela lo que esté en marcha, para todos los comandos, guarda la conversación y sale, sin esperar a ninguna herramienta
   const leave = () => {

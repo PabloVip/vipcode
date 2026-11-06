@@ -724,8 +724,19 @@ test("edit_file: los ficheros que no están en UTF-8 conservan su codificación 
   await run(ctx, "read_file", { path: "viejo.js" });
   tools.beginTurn();
   await run(ctx, "edit_file", { path: "viejo.js", old_string: "valor = 1", new_string: "valor = 3" });
-  tools.undoLastTurn(root);
+  let undone = tools.undoLastTurn(root);
   assert.deepEqual(fs.readFileSync(file), original);
+  assert.deepEqual(undone, { files: ["viejo.js"], kept: [] });
+  // Pero si lo has cambiado después, no se pisa: se deja como está y se dice
+  ctx.readTimes.clear();
+  await run(ctx, "read_file", { path: "viejo.js" });
+  tools.beginTurn();
+  await run(ctx, "edit_file", { path: "viejo.js", old_string: "valor = 1", new_string: "valor = 4" });
+  const mine = Buffer.concat([fs.readFileSync(file), Buffer.from("// mío\n")]);
+  fs.writeFileSync(file, mine);
+  undone = tools.undoLastTurn(root);
+  assert.deepEqual(fs.readFileSync(file), mine);
+  assert.deepEqual(undone, { files: [], kept: ["viejo.js"] });
   fs.rmSync(root, { recursive: true, force: true });
 });
 

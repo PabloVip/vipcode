@@ -1082,8 +1082,11 @@ export class App {
           }
           if (result.files.length > 0) {
             ui.info(`Ficheros restaurados: ${result.files.join(", ")}`);
-          } else {
+          } else if (result.kept.length === 0) {
             ui.info("No había cambios en ficheros.");
+          }
+          if (result.kept.length > 0) {
+            ui.notice(keptNotice(result.kept, "deshecho"));
           }
           if (result.restoredMessages) {
             ui.info("He quitado ese mensaje de la conversación (/redo lo recupera).");
@@ -1101,6 +1104,9 @@ export class App {
             ui.info("No hay nada que rehacer.");
           } else {
             ui.info(`Rehecho${result.files.length > 0 ? `: ${result.files.join(", ")}` : ""}.`);
+            if (result.kept.length > 0) {
+              ui.notice(keptNotice(result.kept, "rehecho"));
+            }
           }
         } catch (err) {
           ui.error((err as Error).message);
@@ -1511,4 +1517,9 @@ export class App {
   subagentNames(): string[] {
     return subagents(this.agents).map((agent) => agent.name);
   }
+}
+
+// /undo y /redo: los ficheros que no se han tocado porque han cambiado después de ese mensaje
+function keptNotice(files: string[], done: string): string {
+  return `No he ${done} ${files.length === 1 ? "este fichero" : "estos ficheros"} porque ${files.length === 1 ? "ha" : "han"} cambiado después de ese mensaje (lo has editado tú, o algo que siguió en marcha), y no quiero pisar ese trabajo: ${files.join(", ")}. Si quieres, cámbialo a mano o pídeselo al agente.`;
 }

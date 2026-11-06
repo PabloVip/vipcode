@@ -52,10 +52,19 @@ expect {
   "Escribe tu mensaje" {}
   timeout { falla "no vuelve a quedar libre" }
 }
-send "/exit\r"
+# Las sugerencias de la caja: «/ex» ofrece /export y /exit. ↓ y Enter llegando juntos eligen la segunda (/exit), no la que
+# estaba marcada la última vez que se pintó (/export)
+send "/ex"
+expect {
+  "/export" {}
+  timeout { falla "no salen las sugerencias de /ex" }
+}
+pausa 0.5
+send "\033\[B\r"
 expect {
   eof {}
-  timeout { falla "/exit no cierra la interfaz" }
+  "Conversación guardada en" { falla "↓ y Enter juntos han elegido /export (la primera sugerencia) en vez de /exit" }
+  timeout { falla "↓ y Enter juntos no han elegido /exit" }
 }
 puts "\nTUI-TECLAS-OK"
 exit 0

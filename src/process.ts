@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Pablo Vicente Juan
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { type ChildProcess, type ChildProcessByStdio, type SpawnOptions, spawn, spawnSync } from "node:child_process";
+import os from "node:os";
 import type { Readable } from "node:stream";
 import { system32 } from "./shell.js";
 
@@ -11,6 +12,12 @@ import { system32 } from "./shell.js";
 // cierre su salida cuando ya ha terminado
 const KILL_GRACE_MS = 2000;
 const CLOSE_GRACE_MS = 2000;
+// En Windows no hay grupos de procesos: taskkill /T para lo que ve en ese momento, y la shell puede estar todavía lanzando el
+// programa, que se quedaría en marcha para siempre. A un comando recién lanzado se le da este tiempo antes de pararlo
+const START_GRACE_MS = 1500;
+const started = new WeakMap<ChildProcess, number>();
+
+const exited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
 
 const alive = new Set<ChildProcess>();
 const stopping = new Map<ChildProcess, Promise<void>>();
@@ -35,6 +42,15 @@ async function stopTree(child: ChildProcess) {
   }
   // En Windows no hay grupos de procesos: taskkill /T recorre los hijos
   if (process.platform === "win32") {
+    const young = START_GRACE_MS - (Date.now() - (started.get(child) ?? 0));
+    if (young > 0) {
+      await new Promise((resolve) => setTimeout(resolve, young));
+    }
+    // Si ya ha terminado, su número de proceso puede ser ya de otro programa (Windows los reutiliza) y taskkill /T pararía ese y
+    // todo lo que cuelga de él. Lo que dejó en marcha ya no se puede alcanzar desde aquí
+    if (exited(child)) {
+      return;
+    }
     await new Promise<void>((resolve) => {
       const taskkill = spawn(system32("taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
       taskkill.on("error", () => {
@@ -91,7 +107,10 @@ export function killTreeNow(child: ChildProcess) {
     return;
   }
   if (process.platform === "win32") {
-    spawnSync(system32("taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    // Igual que arriba: no se le pide nada a un número de proceso que ya puede ser de otro
+    if (!exited(child)) {
+      spawnSync(system32("taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    }
     return;
   }
   try {
@@ -122,7 +141,12 @@ function onExitSignal(signal: NodeJS.Signals) {
   }
   killAllNow();
   unhookExit();
-  process.kill(process.pid, signal);
+  try {
+    process.kill(process.pid, signal);
+  } catch {
+    // En Windows no se puede volver a mandar SIGHUP (lo que llega al cerrar la ventana): se sale con el código de esa señal
+    process.exit(128 + (os.constants.signals[signal] ?? 1));
+  }
 }
 
 function hookExit() {
@@ -156,6 +180,7 @@ export function setInterruptHandler(handler: () => void) {
 export function spawnGroup(file: string, args: string[], options: Omit<SpawnOptions, "stdio" | "detached">): ChildProcessByStdio<null, Readable, Readable> {
   const child = spawn(file, args, { ...options, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
   hookExit();
+  started.set(child, Date.now());
   alive.add(child);
   const forget = () => {
     // Si se está parando, sigue en el registro hasta que lo hayan parado del todo: su salida puede cerrarse antes

@@ -1,0 +1,49 @@
+# vipcode run en una terminal de verdad: un solo Ctrl+C cancela y termina, con un comando en marcha («comando») o con la
+# pregunta de permiso delante («permiso»). Lo lanza test/procesos.test.mjs
+set timeout 30
+log_user 1
+set cli [lindex $argv 0]
+set modo [lindex $argv 1]
+
+proc falla {motivo} {
+  puts "\nFALLO: $motivo"
+  exit 1
+}
+
+if {$modo eq "comando"} {
+  spawn -noecho node $cli run --yolo "lanza el comando"
+  set fichero "padre.pid"
+  set fin [expr {[clock milliseconds] + 20000}]
+  while {![file exists $fichero] || [file size $fichero] == 0} {
+    if {[clock milliseconds] > $fin} {
+      falla "el comando no arranca"
+    }
+    expect {
+      -timeout 0
+      "@@nunca-sale@@" {}
+      timeout {}
+    }
+    after 50
+  }
+  after 300
+} else {
+  spawn -noecho node $cli run "lanza el comando"
+  expect {
+    "Permitir?" {}
+    timeout { falla "no sale la pregunta de permiso" }
+  }
+  after 300
+}
+
+send "\x03"
+set timeout 8
+expect {
+  "(cancelado)" {}
+  timeout { falla "un Ctrl+C no cancela ($modo)" }
+}
+expect {
+  eof {}
+  timeout { falla "no termina tras cancelar ($modo)" }
+}
+puts "\nRUN-CANCELAR-OK"
+exit 0

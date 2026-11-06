@@ -187,7 +187,7 @@ La barra de abajo enseña el agente, el modelo, cuánto te queda de su plan grat
 | `/model <p/m>` | Fija un modelo (`/model auto` vuelve a la rotación) |
 | `/connect`, `/disconnect`, `/providers` | Añadir, quitar y ver las claves de los proveedores |
 | `/agents`, `/agent <nombre>`, `/planear`, `/programar`, `/profe` | Cambiar de agente |
-| `/undo`, `/redo`, `/diff [all]` | Deshacer y rehacer el último mensaje (ficheros y conversación); ver los cambios |
+| `/undo`, `/redo`, `/diff [all]` | Deshacer y rehacer el último mensaje (ficheros y conversación; solo lo que cambió ese mensaje, sin pisar lo que hayas hecho después); ver los cambios |
 | `/todos` | Lista de tareas del agente |
 | `/skills` | Skills instaladas; elige una para usarla (o escribe `/nombre-de-la-skill tarea`) |
 | `/compact` | Resumir la conversación |

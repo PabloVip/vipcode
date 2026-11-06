@@ -352,3 +352,24 @@ test("interfaz: las teclas que llegan seguidas no se pierden en la caja de escri
     ws.cleanup();
   }
 });
+
+test("interfaz: dos preguntas de permiso seguidas responden igual, y la segunda empieza en «Sí»", { skip: !hasExpect && "falta el programa expect" }, async () => {
+  const mock = await startMock(({ body }) =>
+    lastMessage(body).role === "tool"
+      ? { text: "FIN-PERMISOS" }
+      : { tools: [{ name: "write_file", args: { path: "uno.txt", content: "1\n" } }, { name: "write_file", args: { path: "dos.txt", content: "2\n" } }] },
+  );
+  const ws = tempWorkspace();
+  ws.writeConfig({ providers: [provider("p", mock.url, ["m"])], enabledProviders: ["p"], autoUpdateModels: false, checkUpdates: false });
+  try {
+    const result = await runExpect("tui-permisos.exp", ws);
+    assert.equal(result.code, 0, result.plain.slice(-2000));
+    assert.match(result.plain, /TUI-PERMISOS-OK/);
+    // El primero se ha rechazado y el segundo, aprobado
+    assert.ok(!ws.exists("uno.txt"));
+    assert.equal(ws.read("dos.txt"), "2\n");
+  } finally {
+    await mock.close();
+    ws.cleanup();
+  }
+});

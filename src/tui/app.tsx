@@ -29,8 +29,12 @@ import * as E from "./editor.js";
 import { Bullet, type Item, type NewItem, ToolHeader, formatDuration, oneLine, shortTokens, tildify } from "./items.js";
 import { look, setLook } from "./theme.js";
 
+// Cada pregunta de permiso lleva su número: así se pinta siempre un diálogo nuevo, aunque la siguiente llegue antes de que se
+// haya quitado la anterior (React juntaría los dos cambios y reutilizaría el diálogo ya contestado, con su opción marcada)
+let permissionSeq = 0;
+
 type Dialog =
-  | { kind: "permission"; request: PermissionRequest; agent: string; resolve: (choice: PermissionChoice) => void }
+  | { kind: "permission"; id: number; request: PermissionRequest; agent: string; resolve: (choice: PermissionChoice) => void }
   | { kind: "select"; title: string; items: SelectItem<unknown>[]; resolve: (value: unknown) => void }
   | { kind: "checklist"; title: string; items: () => SelectItem<unknown>[]; toggle: (value: unknown) => void; resolve: () => void }
   | { kind: "prompt"; title: string; mask?: boolean; placeholder?: string; resolve: (value: string | null) => void };
@@ -414,6 +418,12 @@ function Main(props: { app: App; initial: string }) {
   });
   const [attachments, setAttachments] = useState<string[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
+  // La sugerencia marcada, al día aunque ↓ y Enter lleguen juntos (sin esperar a que se pinte): Enter coge la que se ha marcado
+  const latestSuggestion = useRef(0);
+  const selectSuggestion = (index: number) => {
+    latestSuggestion.current = index;
+    setSelectedSuggestion(index);
+  };
   const [suggestionsClosed, setSuggestionsClosed] = useState(false);
   const [agentName, setAgentName] = useState(app.agent.agent.name);
   const [, setVersion] = useState(0);
@@ -533,6 +543,8 @@ function Main(props: { app: App; initial: string }) {
       return;
     }
     quitting.current = true;
+    // Lo que había en cola no se lanza: vipcode se está cerrando (y sus herramientas llegarían a ejecutarse)
+    app.agent.queue.length = 0;
     controller.current?.abort();
     cancelDialog();
     await app.shutdown();
@@ -542,6 +554,9 @@ function Main(props: { app: App; initial: string }) {
 
   // «Reiniciar ahora» tras /update: se cierra la interfaz y la versión nueva la abre index.ts (este proceso no sale)
   const restart = async () => {
+    // Igual que al salir: este proceso sigue vivo esperando a la versión nueva, y lo que hubiera en cola seguiría por detrás
+    quitting.current = true;
+    app.agent.queue.length = 0;
     controller.current?.abort();
     cancelDialog();
     await app.shutdown();
@@ -604,8 +619,8 @@ function Main(props: { app: App; initial: string }) {
       setAgentName(app.agent.agent.name);
       setTodos([...app.agent.session.todos]);
       refresh();
-      // Lo que se escribió al final y no llegó a entregarse se lanza ahora
-      const next = app.agent.queue.shift();
+      // Lo que se escribió al final y no llegó a entregarse se lanza ahora (salvo si vipcode se está cerrando)
+      const next = quitting.current ? undefined : app.agent.queue.shift();
       if (next) {
         void runAgent(next, {});
       }
@@ -880,6 +895,7 @@ function Main(props: { app: App; initial: string }) {
         }
         setDialog({
           kind: "permission",
+          id: ++permissionSeq,
           request,
           agent: agent.name,
           resolve: (choice) => {
@@ -1035,11 +1051,11 @@ function Main(props: { app: App; initial: string }) {
   const update = (state: E.EditorState) => {
     setEditor(state);
     setSuggestionsClosed(false);
-    setSelectedSuggestion(0);
+    selectSuggestion(0);
   };
 
   const accept = (andSubmit: boolean) => {
-    const suggestion = suggestions[selected];
+    const suggestion = suggestions[Math.min(latestSuggestion.current, Math.max(0, suggestions.length - 1))];
     if (!suggestion) {
       return;
     }
@@ -1141,7 +1157,7 @@ function Main(props: { app: App; initial: string }) {
     }
     if (key.upArrow) {
       if (suggestionsVisible) {
-        setSelectedSuggestion(Math.max(0, selected - 1));
+        selectSuggestion(Math.max(0, Math.min(latestSuggestion.current, suggestions.length - 1) - 1));
         return;
       }
       const moved = E.moveVertical(editor, -1);
@@ -1167,7 +1183,7 @@ function Main(props: { app: App; initial: string }) {
     }
     if (key.downArrow) {
       if (suggestionsVisible) {
-        setSelectedSuggestion(Math.min(suggestions.length - 1, selected + 1));
+        selectSuggestion(Math.min(suggestions.length - 1, latestSuggestion.current + 1));
         return;
       }
       const moved = E.moveVertical(editor, 1);
@@ -1303,7 +1319,7 @@ function Main(props: { app: App; initial: string }) {
       const where = dialog.request.kind === "bash" ? ": el comando entero está justo encima, léelo antes de aprobarlo" : "";
       request = { ...request, preview: `${lines.slice(0, room).join("\n")}\n… ${lines.length - room} líneas más${where}` };
     }
-    dialogView = <PermissionDialog key="permission" request={request} agent={dialog.agent} onDone={dialog.resolve} />;
+    dialogView = <PermissionDialog key={`permission-${dialog.id}`} request={request} agent={dialog.agent} onDone={dialog.resolve} />;
   } else if (dialog?.kind === "select") {
     dialogView = <SelectDialog key="select" title={dialog.title} items={dialog.items} onDone={dialog.resolve} />;
   } else if (dialog?.kind === "checklist") {

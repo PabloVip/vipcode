@@ -22,6 +22,9 @@ interface Option {
   label: string;
 }
 
+// Respuestas escritas enteras en el diálogo de permiso: la letra de su opción
+const ANSWER_WORDS: Record<string, string> = { no: "n", si: "s", sí: "s", y: "s", yes: "s" };
+
 export type PermissionChoice = { reply: PermissionReply; grant?: "kind" | "pattern"; pattern?: string };
 
 // Un valor que está siempre al día aunque lleguen varias teclas antes de volver a pintar (al escribir rápido, o en un ordenador
@@ -67,11 +70,21 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
   options.push({ key: "n", label: "No" });
   options.push({ key: "e", label: "No, y decirle qué hacer en su lugar" });
 
-  const [selected, , setSelected] = useLatest(0);
-  const [explaining, setExplaining] = useState(false);
+  // La opción marcada se lee de «latestSelected» y no de lo último pintado: si ↓↓↓ y Enter llegan juntos (el ordenador va
+  // cargado, por SSH), Enter tiene que elegir la opción a la que se ha bajado, no la que estaba marcada antes («Sí»)
+  const [selected, latestSelected, setSelected] = useLatest(0);
+  const [explaining, latestExplaining, setExplaining] = useLatest(false);
   const [feedback, latestFeedback, setFeedback] = useLatest<EditorState>(EMPTY);
+  // Una respuesta y solo una: lo que llegue detrás en el mismo trozo no puede contestar otra vez
+  const answered = useRef(false);
 
   const choose = (key: string) => {
+    if (answered.current) {
+      return;
+    }
+    if (key !== "e") {
+      answered.current = true;
+    }
     if (key === "s") {
       props.onDone({ reply: { allow: true } });
     } else if (key === "t") {
@@ -81,18 +94,22 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
     } else if (key === "n") {
       props.onDone({ reply: { allow: false } });
     } else if (key === "e") {
-      setExplaining(true);
+      setExplaining(() => true);
     }
   };
 
   useInput((input, key) => {
+    if (answered.current) {
+      return;
+    }
     const { text, enter } = splitEnter(input, key.return);
-    if (explaining) {
+    if (latestExplaining.current) {
       if (enter) {
         const value = insert(latestFeedback.current, text).value;
+        answered.current = true;
         props.onDone({ reply: { allow: false, feedback: value.trim() || undefined } });
       } else if (key.escape) {
-        setExplaining(false);
+        setExplaining(() => false);
       } else if (key.backspace) {
         setFeedback(backspace);
       } else if (key.leftArrow) {
@@ -106,7 +123,9 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
       }
       return;
     }
-    const letter = text.trim().toLowerCase();
+    const typed = text.trim().toLowerCase();
+    // Lo que se escribe entero también vale («no», «sí»), como en el modo de texto
+    const letter = ANSWER_WORDS[typed] ?? typed;
     if (key.upArrow) {
       setSelected((current) => (current - 1 + options.length) % options.length);
     } else if (key.downArrow || key.tab) {
@@ -115,15 +134,16 @@ export function PermissionDialog(props: { request: PermissionRequest; agent: str
       choose("n");
     } else if (letter && options.some((option) => option.key === letter)) {
       choose(letter);
-    } else if (letter === "y") {
-      choose("s");
+    } else if (letter) {
+      // Un texto que no es ninguna opción no contesta nada, ni aunque lleve Enter detrás: si no, «no» + Enter llegando
+      // juntos aprobaría la opción marcada
     } else if (enter) {
-      choose(options[selected].key);
+      choose(options[latestSelected.current].key);
     }
   });
 
   usePaste((text) => {
-    if (explaining) {
+    if (latestExplaining.current) {
       setFeedback((current) => insert(current, text.replace(/\r?\n/g, " ")));
     }
   });

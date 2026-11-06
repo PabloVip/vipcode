@@ -1212,16 +1212,23 @@ export class Agent {
   }
 
   // Deshace el último mensaje: ficheros (con instantáneas, incluido lo que hizo bash) y conversación
-  async undo(): Promise<{ files: string[]; text: string; restoredMessages: boolean } | null> {
+  async undo(): Promise<{ files: string[]; kept: string[]; text: string; restoredMessages: boolean } | null> {
     const turn = this.session.turns.pop();
     if (!turn) {
       return null;
     }
+    // Solo lo que cambió ese mensaje, y solo si sigue como lo dejó: lo que hayas tocado después se queda como está («kept»)
     let files: string[] = [];
+    let kept: string[] = [];
     if (turn.before && this.deps.snapshots) {
-      files = await this.deps.snapshots.restore(turn.before);
+      if (turn.after) {
+        ({ files, kept } = await this.deps.snapshots.revert(turn.before, turn.after));
+      } else {
+        // Sin la instantánea del final (no se pudo hacer) no se sabe qué cambió ese mensaje: todo como estaba antes
+        files = await this.deps.snapshots.restore(turn.before);
+      }
     } else {
-      files = undoLastTurn(this.deps.root);
+      ({ files, kept } = undoLastTurn(this.deps.root));
     }
     let removed: Message[] = [];
     let restoredMessages = false;
@@ -1235,16 +1242,20 @@ export class Agent {
     this.readTimes.clear();
     this.logEntry({ role: "info", text: `Deshecho: «${turn.userText}»${files.length > 0 ? ` (ficheros restaurados: ${files.join(", ")})` : ""}` });
     saveSession(this.session);
-    return { files, text: turn.userText, restoredMessages };
+    return { files, kept, text: turn.userText, restoredMessages };
   }
 
-  async redo(): Promise<{ files: string[] } | null> {
+  async redo(): Promise<{ files: string[]; kept: string[] } | null> {
     const entry = this.session.redo.pop();
     if (!entry) {
       return null;
     }
     let files: string[] = [];
-    if (entry.turn.after && this.deps.snapshots) {
+    let kept: string[] = [];
+    if (entry.turn.after && entry.turn.before && this.deps.snapshots) {
+      // Lo mismo al revés: vuelve lo que deshizo /undo, sin pisar lo que hayas cambiado desde entonces
+      ({ files, kept } = await this.deps.snapshots.revert(entry.turn.after, entry.turn.before));
+    } else if (entry.turn.after && this.deps.snapshots) {
       files = await this.deps.snapshots.restore(entry.turn.after);
     }
     if (entry.messages.length > 0 && entry.turn.epoch === this.session.epoch && this.session.messages.length === entry.turn.messageIndex) {
@@ -1254,7 +1265,7 @@ export class Agent {
     this.readTimes.clear();
     this.logEntry({ role: "info", text: `Rehecho: «${entry.turn.userText}»` });
     saveSession(this.session);
-    return { files };
+    return { files, kept };
   }
 
   // Diff de lo que ha cambiado en el último mensaje o en toda la sesión

@@ -116,6 +116,29 @@ test("Esc: la herramienta contesta en menos de 3 s con lo que había escrito y n
   }
 });
 
+test("Esc nada más arrancar: el comando se para también, aunque aún no hubiera lanzado su programa", async () => {
+  const ws = workspace();
+  try {
+    const cancel = new AbortController();
+    const pending = run({ ...ws.ctx, signal: cancel.signal }, { command: "node padre.cjs" });
+    await sleep(50);
+    const start = Date.now();
+    cancel.abort();
+    assert.match((await pending).output, /^Cancelado por el usuario/);
+    assert.ok(Date.now() - start < 3000, `ha tardado ${Date.now() - start} ms`);
+    // En Windows se le deja terminar de arrancar (1,5 s) antes de pararlo: lo que llegue a lanzar, también se para
+    await sleep(3000);
+    for (const name of ["padre", "nieto"]) {
+      const file = path.join(ws.root, `${name}.pid`);
+      if (fs.existsSync(file) && fs.readFileSync(file, "utf8") !== "") {
+        await noneAlive([Number(fs.readFileSync(file, "utf8"))]);
+      }
+    }
+  } finally {
+    ws.cleanup();
+  }
+});
+
 test("tiempo máximo: lo mismo, y avisa de cuánto llevaba", async () => {
   const ws = workspace();
   try {
@@ -300,7 +323,7 @@ async function withCommandRunning(fn) {
     }
   }, 20000);
   try {
-    await fn(ws, started, () => [pid("padre"), pid("nieto")]);
+    await fn(ws, started, () => [pid("padre"), pid("nieto")], mock);
   } finally {
     for (const name of ["padre", "nieto"]) {
       try {
@@ -361,10 +384,10 @@ test("vipcode run: Ctrl+C cancela y dos veces seguidas sale, sin dejar huérfano
   });
 });
 
-for (const mode of ["exit", "ctrl-c"]) {
-  const label = mode === "exit" ? "/exit" : "Ctrl+C dos veces";
+const EXIT_MODES = { exit: "/exit", "ctrl-c": "Ctrl+C dos veces", cola: "/exit con un mensaje en cola" };
+for (const [mode, label] of Object.entries(EXIT_MODES)) {
   test(`interfaz: ${label} sale con un comando en marcha y no deja huérfanos`, { skip: !hasExpect && "falta el programa expect" }, async () => {
-    await withCommandRunning(async (ws, started, pids) => {
+    await withCommandRunning(async (ws, started, pids, mock) => {
       const { ROOT } = await import("./helpers/mock-llm.mjs");
       const child = spawn("expect", [path.join(ROOT, "test", "fixtures", "tui-salir.exp"), CLI, mode], {
         cwd: ws.proj,
@@ -381,6 +404,38 @@ for (const mode of ["exit", "ctrl-c"]) {
       assert.match(plain, /TUI-SALIR-OK/);
       assert.ok(await started());
       await noneAlive(pids());
+      // Lo que estaba en cola no se manda al cerrar (antes se mandaba y sus herramientas llegaban a ejecutarse)
+      const sent = mock.chats().map((request) => JSON.stringify(request.body.messages)).join("\n");
+      assert.ok(!sent.includes("SEGUNDO-MENSAJE"), "el mensaje en cola se ha mandado a la IA al cerrar");
+    });
+  });
+}
+
+// En una terminal de verdad, Ctrl+C llega como una tecla y no como señal: antes el primero no cancelaba (cerraba la entrada
+// sin decir nada, y con ella las preguntas de permiso) y hacía falta otro
+for (const mode of ["comando", "permiso"]) {
+  test(`vipcode run en una terminal: un solo Ctrl+C cancela y termina (${mode === "comando" ? "con un comando en marcha" : "con la pregunta de permiso delante"})`, { skip: !hasExpect && "falta el programa expect" }, async () => {
+    await withCommandRunning(async (ws, started, pids) => {
+      const { ROOT } = await import("./helpers/mock-llm.mjs");
+      const child = spawn("expect", [path.join(ROOT, "test", "fixtures", "run-cancelar.exp"), CLI, mode], {
+        cwd: ws.proj,
+        env: { ...systemEnv(ws.home), VIPCODE_HOME: ws.home, TERM: "xterm-256color", NO_COLOR: "1" },
+      });
+      const chunks = [];
+      child.stdout.on("data", (d) => chunks.push(d));
+      child.stderr.on("data", (d) => chunks.push(d));
+      const killer = setTimeout(() => child.kill("SIGKILL"), 60000);
+      const code = await new Promise((resolve) => child.on("close", resolve));
+      clearTimeout(killer);
+      const plain = Buffer.concat(chunks).toString("utf8").replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
+      assert.equal(code, 0, plain.slice(-1500));
+      assert.match(plain, /RUN-CANCELAR-OK/);
+      if (mode === "comando") {
+        await noneAlive(pids());
+      } else {
+        // Con la pregunta delante no se ha llegado a ejecutar nada
+        assert.ok(!fs.existsSync(path.join(ws.proj, "padre.pid")));
+      }
     });
   });
 }
@@ -489,6 +544,11 @@ test("la lista de comandos que no terminan: los habituales sí, y lo que se les 
     "kubectl logs -f web", "journalctl -f", "Get-Content app.log -Wait", "ping -t 1.1.1.1", "watch ls", "PORT=3000 npm start", "NODE_ENV=dev npx nodemon a.js",
     "cd web && npm run dev", "cd web; npm start", "npm install && npm start", "npm start &", "(cd web && npm start)", "bash -c 'npm start'", "cmd /c npm start", "nohup npm start",
     "npm start 2>&1", "npm start > salida.log 2>&1 &", "npm.cmd start", "ng.cmd serve", "C:/tools/ng.exe serve",
+    // Los que se escapaban en la 0.4.3
+    "npm run build:watch", "npm run watch:build", "npm run compile:watch", "bundle exec rails s", "uv run uvicorn main:app", "uv run --env-file .env uvicorn app:app",
+    "poetry run python manage.py runserver", "pipenv run flask run", "flask --app app run", "python -m flask run", "bin/dev", "npm run storybook", "docker compose watch",
+    "python3.12 -m http.server", "wrangler dev", "netlify dev", "vercel dev", "firebase emulators:start", "deno task dev", "deno serve main.ts", "turbo dev", "nx serve web",
+    "nx run web:serve", "python -m django runserver", "kubectl get pods -w", "ping host -t", "vite --host", "cross-env NODE_ENV=dev nodemon a.js",
   ];
   for (const command of endless) {
     assert.ok(findLongRunning(command), `debería rechazarse: ${command}`);
@@ -500,6 +560,12 @@ test("la lista de comandos que no terminan: los habituales sí, y lo que se les 
     "docker logs web", "tail app.log", "tail -n 50 app.log", "mvn package", "mvn test", "gradle build", "cargo build", "dotnet build", "python -m pytest", "python main.py", "php -l a.php", "git status",
     "git log --oneline", "ls -la", "echo hola", "echo npm start", "echo ng serve && git status", 'grep "npm start" README.md', 'git commit -m "--watch añadido"', 'grep -- "--watch" a.txt', "cat vite.config.ts",
     "node a.js", "node --version", "timeout 5 npm start", "mkdir -p a", "npm --version", "ng serve --help", 'git commit -m "arregla; npm start"', 'echo "a && ng serve"', "npm run build 2>&1", "npm test > salida.txt 2>&1",
+    // Los que se rechazaban en la 0.4.3 y sí terminan
+    "npm run test:server", "npm run lint:server", "npm run typecheck:server", "npm run server:test", "npm run dev:setup", "npm run dev:seed", "npm run migrate:dev",
+    "npm run db:migrate:dev", "npm run seed:dev", "git commit -F - <<EOF\nnpm start ya no falla\nEOF", "cat > README.md <<'FIN'\nnpm run dev\nFIN", "cat <<-FIN\n\tnpm start\n\tFIN",
+    '$texto = @"\nnpm start\n"@', "docker compose up --abort-on-container-exit --exit-code-from tests", "docker compose up --wait", "gh pr checks 12 --watch", "gh run watch",
+    "kubectl rollout status deploy/web --watch=true", "vite -c vite.config.ts build", "vite --mode production build", "ping -c 3 -t 5 example.com", "bun server.test.ts",
+    "python3 -m pytest", "python manage.py migrate", "uv run pytest", "bundle exec rspec", "nx build web", "turbo run build", "deno test", "deno run main.ts",
   ];
   for (const command of normal) {
     assert.equal(findLongRunning(command), null, `no debería rechazarse: ${command}`);
@@ -548,10 +614,11 @@ test("red final: un servidor que no reconoce la lista se corta si se queda calla
     delete process.env.VIPCODE_SERVER_IDLE_MS;
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
-  for (const line of ["Watching for file changes.", "  Local: http://localhost:5173/", "Server listening on port 80", "listening on 0.0.0.0:8000", "Started Application in 3.2 seconds", "Started", "\x1b[32mcompiled successfully\x1b[0m"]) {
+  for (const line of ["Watching for file changes.", "  Local: http://localhost:5173/", "Server listening on port 80", "listening on 0.0.0.0:8000", "Started server on port 3000", "Started", "\x1b[32mcompiled successfully\x1b[0m"]) {
     assert.ok(looksLikeServer(`algo\n${line}\n`), line);
   }
-  for (const line of ["Tests: 12 passed", "Compilando…", "started the migration of 3 tables", "Downloading http://example.com/a.tgz"]) {
+  // «Started FooTests in 3.2 seconds» lo escriben también las pruebas de Spring Boot, que luego pueden pasar un rato calladas
+  for (const line of ["Tests: 12 passed", "Compilando…", "started the migration of 3 tables", "Downloading http://example.com/a.tgz", "Started FooTests in 3.2 seconds (process running for 4.1)", "Started Application in 3.2 seconds"]) {
     assert.ok(!looksLikeServer(`algo\n${line}\n`), line);
   }
 });

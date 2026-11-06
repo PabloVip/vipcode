@@ -4,6 +4,16 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Corregido
+
+- **El diálogo de permiso ya no puede aprobar lo que rechazas.** Si las teclas llegaban juntas (el ordenador iba cargado, por SSH), ↓ hasta «No» y Enter podían ejecutar el comando de todas formas, y escribir «no» y Enter de golpe también lo aprobaba. Ahora Enter elige la opción a la que has bajado, «no» y «sí» escritos enteros valen, un texto que no es ninguna opción no aprueba nada y una respuesta solo cuenta una vez. Lo mismo para elegir entre las sugerencias de la caja de escribir.
+- **`/undo` ya no se lleva tu trabajo.** Volvía todo el proyecto a como estaba antes de ese mensaje: borraba los ficheros que hubieras creado después y deshacía lo que hubieras editado a mano, aunque el agente no los hubiera tocado, y `/redo` no los recuperaba. Ahora `/undo` y `/redo` solo tocan lo que cambió ese mensaje, y si un fichero ha cambiado después, no lo tocan y te lo dicen. También sin git.
+- **`/exit` con un mensaje en cola ya no lo manda a la IA al cerrar** (ni al reiniciar tras `/update`): antes llegaba a enviarse, y sus herramientas podían ejecutarse mientras vipcode se cerraba.
+- **`vipcode run` en una terminal: un solo Ctrl+C cancela.** El primero no hacía nada visible (y dejaba rechazadas, sin decirlo, las preguntas de permiso siguientes); hacía falta otro. Ahora cancela a la primera, también con una pregunta de permiso delante, y la segunda vez sale ya. Un `vipcode run` cancelado termina con el código 130.
+- **La detección de servidores ya no rechaza comandos que sí terminan,** como `npm run test:server`, `npm run migrate:dev`, `docker compose up --abort-on-container-exit`, `vite --mode production build`, `gh pr checks --watch` o un heredoc que mencione `npm start`. Y reconoce más servidores: `bundle exec rails s`, `uv run uvicorn`, `flask --app app run`, `python3.12 -m http.server`, `wrangler dev`, `deno task dev`, `nx serve`, `npm run build:watch`, entre otros.
+- **Las pruebas de Spring Boot ya no se cortan por parecer un servidor:** «Started FooTests in 3.2 seconds» ya no cuenta como servidor listo.
+- **Windows:** parar un comando que ya ha terminado ya no le manda `taskkill` a su número de proceso, que Windows puede haber dado a otro programa; un comando recién lanzado se para entero también al salir con `/exit`; y cerrar la ventana ya no acaba con un error.
+
 ## [0.4.3] - 2026-11-06
 
 ### Corregido

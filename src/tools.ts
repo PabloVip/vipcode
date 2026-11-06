@@ -201,6 +201,8 @@ interface Change {
   file: string;
   // null si el fichero no existía antes. Los bytes tal cual: como texto se perdería lo que no esté en UTF-8
   previous: Buffer | null;
+  // Lo último que escribió el agente: si el fichero ya no está así, alguien lo ha cambiado después y /undo no lo toca
+  written: Buffer;
 }
 const undoStack: Change[][] = [];
 
@@ -208,35 +210,52 @@ export function beginTurn() {
   undoStack.push([]);
 }
 
-function recordChange(file: string, previous: Buffer | null) {
+function recordChange(file: string, previous: Buffer | null, written: Buffer) {
   if (undoStack.length === 0) {
     undoStack.push([]);
   }
   const group = undoStack[undoStack.length - 1];
-  // Solo guardamos el estado anterior al turno; las siguientes ediciones del mismo fichero no cuentan
-  if (!group.some((change) => change.file === file)) {
-    group.push({ file, previous });
+  // Solo guardamos el estado anterior al turno (las siguientes ediciones del mismo fichero no lo cambian) y lo último escrito
+  const existing = group.find((change) => change.file === file);
+  if (existing) {
+    existing.written = written;
+  } else {
+    group.push({ file, previous, written });
   }
 }
 
-// Restaura los ficheros del último turno que cambió algo; devuelve sus rutas
-export function undoLastTurn(root: string): string[] {
+// Restaura los ficheros del último turno que cambió algo, salvo los que han cambiado después (esos se dejan como están y se
+// devuelven en «kept»: deshacerlos borraría tu trabajo)
+export function undoLastTurn(root: string): { files: string[]; kept: string[] } {
   while (undoStack.length > 0) {
     const group = undoStack.pop()!;
     if (group.length === 0) {
       continue;
     }
+    const files: string[] = [];
+    const kept: string[] = [];
     for (const change of group) {
+      let now: Buffer | null = null;
+      try {
+        now = fs.readFileSync(change.file);
+      } catch {
+        now = null;
+      }
+      if (!now || !now.equals(change.written)) {
+        kept.push(rel(root, change.file));
+        continue;
+      }
       if (change.previous === null) {
         fs.rmSync(change.file, { force: true });
       } else {
         fs.mkdirSync(path.dirname(change.file), { recursive: true });
         fs.writeFileSync(change.file, change.previous);
       }
+      files.push(rel(root, change.file));
     }
-    return group.map((change) => rel(root, change.file));
+    return { files, kept };
   }
-  return [];
+  return { files: [], kept: [] };
 }
 
 interface DiffLine {
@@ -619,7 +638,7 @@ const writeFile: Tool = {
     if (!reply.allow) {
       return rejected(reply, "escribir el fichero");
     }
-    recordChange(file, before);
+    recordChange(file, before, Buffer.from(bytes!));
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, bytes!);
     markRead(ctx, file);
@@ -917,7 +936,7 @@ const editFile: Tool = {
     if (!reply.allow) {
       return rejected(reply, "la edición");
     }
-    recordChange(file, before);
+    recordChange(file, before, Buffer.from(bytes));
     fs.writeFileSync(file, bytes);
     markRead(ctx, file);
     const output = await withDiagnostics(ctx, file, `Editado ${rel(ctx.root, file)} (${result.count} sustitución/es)${result.note}.`);

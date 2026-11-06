@@ -95,6 +95,48 @@ test("/undo y /redo deshacen ficheros (también lo que hizo bash) y la conversac
   ws.cleanup();
 });
 
+test("/undo y /redo solo tocan lo que cambió ese mensaje: lo que hagas tú después se queda", async () => {
+  const mock = await startMock(({ body }) => {
+    if (lastMessage(body).role === "user") {
+      return {
+        tools: [
+          { name: "write_file", args: { path: "agente.txt", content: "del agente\n" } },
+          { name: "bash", args: { command: "echo cambio > compartido.txt" } },
+        ],
+      };
+    }
+    return { text: "listo" };
+  });
+  const ws = tempWorkspace({ "README.md": "original\n", "compartido.txt": "antes\n" });
+  const { app } = makeApp(ws, mock.url);
+  await app.runPrompt({ text: "trabaja" }, {});
+  assert.equal(ws.read("agente.txt"), "del agente\n");
+  // Después, tú desde el editor: una nota nueva, un cambio en el README y otro en un fichero que también cambió el agente
+  fs.writeFileSync(path.join(ws.proj, "nota.txt"), "mi nota\n");
+  fs.writeFileSync(path.join(ws.proj, "README.md"), "original\ncambio mío\n");
+  fs.writeFileSync(path.join(ws.proj, "compartido.txt"), "cambio\ny lo mío\n");
+
+  const { out, adapter } = capture();
+  await app.handleCommand("/undo", adapter);
+  // Lo del agente, deshecho; lo tuyo, intacto (antes /undo borraba la nota y te quitaba los dos cambios)
+  assert.ok(!ws.exists("agente.txt"));
+  assert.equal(ws.read("nota.txt"), "mi nota\n");
+  assert.equal(ws.read("README.md"), "original\ncambio mío\n");
+  // Lo cambió el agente y luego tú: no se pisa, y se dice
+  assert.equal(ws.read("compartido.txt"), "cambio\ny lo mío\n");
+  assert.match(out.info.join("\n"), /Ficheros restaurados: agente\.txt$/m);
+  assert.match(out.notice.join("\n"), /No he deshecho este fichero porque ha cambiado después de ese mensaje.*compartido\.txt/);
+
+  await app.handleCommand("/redo", adapter);
+  assert.equal(ws.read("agente.txt"), "del agente\n");
+  assert.equal(ws.read("nota.txt"), "mi nota\n");
+  assert.equal(ws.read("README.md"), "original\ncambio mío\n");
+  assert.equal(ws.read("compartido.txt"), "cambio\ny lo mío\n");
+  await app.shutdown();
+  await mock.close();
+  ws.cleanup();
+});
+
 test("LSP: tras editar un .ts el modelo recibe los errores de tipos", async () => {
   const mock = await startMock(({ body }) => {
     if (lastMessage(body).role === "user") {

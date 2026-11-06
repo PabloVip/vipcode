@@ -138,11 +138,16 @@ export function plainEvents(options: { showReasoning: boolean }): AgentEvents {
 }
 
 // Pregunta s/n/t (y p para comandos) antes de escribir ficheros o ejecutar comandos
-export function plainPermissionPrompt(getReadline: () => Interface | null, grants: () => SessionGrants) {
+// «getSignal»: lo que está en marcha. Si lo cancelas (Ctrl+C) con la pregunta delante, la pregunta se da por contestada que no
+export function plainPermissionPrompt(getReadline: () => Interface | null, grants: () => SessionGrants, getSignal: () => AbortSignal | undefined = () => undefined) {
   return async (request: PermissionRequest): Promise<PermissionReply> => {
     const rl = getReadline();
     if (!rl || !process.stdin.isTTY) {
       return { allow: false, feedback: "no hay nadie para aprobarlo (usa --yolo o ajusta los permisos)" };
+    }
+    const signal = getSignal();
+    if (signal?.aborted) {
+      return { allow: false, feedback: "cancelado" };
     }
     console.log("");
     console.log(pc.bold(pc.yellow(`? ${showControl(request.title)}`)));
@@ -157,9 +162,9 @@ export function plainPermissionPrompt(getReadline: () => Interface | null, grant
     while (true) {
       let answer = "";
       try {
-        answer = (await rl.question(pc.yellow(`  ¿Permitir? ${options}: `))).trim().toLowerCase();
+        answer = (await rl.question(pc.yellow(`  ¿Permitir? ${options}: `), { signal })).trim().toLowerCase();
       } catch {
-        return { allow: false, feedback: "sin respuesta" };
+        return { allow: false, feedback: signal?.aborted ? "cancelado" : "sin respuesta" };
       }
       if (["s", "si", "sí", "y", "yes"].includes(answer)) {
         return { allow: true };
@@ -178,7 +183,7 @@ export function plainPermissionPrompt(getReadline: () => Interface | null, grant
       if (answer === "e") {
         let why = "";
         try {
-          why = (await rl.question(pc.yellow("  ¿Qué debería hacer en su lugar?: "))).trim();
+          why = (await rl.question(pc.yellow("  ¿Qué debería hacer en su lugar?: "), { signal })).trim();
         } catch {
           why = "";
         }

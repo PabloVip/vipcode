@@ -155,6 +155,44 @@ export class Snapshots {
     if (changes.length === 0) {
       return [];
     }
+    await this.apply(tree, changes);
+    // Lo ignorado no se queda en las instantáneas siguientes
+    await this.git(["read-tree", tree]);
+    return changes.map((change) => change.file).filter((file) => !this.lastIgnored.has(file));
+  }
+
+  // /undo y /redo: deshace solo lo que cambió entre dos instantáneas (de «expected» a «target»), y solo en los ficheros que
+  // siguen como los dejó «expected». Lo que ha cambiado después (lo has editado tú, o lo cambió algo que siguió en marcha)
+  // no se toca: se devuelve en «kept» para decirlo. Volver todo el proyecto a «target» borraría tu trabajo
+  async revert(target: string, expected: string): Promise<{ files: string[]; kept: string[] }> {
+    const current = await this.track();
+    if (!current) {
+      throw new Error(`No se pueden restaurar las instantáneas: ${this.disabledReason || "error de git"}`);
+    }
+    const changes = await this.changes(target, expected);
+    const since = new Set((await this.changes(expected, current)).map((change) => change.file));
+    const apply = changes.filter((change) => !since.has(change.file));
+    await this.apply(target, apply);
+    // Lo que vuelve a estar ignorado (tu .env, si el modelo había tocado el .gitignore) no se queda en las instantáneas siguientes
+    const ignoredNow = [...this.lastIgnored];
+    for (let i = 0; i < ignoredNow.length; i += 200) {
+      await this.git(["rm", "--cached", "--quiet", "--ignore-unmatch", "--", ...ignoredNow.slice(i, i + 200)]);
+    }
+    return {
+      files: apply.map((change) => change.file).filter((file) => !this.lastIgnored.has(file)),
+      kept: changes.filter((change) => since.has(change.file)).map((change) => change.file),
+    };
+  }
+
+  // Los ficheros nuevos que la última vuelta atrás no ha borrado porque las reglas de ahora los ignoran (tu .env, tus datos)
+  private lastIgnored = new Set<string>();
+
+  // Pone estos ficheros como están en «tree»: los que no existen allí (A) se borran y los demás se sacan de ella
+  private async apply(tree: string, changes: { status: string; file: string }[]) {
+    this.lastIgnored = new Set();
+    if (changes.length === 0) {
+      return;
+    }
     const remove = (file: string) => {
       const abs = path.join(this.root, file);
       fs.rmSync(abs, { force: true });
@@ -180,9 +218,7 @@ export class Snapshots {
         remove(file);
       }
     }
-    // Lo ignorado no se queda en las instantáneas siguientes
-    await this.git(["read-tree", tree]);
-    return changes.map((change) => change.file).filter((file) => !ignored.has(file));
+    this.lastIgnored = ignored;
   }
 
   // Cuáles de estos ficheros ignoran las reglas de ahora

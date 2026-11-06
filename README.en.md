@@ -189,7 +189,7 @@ The bottom bar shows the agent, the model, how much of its free plan is left and
 | `/model <p/m>` | Pins a model (`/model auto` goes back to rotation) |
 | `/connect`, `/disconnect`, `/providers` | Add, remove and see provider keys |
 | `/agents`, `/agent <name>`, `/planear`, `/programar`, `/profe` | Switch agents |
-| `/undo`, `/redo`, `/diff [all]` | Undo and redo the last message (files and conversation); see the changes |
+| `/undo`, `/redo`, `/diff [all]` | Undo and redo the last message (files and conversation; only what that message changed, without overwriting what you did afterwards); see the changes |
 | `/todos` | The agent's task list |
 | `/skills` | Installed skills; pick one to use it (or type `/skill-name task`) |
 | `/compact` | Summarize the conversation |
