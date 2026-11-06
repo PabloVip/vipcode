@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.4.3] - 2026-11-06
+
 ### Corregido
 
 - **Un comando que no termina ya no deja a vipcode colgado.** `npm start` podía dejarlo esperando horas: el tiempo máximo no lo cortaba, Esc no lo interrumpía y `/exit` estaba bloqueado, porque se esperaba a que se cerrara la salida del comando y un proceso nieto la mantenía abierta. Ahora cancelar o pasarse de tiempo contesta en el acto con lo que haya escrito, y si un comando ya ha terminado pero algo sigue con su salida abierta, a los 2 s se para. Vale también para `!comando` y para las plantillas.
@@ -379,7 +381,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.4.2...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/PabloVip/vipcode/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/PabloVip/vipcode/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/PabloVip/vipcode/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/PabloVip/vipcode/compare/v0.3.6...v0.4.0
