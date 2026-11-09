@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.4.4] - 2026-11-09
+
 ### Corregido
 
 - **El diálogo de permiso ya no puede aprobar lo que rechazas.** Si las teclas llegaban juntas (el ordenador iba cargado, por SSH), ↓ hasta «No» y Enter podían ejecutar el comando de todas formas, y escribir «no» y Enter de golpe también lo aprobaba. Ahora Enter elige la opción a la que has bajado, «no» y «sí» escritos enteros valen, un texto que no es ninguna opción no aprueba nada y una respuesta solo cuenta una vez. Lo mismo para elegir entre las sugerencias de la caja de escribir.
@@ -391,7 +393,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.4.3...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/PabloVip/vipcode/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/PabloVip/vipcode/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/PabloVip/vipcode/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/PabloVip/vipcode/compare/v0.4.0...v0.4.1
