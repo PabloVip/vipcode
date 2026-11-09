@@ -4,6 +4,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+## [0.5.0] - 2026-11-09
+
 ### Añadido
 
 - **Claude, con tu clave de Anthropic.** `/connect anthropic` (o `ANTHROPIC_API_KEY`) y vipcode trabaja con Claude Opus 5.5, Sonnet 5.5 y Haiku 5.5. Es el único proveedor de pago del catálogo y solo se usa si pones tu clave. vipcode le habla con su API propia, no con la compatible con OpenAI: así usa la caché de prompts, que abarata mucho repetir la conversación en cada paso, y le devuelve su razonamiento entre llamadas a herramientas. Si quieres trabajar solo con uno de sus modelos, elígelo con `/favoritos`. Con `"api": "anthropic"` en `providers` vale también para otro servidor con la misma API.
@@ -397,7 +399,8 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 - Inicio de sesión en OpenRouter desde el navegador, ranking de modelos con LLM Stats, `/undo` y `/redo`, sesiones, agentes, comandos y skills propios, servidores MCP y de lenguaje.
 - Instalación con `npm install -g vipcode` y `/update` para actualizar.
 
-[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.4.4...HEAD
+[Sin publicar]: https://github.com/PabloVip/vipcode/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/PabloVip/vipcode/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/PabloVip/vipcode/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/PabloVip/vipcode/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/PabloVip/vipcode/compare/v0.4.1...v0.4.2
