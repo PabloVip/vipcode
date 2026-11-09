@@ -22,7 +22,7 @@ Escribe lo que quieres hacer («arregla el test que falla», «añade un botón 
 
 ## En qué destaca
 
-- **💸 Gratis de verdad.** Solo usa modelos gratuitos: nunca pagas nada. Nada más instalarlo funciona **sin claves ni registro**, con los proveedores que dejan entrar sin cuenta (Kilo Gateway, OVHcloud, LLM7 y Pollinations). Con claves gratuitas de más de 20 proveedores (Gemini, NVIDIA, Cerebras, Mistral, OpenRouter, Groq…) tienes más cupo y mejores modelos.
+- **💸 Gratis de verdad.** Solo usa modelos gratuitos: nunca pagas nada (salvo que tú pongas una clave de pago, como la de Anthropic para usar Claude). Nada más instalarlo funciona **sin claves ni registro**, con los proveedores que dejan entrar sin cuenta (Kilo Gateway, OVHcloud, LLM7 y Pollinations). Con claves gratuitas de más de 20 proveedores (Gemini, NVIDIA, Cerebras, Mistral, OpenRouter, Groq…) tienes más cupo y mejores modelos.
 - **🔄 No te deja tirado.** Cuando un modelo llega a su límite, falla, está saturado o tarda en empezar a contestar, lo deja en pausa y sigue con otro sin que tengas que hacer nada. Si es todo un proveedor el que no responde, lo aparta entero en vez de esperar a cada modelo. Recuerda las pausas entre sesiones y te dice cuánto te queda de cada plan gratis.
 - **🧠 Conversaciones largas también con modelos pequeños.** Si la conversación ya no cabe en los modelos libres, al de más capacidad le llega un resumen de lo anterior y los últimos mensajes tal cual. La conversación no se pierde: cuando vuelve un modelo en el que cabe entera, la recibe entera. Y aprende de cada respuesta cuántos tokens cuentan de verdad los proveedores, para no mandarle a un modelo lo que no le cabe.
 - **🇪🇸 En español.** La interfaz, los avisos, los mensajes y la documentación. Y con un agente, el **profe**, que te enseña paso a paso para que lo hagas tú, sin tocar tu código.
@@ -106,6 +106,9 @@ Para añadir una clave:
 | LLM7.io | sin clave (opcional `LLM7_API_KEY`) | https://token.llm7.io | ~60/hora sin clave |
 | Pollinations | sin clave (opcional `POLLINATIONS_API_KEY`) | https://auth.pollinations.ai | Límite por hora y por IP |
 | Ollama, LM Studio, llama.cpp | sin clave | se detectan solos si están encendidos | En tu ordenador, sin límites |
+| Anthropic (Claude) | `ANTHROPIC_API_KEY` | https://platform.claude.com/settings/keys | **De pago**, sin plan gratis: solo se usa si pones tu clave |
+
+Anthropic es la única excepción de pago, para quien ya tenga su clave: vipcode le habla con su API propia, con la caché de prompts (repetir la conversación en cada paso cuesta mucho menos) y su razonamiento entre pasos. Pagas lo que uses, así que pon un límite de gasto en su consola y, si quieres trabajar solo con uno de sus modelos, elígelo con `/favoritos` (por ejemplo `anthropic/claude-sonnet-5-5`, que cuesta la mitad que Opus).
 
 ## Cómo elige el modelo
 
@@ -365,7 +368,7 @@ Son los planes gratis: en horas de mucho uso los proveedores se saturan o ponen 
 Sí, con un modelo en tu ordenador: enciende Ollama, LM Studio o llama.cpp y vipcode lo detecta solo.
 
 **¿Puedo usar un modelo de pago o mi propio servidor?**
-Sí: cualquier servidor compatible con la API de OpenAI se añade en `providers` de la [configuración](#configuración), con su clave en una variable de entorno.
+Sí. Claude viene en el catálogo: `/connect anthropic` con tu clave (ver [Proveedores](#proveedores)). Cualquier otro servidor compatible con la API de OpenAI se añade en `providers` de la [configuración](#configuración), con su clave en una variable de entorno.
 
 **¿En qué se diferencia de otros agentes como opencode, Aider o Claude Code?**
 Esos agentes usan el modelo que tú elijas, normalmente de pago o con tus propias claves (opencode, por ejemplo, ofrece unos pocos modelos gratis solo dentro de su aplicación). vipcode está hecho para no pagar nunca: junta los planes gratis de muchos proveedores, cambia solo de uno a otro, funciona sin claves y gestiona conversaciones largas con modelos de capacidades muy distintas. Además, todo está en español.

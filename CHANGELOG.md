@@ -4,6 +4,10 @@ Los cambios importantes de cada versión de vipcode. El formato sigue [Keep a Ch
 
 ## [Sin publicar]
 
+### Añadido
+
+- **Claude, con tu clave de Anthropic.** `/connect anthropic` (o `ANTHROPIC_API_KEY`) y vipcode trabaja con Claude Opus 5.5, Sonnet 5.5 y Haiku 5.5. Es el único proveedor de pago del catálogo y solo se usa si pones tu clave. vipcode le habla con su API propia, no con la compatible con OpenAI: así usa la caché de prompts, que abarata mucho repetir la conversación en cada paso, y le devuelve su razonamiento entre llamadas a herramientas. Si quieres trabajar solo con uno de sus modelos, elígelo con `/favoritos`. Con `"api": "anthropic"` en `providers` vale también para otro servidor con la misma API.
+
 ## [0.4.4] - 2026-11-09
 
 ### Corregido

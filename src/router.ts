@@ -1,12 +1,14 @@
 // Copyright (C) 2026 Pablo Vicente Juan
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import fs from "node:fs";
+import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import type {
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
+import { CLAUDE_CONTENT, claudeClient, claudeParams, rejectsExtras, streamClaude } from "./anthropic.js";
 import { readAuth, resolveCredentials } from "./auth.js";
 import type { Config, ModelConfig, ProviderConfig } from "./config.js";
 import { debugLog } from "./debug.js";
@@ -20,6 +22,8 @@ export interface Slot {
   provider: ProviderConfig;
   model: ModelConfig;
   client: OpenAI;
+  // Proveedores con la API propia de Anthropic (api: "anthropic"): se les habla con su SDK en vez del de OpenAI
+  claude?: Anthropic;
   // Nota de 0 a 100 según LLM Stats (null si no hay datos) y el modelo de LLM Stats con el que se ha emparejado
   score: number | null;
   ratedAs: string | null;
@@ -56,7 +60,8 @@ export interface Usage {
 }
 
 export interface ChatResult {
-  message: { role: "assistant"; content: string | null; tool_calls?: ChatCompletionMessageToolCall[] };
+  // anthropic_content: lo que contestó Claude tal cual, para devolvérselo en el paso siguiente (los demás no lo ven)
+  message: { role: "assistant"; content: string | null; tool_calls?: ChatCompletionMessageToolCall[]; anthropic_content?: unknown[] };
   slot: Slot;
   // Tokens que dice el proveedor (null si no lo dice)
   usage: Usage | null;
@@ -277,10 +282,10 @@ function classify(err: unknown): Classified {
   if (message.startsWith("no ha empezado a contestar")) {
     return { kind: "server", retryAfterMs: 5 * 60000, detail: message, stall: true };
   }
-  if (err instanceof OpenAI.APIConnectionError) {
+  if (err instanceof OpenAI.APIConnectionError || err instanceof Anthropic.APIConnectionError) {
     return { kind: "server", retryAfterMs: 30000, detail: "sin conexión", stall: true };
   }
-  if (err instanceof OpenAI.APIError) {
+  if (err instanceof OpenAI.APIError || err instanceof Anthropic.APIError) {
     status = err.status || 0;
     retryAfterMs = retryFromHeaders(err.headers);
     if (err.error) {
@@ -366,7 +371,13 @@ export function withHandoff(messages: ChatCompletionMessageParam[], handoff: str
 
 function prepareMessages(slot: Slot, messages: ChatCompletionMessageParam[]): ChatCompletionMessageParam[] {
   const gemini = slot.provider.baseURL.includes("generativelanguage.googleapis.com");
-  return messages.map((message: any) => {
+  return messages.map((original: any) => {
+    // Lo guardado para Claude no se le manda a nadie más
+    let message = original;
+    if (message.role === "assistant" && CLAUDE_CONTENT in message) {
+      const { [CLAUDE_CONTENT]: _claude, ...rest } = message;
+      message = rest;
+    }
     if (message.role !== "assistant" || !Array.isArray(message.tool_calls)) {
       return message;
     }
@@ -549,6 +560,7 @@ export class Router {
         maxRetries: 0, // reintentar lo hacemos nosotros cambiando de proveedor
         timeout: 180000,
       });
+      const claude = provider.api === "anthropic" ? claudeClient(credentials.apiKey, credentials.baseURL, provider.headers || {}) : undefined;
       const anonymous = credentials.apiKey === "no-key" && !provider.local;
       for (const model of provider.models) {
         const rated = this.ranking ? this.ranking.score(model.id) : null;
@@ -557,6 +569,7 @@ export class Router {
           provider,
           model,
           client,
+          claude,
           score: rated ? rated.score : null,
           ratedAs: rated ? rated.model.id : null,
           anonymous,
@@ -1154,6 +1167,39 @@ export class Router {
     }
   }
 
+  // Una llamada a un proveedor con la API de Anthropic. Si no acepta algo de lo nuevo que se le pide (una beta, el relevo a
+  // otro Claude), se repite sin ello y ya no se le vuelve a pedir en esta sesión
+  private claudePlain: Record<string, boolean> = {};
+  private async claudeOnce(
+    slot: Slot,
+    request: ChatRequest,
+    signal: AbortSignal,
+    handlers: { onText: (text: string) => void; onReasoning?: (text: string) => void; alive: (answer: boolean) => void },
+  ): Promise<{ message: ChatResult["message"]; usage: Usage | null }> {
+    const plain = Boolean(this.claudePlain[slot.provider.name]);
+    const send = (simple: boolean) => streamClaude(slot.claude!, claudeParams(slot.model, request, { plain: simple }), signal, handlers, shortId);
+    let reply;
+    try {
+      reply = await send(plain);
+    } catch (err) {
+      if (plain || !rejectsExtras(err)) {
+        throw err;
+      }
+      debugLog("claude sin extras", String((err as Error).message));
+      this.claudePlain[slot.provider.name] = true;
+      reply = await send(true);
+    }
+    if (reply.toolCalls.length === 0 && reply.text.trim() === "") {
+      throw new Error("respuesta vacía del modelo");
+    }
+    const message: ChatResult["message"] = { role: "assistant", content: reply.text, anthropic_content: reply.content };
+    if (reply.toolCalls.length > 0) {
+      message.content = reply.text.length > 0 ? reply.text : null;
+      message.tool_calls = reply.toolCalls;
+    }
+    return { message, usage: reply.usage };
+  }
+
   // Una sola llamada en streaming; junta el texto y las llamadas a herramientas
   private async streamOnce(
     slot: Slot,
@@ -1218,6 +1264,9 @@ export class Router {
     const byId = new Map<string, PartialCall>();
 
     try {
+      if (slot.claude) {
+        return await this.claudeOnce(slot, request, combined, { ...handlers, alive: bump });
+      }
       // withResponse para leer las cabeceras: algunos proveedores dicen ahí cuántas peticiones te quedan
       const { data, response } = await slot.client.chat.completions.create(params as any, { signal: combined }).withResponse();
       this.noteLimits(slot, response.headers);

@@ -76,6 +76,10 @@ export interface ProviderConfig {
   rateHeaders?: { requests?: "day" | "minute"; tokens?: "day" | "minute" };
   // false si el proveedor no acepta stream_options (se aprende solo si falla)
   streamUsage?: boolean;
+  // "anthropic" para la API propia de Anthropic (Claude); si no, la compatible con OpenAI
+  api?: "openai" | "anthropic";
+  // De pago, sin plan gratis: solo se usa si pones tu clave
+  paid?: boolean;
   // Lo pone vipcode: proveedor añadido por ti (no viene en el catálogo); va el primero en la rotación
   custom?: boolean;
 }

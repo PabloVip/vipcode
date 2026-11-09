@@ -58,6 +58,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "cross-spawn": "^7.0.6",
     "fast-glob": "^3.3.3",

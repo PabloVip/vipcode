@@ -6,6 +6,7 @@ import pc from "picocolors";
 import { Agent, type UserInput } from "./agent.js";
 import { type AgentDefinition, MAIN_AGENT, agentName, loadAgents, primaryAgents, subagents } from "./agents.js";
 import { envNames, maskKey, readAuth, removeAuth, resolveCredentials, saveAuth, urlVars } from "./auth.js";
+import { claudeBaseURL } from "./anthropic.js";
 import { CATALOG } from "./catalog.js";
 import { type CommandDefinition, expandCommand, loadCommands } from "./commands.js";
 import { CONFIG_PATH, type Config, type ModelConfig, type ProviderConfig, configNotices, isAnonymous, loadConfig, setGlobalConfigValue } from "./config.js";
@@ -130,10 +131,16 @@ async function checkProvider(provider: ProviderConfig): Promise<{ ok: boolean; m
   }
   try {
     const headers: Record<string, string> = { ...(provider.headers || {}) };
-    if (credentials.apiKey !== "no-key") {
+    let url = `${credentials.baseURL.replace(/\/+$/, "")}/models`;
+    if (provider.api === "anthropic") {
+      // La API de Anthropic quiere la clave en x-api-key y la versión de la API
+      headers["x-api-key"] = credentials.apiKey;
+      headers["anthropic-version"] = "2023-06-01";
+      url = `${claudeBaseURL(credentials.baseURL)}/v1/models`;
+    } else if (credentials.apiKey !== "no-key") {
       headers.authorization = `Bearer ${credentials.apiKey}`;
     }
-    const response = await fetch(`${credentials.baseURL.replace(/\/+$/, "")}/models`, { headers, signal: AbortSignal.timeout(15000) });
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
     if (response.status === 401 || response.status === 403) {
       return { ok: false, message: `la clave no es válida (HTTP ${response.status})` };
     }
@@ -881,6 +888,8 @@ export class App {
     if (apiKey === undefined) {
       if (anonymous) {
         ui.info(`${provider.label} ya funciona sin clave. Con una clave gratis tienes más límites${provider.signup ? ` (${provider.signup})` : ""}.`);
+      } else if (provider.paid && provider.signup) {
+        ui.info(`${provider.label} es de pago: pagas lo que uses con tu clave. Consíguela en ${provider.signup} y pon un límite de gasto allí.`);
       } else if (provider.signup) {
         ui.info(`Consigue la clave gratis en ${provider.signup}`);
       }
@@ -940,6 +949,9 @@ export class App {
       ui.error(`${provider.label}: ${check.message}. La he guardado igualmente; cámbiala con /connect ${provider.name}.`);
     } else {
       ui.info(`${provider.label} conectado (${check.message}). Guardado en ${AUTH_PATH}.`);
+    }
+    if (check.ok && provider.paid) {
+      ui.info(`Ojo: ${provider.label} cobra por uso. Si quieres que vipcode trabaje solo con uno de sus modelos, elígelo con /favoritos.`);
     }
     if (loggedIn && provider.signup) {
       ui.info(`La clave se llama «vipcode» en ${provider.signup}: desde ahí puedes borrarla cuando quieras.`);

@@ -24,7 +24,7 @@ Type what you want to do ("fix the failing test", "add an export button", "expla
 
 ## What makes it different
 
-- **💸 Truly free.** It only uses free models: you never pay anything. Right after installing it works **with no keys or sign-up**, through providers that allow anonymous access (Kilo Gateway, OVHcloud, LLM7 and Pollinations). With free keys from 20+ providers (Gemini, NVIDIA, Cerebras, Mistral, OpenRouter, Groq…) you get more quota and better models.
+- **💸 Truly free.** It only uses free models: you never pay anything (unless you add a paid key yourself, like Anthropic's to use Claude). Right after installing it works **with no keys or sign-up**, through providers that allow anonymous access (Kilo Gateway, OVHcloud, LLM7 and Pollinations). With free keys from 20+ providers (Gemini, NVIDIA, Cerebras, Mistral, OpenRouter, Groq…) you get more quota and better models.
 - **🔄 It doesn't leave you stranded.** When a model hits its limit, fails, is overloaded or takes too long to start answering, vipcode pauses it and moves on to another one without you doing anything. If a whole provider stops responding, it sets the whole provider aside instead of waiting for each of its models. Pauses are remembered across sessions, and it tells you how much of each free plan is left.
 - **🧠 Long conversations, even with small models.** If the conversation no longer fits in the available models, the one with the most room gets a summary of the earlier part plus the latest messages verbatim. Nothing is lost: when a model that fits the whole conversation comes back, it gets the whole conversation. vipcode also learns from every answer how many tokens providers really count, so it doesn't send a model more than it can take.
 - **🇪🇸 In Spanish.** The interface, notices, messages and docs. Plus an agent, **profe** ("teacher"), that walks you through things step by step so you do them yourself, without touching your code.
@@ -108,6 +108,9 @@ To add a key:
 | LLM7.io | no key (optional `LLM7_API_KEY`) | https://token.llm7.io | ~60/hour without a key |
 | Pollinations | no key (optional `POLLINATIONS_API_KEY`) | https://auth.pollinations.ai | Hourly limit per IP |
 | Ollama, LM Studio, llama.cpp | no key | detected automatically when running | On your computer, no limits |
+| Anthropic (Claude) | `ANTHROPIC_API_KEY` | https://platform.claude.com/settings/keys | **Paid**, no free plan: only used if you add your key |
+
+Anthropic is the one paid exception, for people who already have a key: vipcode talks to it through its own API, with prompt caching (resending the conversation at every step costs much less) and its reasoning kept between steps. You pay for what you use, so set a spending limit in its console and, if you want to work with just one of its models, pick it with `/favoritos` (for example `anthropic/claude-sonnet-5-5`, half the price of Opus).
 
 ## How it picks a model
 
@@ -366,7 +369,7 @@ That's the free plans: at busy times providers get overloaded or queue requests.
 Yes, with a model on your computer: start Ollama, LM Studio or llama.cpp and vipcode detects it automatically.
 
 **Can I use a paid model or my own server?**
-Yes: any server compatible with the OpenAI API can be added under `providers` in the [configuration](#configuration), with its key in an environment variable.
+Yes. Claude is in the catalog: `/connect anthropic` with your key (see [Providers](#providers)). Any other server compatible with the OpenAI API can be added under `providers` in the [configuration](#configuration), with its key in an environment variable.
 
 **How is it different from other agents like opencode, Aider or Claude Code?**
 Those agents use the model you choose, usually a paid one or with your own keys (opencode, for example, offers a few free models only inside its own app). vipcode is built so you never pay: it pools the free plans of many providers, switches between them by itself, works without keys and handles long conversations across models of very different sizes. And everything is in Spanish.

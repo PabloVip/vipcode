@@ -74,6 +74,11 @@ export async function startMock(handler) {
         return;
       }
       res.writeHead(200, { "content-type": "text/event-stream", ...(reply.headers || {}) });
+      // La API propia de Anthropic (/v1/messages) contesta con otros eventos
+      if (req.url.endsWith("/v1/messages")) {
+        await sendClaude(res, reply);
+        return;
+      }
       const send = (o) => res.write(`data: ${JSON.stringify(o)}\n\n`);
       if (reply.reasoning) {
         send({ choices: [{ delta: { reasoning: reply.reasoning } }] });
@@ -102,8 +107,44 @@ export async function startMock(handler) {
     url: `http://127.0.0.1:${port}`,
     requests,
     chats: () => requests.filter((r) => r.path.endsWith("/chat/completions")),
+    claude: () => requests.filter((r) => r.path.endsWith("/v1/messages")),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
+}
+
+// Una respuesta en el formato de la API de Anthropic: { text, tools, reasoning (con firma), usage, stopReason }
+async function sendClaude(res, reply) {
+  const send = (o) => res.write(`event: ${o.type}\ndata: ${JSON.stringify(o)}\n\n`);
+  const usage = reply.usage || { input_tokens: 10, output_tokens: 5 };
+  send({ type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: "m", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: usage.input_tokens || 0, cache_read_input_tokens: usage.cache_read_input_tokens || 0, cache_creation_input_tokens: usage.cache_creation_input_tokens || 0, output_tokens: 1 } } });
+  let index = 0;
+  if (reply.reasoning) {
+    send({ type: "content_block_start", index, content_block: { type: "thinking", thinking: "", signature: "" } });
+    send({ type: "content_block_delta", index, delta: { type: "thinking_delta", thinking: reply.reasoning } });
+    send({ type: "content_block_delta", index, delta: { type: "signature_delta", signature: reply.signature || "firma-de-prueba" } });
+    send({ type: "content_block_stop", index });
+    index++;
+  }
+  send({ type: "ping" });
+  if (reply.pauseMs) {
+    await new Promise((resolve) => setTimeout(resolve, reply.pauseMs));
+  }
+  if (reply.text) {
+    send({ type: "content_block_start", index, content_block: { type: "text", text: "" } });
+    send({ type: "content_block_delta", index, delta: { type: "text_delta", text: reply.text } });
+    send({ type: "content_block_stop", index });
+    index++;
+  }
+  (reply.tools || []).forEach((tool, n) => {
+    send({ type: "content_block_start", index, content_block: { type: "tool_use", id: `toolu_${n}`, name: tool.name, input: {} } });
+    send({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(tool.args || {}) } });
+    send({ type: "content_block_stop", index });
+    index++;
+  });
+  const stop = reply.stopReason || ((reply.tools || []).length > 0 ? "tool_use" : "end_turn");
+  send({ type: "message_delta", delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: usage.output_tokens || 0 } });
+  send({ type: "message_stop" });
+  res.end();
 }
 
 // Carpeta temporal con un proyecto y un VIPCODE_HOME propios

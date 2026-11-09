@@ -3,7 +3,8 @@
 import type { ModelConfig, ProviderConfig } from "./config.js";
 import { REPO_URL } from "./meta.js";
 
-// Catálogo de proveedores con plan gratuito (revisado a finales de octubre de 2026).
+// Catálogo de proveedores con plan gratuito (revisado a finales de octubre de 2026), más Anthropic, de pago, para quien
+// tenga su clave.
 // El orden es la prioridad: el router prueba de arriba abajo y salta al siguiente cuando uno se agota.
 // Los modelos nuevos se añaden solos con "vipcode models --refresh" (o una vez al día al arrancar).
 
@@ -468,6 +469,22 @@ export const CATALOG: ProviderConfig[] = [
     freeInfo: "Funciona sin registrarse con GPT-OSS 20B, con límite por hora y por IP. Pueden guardar lo que envías.",
     limitScope: "provider",
     models: [m("openai-fast", 131072)],
+  },
+  {
+    // De pago: solo se usa si pones tu clave. Va con su API propia (caché de prompts y razonamiento entre pasos)
+    name: "anthropic",
+    label: "Anthropic (Claude, de pago)",
+    baseURL: "https://api.anthropic.com",
+    api: "anthropic",
+    paid: true,
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    signup: "https://platform.claude.com/settings/keys",
+    freeInfo: "De pago, sin plan gratis: pagas lo que uses con tu clave. Opus 5.5 es el mejor, Sonnet 5.5 cuesta la mitad y Haiku 5.5 muy poco.",
+    models: [
+      m("claude-opus-5-5", 1000000, { vision: true, reasoningEffort: "high" }),
+      m("claude-sonnet-5-5", 1000000, V),
+      m("claude-haiku-5-5", 1000000, V),
+    ],
   },
   {
     name: "ollama",
